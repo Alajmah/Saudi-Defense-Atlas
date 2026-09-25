@@ -38,6 +38,7 @@ class _BlockParser(HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.blocks: list[TextBlock] = []
+        self.visible_parts: list[str] = []
         self._active_tag: str | None = None
         self._parts: list[str] = []
         self._skip_depth = 0
@@ -54,9 +55,11 @@ class _BlockParser(HTMLParser):
             self._parts = []
 
     def handle_data(self, data: str) -> None:
-        if self._skip_depth or self._active_tag is None:
+        if self._skip_depth:
             return
-        self._parts.append(data)
+        self.visible_parts.append(data)
+        if self._active_tag is not None:
+            self._parts.append(data)
 
     def handle_endtag(self, tag: str) -> None:
         tag = tag.lower()
@@ -80,9 +83,19 @@ class _BlockParser(HTMLParser):
             self._parts = []
 
 
-def extract_text_blocks(content: bytes, *, encoding: str = "utf-8") -> list[TextBlock]:
-    """Extract normalized heading/paragraph blocks in document order."""
+def _parse(content: bytes, encoding: str) -> _BlockParser:
     parser = _BlockParser()
     parser.feed(content.decode(encoding, errors="replace"))
     parser.close()
-    return parser.blocks
+    return parser
+
+
+def extract_text_blocks(content: bytes, *, encoding: str = "utf-8") -> list[TextBlock]:
+    """Extract normalized heading/paragraph blocks in document order."""
+    return _parse(content, encoding).blocks
+
+
+def extract_visible_text(content: bytes, *, encoding: str = "utf-8") -> str:
+    """Return normalized visible text outside script/style-like elements."""
+    parser = _parse(content, encoding)
+    return normalize_text(" ".join(parser.visible_parts))
