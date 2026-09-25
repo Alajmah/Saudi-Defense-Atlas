@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:sda:schema:v0.1:review-decision",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/review-decision.schema.json",
   "title": "Saudi Defense Atlas Review Decision",
   "type": "object",
   "required": ["id", "proposal_id", "decision", "decided_at", "decided_by"],
