@@ -35,3 +35,6 @@ jobs:
 
       - name: Validate M1 deterministic ingestion
         run: python scripts/validate_m1_ingestion.py
+
+      - name: Validate M1 typed proposal generation
+        run: python scripts/validate_m1_proposal.py
