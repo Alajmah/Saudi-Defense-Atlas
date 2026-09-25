@@ -47,12 +47,16 @@ set +a
 
 python seed.py
 python verify.py
+python apply_approved_demo.py
 ```
 
-Successful verification creates two ignored local files:
+The order is intentional. `verify.py` first checks the baseline conflict fixture containing exactly the synthetic values `10` and `12`; only after those representational checks pass does `apply_approved_demo.py` exercise one policy-approved write through the project governance boundary.
+
+Successful execution creates three ignored local files:
 
 - `state.generated.json` — SDA ID to Q/P ID mappings and created statement GUIDs
-- `verification.generated.json` — evidence for the M0 acceptance checks
+- `verification.generated.json` — evidence for the M0 representation/query checks
+- `approved-demo-applied.generated.json` — evidence that the exact approved synthetic proposal produced a project Revision and a Wikibase backend receipt
 
 Inspect container state with:
 
@@ -113,6 +117,21 @@ The verifier fails unless the local instance demonstrates:
 7. MediaWiki/Wikibase revision history is queryable;
 8. Action API returns bilingual labels/aliases/claims;
 9. WDQS can resolve an entity by its SDA project ID.
+
+## What `apply_approved_demo.py` proves
+
+The adapter demo uses only the synthetic M0 item and refuses to call the backend until:
+
+- the ChangeProposal validates against the versioned project schema;
+- the ReviewDecision validates;
+- cross-record policy confirms the decision binds to the exact proposal;
+- AMBER approval was made by a human reviewer;
+- the proposal's policy outcome permits admission;
+- the mutation is the explicitly supported synthetic quantity operation.
+
+After the write, the script creates and validates the project `Revision` record and stores the MediaWiki revision/statement identifiers only as backend receipts.
+
+This is a bounded adapter proof, not the final M1 canonical mutation service.
 
 ## What this does **not** prove
 
