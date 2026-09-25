@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sda:schema:v0.1:source",
+  "title": "Saudi Defense Atlas Source",
+  "type": "object",
+  "required": ["id", "publisher", "source_class", "publisher_type"],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "publisher": { "$ref": "common.schema.json#/$defs/localized_text" },
+    "source_class": {
+      "type": "string",
+      "enum": ["A", "B", "C", "D", "E"]
+    },
+    "publisher_type": {
+      "type": "string",
+      "enum": [
+        "government",
+        "military",
+        "official_procurement",
+        "company",
+        "specialist_media",
+        "general_media",
+        "academic",
+        "think_tank",
+        "social",
+        "other"
+      ]
+    },
+    "homepage": { "type": ["string", "null"], "format": "uri" },
+    "jurisdiction": { "type": ["string", "null"] },
+    "notes": { "type": ["string", "null"] },
+    "active": { "type": "boolean", "default": true }
+  },
+  "additionalProperties": false
+}
