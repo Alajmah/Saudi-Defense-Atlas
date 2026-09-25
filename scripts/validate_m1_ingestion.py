@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate M1 deterministic acquisition/idempotency invariants without network IO."""
+"""Validate M1 deterministic acquisition and bounded parsing without network IO."""
 
 from __future__ import annotations
 
@@ -23,6 +23,10 @@ from services.ingestion.document_identity import (  # noqa: E402
     validate_retrieved_url,
 )
 from services.ingestion.registry import load_registered_document  # noqa: E402
+from services.ingestion.usaf_f15sa_2020 import (  # noqa: E402
+    SourceParseError,
+    parse_release,
+)
 
 
 def expect(condition: bool, message: str, failures: list[str]) -> None:
@@ -160,6 +164,11 @@ def main() -> int:
         registry=schema_registry,
         format_checker=FormatChecker(),
     )
+    evidence_validator = Draft202012Validator(
+        schemas["evidence.schema.json"],
+        registry=schema_registry,
+        format_checker=FormatChecker(),
+    )
 
     for label, record in (("first", first.document), ("changed", changed.document)):
         failures.extend(validate_instance(document_validator, dict(record), label))
@@ -187,6 +196,55 @@ def main() -> int:
     except Exception as exc:  # noqa: BLE001
         failures.append(f"registered M1 document policy failed validation: {exc}")
 
+    parser_fixture = b"""
+    <html><body>
+      <h1>AFLCMC delivers final F-15SA to Royal Saudi Air Force</h1>
+      <div>Published Dec. 11, 2020</div>
+      <p>Final F-15SA aircraft were delivered Dec. 10 to the Royal Saudi Air Force.</p>
+      <p>The Boeing-produced aircraft represented the last delivery in this synthetic fixture.</p>
+      <p>The F-15SA is an advanced version of the F-15S and is associated with the Royal Saudi Air Force.</p>
+    </body></html>
+    """
+
+    try:
+        parsed = parse_release(
+            parser_fixture,
+            document_id="SDA-DOC-SYNTHETIC-PARSER-FIXTURE",
+            captured_at="2026-01-04T00:00:00Z",
+        )
+        expect(parsed.published_date == "2020-12-11", "publication date parse drift", failures)
+        expect(
+            parsed.reported_delivery_date == "2020-12-10",
+            "reported delivery date parse drift",
+            failures,
+        )
+        expect(len(parsed.evidence) == 4, "parser must emit four bounded evidence records", failures)
+        for index, evidence in enumerate(parsed.evidence, start=1):
+            failures.extend(
+                validate_instance(evidence_validator, dict(evidence), f"evidence {index}")
+            )
+            expect(
+                evidence["excerpt"] is None,
+                "deterministic parser should not copy source prose by default",
+                failures,
+            )
+    except Exception as exc:  # noqa: BLE001
+        failures.append(f"bounded parser rejected valid fixture: {exc}")
+
+    ambiguous_fixture = parser_fixture.replace(
+        b"</body>",
+        b"<p>Another F-15SA group was delivered Dec. 10 to the Royal Saudi Air Force.</p></body>",
+    )
+    try:
+        parse_release(
+            ambiguous_fixture,
+            document_id="SDA-DOC-SYNTHETIC-PARSER-AMBIGUOUS",
+            captured_at="2026-01-04T00:00:00Z",
+        )
+        failures.append("bounded parser accepted ambiguous duplicate delivery evidence")
+    except SourceParseError:
+        pass
+
     if failures:
         print("M1 ingestion validation failed:", file=sys.stderr)
         for failure in failures:
@@ -195,7 +253,7 @@ def main() -> int:
 
     print(
         "Validated deterministic M1 acquisition, idempotency, versioning, URL policy, "
-        "and registered source/document metadata."
+        "registered source metadata, bounded parsing, and Evidence schema output."
     )
     return 0
 
