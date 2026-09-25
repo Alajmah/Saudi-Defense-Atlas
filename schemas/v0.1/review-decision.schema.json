@@ -41,15 +41,5 @@
       "default": []
     }
   },
-  "allOf": [
-    {
-      "if": { "properties": { "decided_by": { "properties": { "kind": { "const": "system" } } } } },
-      "then": {
-        "properties": {
-          "decision": { "const": "approve" }
-        }
-      }
-    }
-  ],
   "additionalProperties": false
 }
