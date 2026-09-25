@@ -57,7 +57,10 @@ def validate_fixtures(schemas: dict[str, dict], registry: Registry) -> list[str]
                 registry=registry,
                 format_checker=FormatChecker(),
             )
-            errors = sorted(validator.iter_errors(instance), key=lambda error: list(error.absolute_path))
+            errors = sorted(
+                validator.iter_errors(instance),
+                key=lambda error: tuple(str(segment) for segment in error.absolute_path),
+            )
 
             if expected_valid and errors:
                 rendered = "; ".join(
