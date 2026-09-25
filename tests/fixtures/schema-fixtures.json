@@ -1,0 +1,295 @@
+{
+  "valid": [
+    {
+      "name": "bilingual entity",
+      "schema": "entity.schema.json",
+      "instance": {
+        "id": "TEST-ENTITY-001",
+        "entity_type": "organization",
+        "names": {"ar": "جهة اختبار", "en": "Test Organization"},
+        "aliases": [{"value": "TESTORG", "language": "en", "kind": "abbreviation"}],
+        "record_status": "active"
+      }
+    },
+    {
+      "name": "official source publisher",
+      "schema": "source.schema.json",
+      "instance": {
+        "id": "TEST-SOURCE-001",
+        "publisher": {"en": "Test Government Publisher"},
+        "source_class": "A",
+        "publisher_type": "government",
+        "homepage": "https://example.test/"
+      }
+    },
+    {
+      "name": "content-addressed document",
+      "schema": "document.schema.json",
+      "instance": {
+        "id": "TEST-DOC-001",
+        "source_id": "TEST-SOURCE-001",
+        "title": {"en": "Test official release"},
+        "canonical_url": "https://example.test/releases/1",
+        "retrieved_at": "2026-09-25T12:00:00Z",
+        "published_at": {"value": "2026-09-25", "precision": "day"},
+        "language": "en",
+        "document_type": "press_release",
+        "media_type": "text/html",
+        "content_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      }
+    },
+    {
+      "name": "bounded evidence locator",
+      "schema": "evidence.schema.json",
+      "instance": {
+        "id": "TEST-EVIDENCE-001",
+        "document_id": "TEST-DOC-001",
+        "locator": {"section": "Announcement", "paragraph": 2},
+        "excerpt": "Example evidence text.",
+        "captured_at": "2026-09-25T12:05:00Z",
+        "capture_method": "deterministic_parser"
+      }
+    },
+    {
+      "name": "temporal quantity claim with evidence",
+      "schema": "claim.schema.json",
+      "instance": {
+        "id": "TEST-CLAIM-001",
+        "subject_id": "TEST-ENTITY-001",
+        "predicate_id": "inventory.quantity",
+        "value": {"kind": "number", "value": 12, "unit": "systems", "precision": "exact"},
+        "scope": {"entity_ids": ["TEST-EQUIPMENT-001"], "quantity_type": "operational_estimate"},
+        "validity": {"point_in_time": {"value": "2026", "precision": "year"}},
+        "confidence": "medium",
+        "evidence_links": [{"evidence_id": "TEST-EVIDENCE-001", "role": "supports"}],
+        "claim_state": "active",
+        "created_at": "2026-09-25T12:10:00Z"
+      }
+    },
+    {
+      "name": "sourced procurement event",
+      "schema": "event.schema.json",
+      "instance": {
+        "id": "TEST-EVENT-001",
+        "event_type": "procurement_approval_or_notification",
+        "names": {"en": "Test procurement notification"},
+        "occurred_at": {"value": "2026-09-25", "precision": "day"},
+        "participants": [{"entity_id": "TEST-ENTITY-001", "role": "buyer"}],
+        "confidence": "verified",
+        "evidence_links": [{"evidence_id": "TEST-EVIDENCE-001", "role": "supports"}],
+        "created_at": "2026-09-25T12:10:00Z"
+      }
+    },
+    {
+      "name": "amber AI claim proposal",
+      "schema": "change-proposal.schema.json",
+      "instance": {
+        "id": "TEST-PROPOSAL-001",
+        "created_at": "2026-09-25T12:15:00Z",
+        "created_by": {"kind": "ai", "id": "extractor-v0", "provider": "test", "model": "test-model", "version": "1"},
+        "source_document_ids": ["TEST-DOC-001"],
+        "risk_class": "AMBER",
+        "policy_outcome": "human_review_required",
+        "policy_reasons": ["quantity claim requires review"],
+        "mutations": [
+          {
+            "id": "TEST-MUTATION-001",
+            "action": "create",
+            "resource_type": "claim",
+            "payload": {
+              "id": "TEST-CLAIM-002",
+              "subject_id": "TEST-ENTITY-001",
+              "predicate_id": "inventory.quantity",
+              "value": {"kind": "number", "value": 12, "unit": "systems"},
+              "scope": {"entity_ids": ["TEST-EQUIPMENT-001"], "quantity_type": "operational_estimate"},
+              "validity": {"point_in_time": {"value": "2026", "precision": "year"}},
+              "confidence": "medium",
+              "evidence_links": [{"evidence_id": "TEST-EVIDENCE-001", "role": "supports"}],
+              "claim_state": "active",
+              "created_at": "2026-09-25T12:15:00Z"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "human approval decision",
+      "schema": "review-decision.schema.json",
+      "instance": {
+        "id": "TEST-DECISION-001",
+        "proposal_id": "TEST-PROPOSAL-001",
+        "proposal_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "decision": "approve",
+        "decided_at": "2026-09-25T12:20:00Z",
+        "decided_by": {"kind": "human", "id": "editor-test"},
+        "reason_codes": ["evidence_sufficient"],
+        "policy_references": ["docs/AI_GOVERNANCE.md#amber--ai-proposes-human-approves"]
+      }
+    },
+    {
+      "name": "auditable revision",
+      "schema": "revision.schema.json",
+      "instance": {
+        "id": "TEST-REVISION-001",
+        "proposal_id": "TEST-PROPOSAL-001",
+        "decision_id": "TEST-DECISION-001",
+        "applied_at": "2026-09-25T12:21:00Z",
+        "applied_by": {"kind": "system", "id": "canonical-adapter"},
+        "affected_records": [
+          {
+            "resource_type": "claim",
+            "record_id": "TEST-CLAIM-002",
+            "action": "created",
+            "payload_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          }
+        ],
+        "backend_receipts": [{"backend": "test", "receipt": "receipt-001"}]
+      }
+    }
+  ],
+  "invalid": [
+    {
+      "name": "claim without evidence",
+      "schema": "claim.schema.json",
+      "instance": {
+        "id": "BAD-CLAIM-001",
+        "subject_id": "TEST-ENTITY-001",
+        "predicate_id": "inventory.quantity",
+        "value": {"kind": "number", "value": 12},
+        "confidence": "medium",
+        "evidence_links": [],
+        "claim_state": "active",
+        "created_at": "2026-09-25T13:00:00Z"
+      }
+    },
+    {
+      "name": "red proposal not blocked",
+      "schema": "change-proposal.schema.json",
+      "instance": {
+        "id": "BAD-PROPOSAL-001",
+        "created_at": "2026-09-25T13:00:00Z",
+        "created_by": {"kind": "ai", "id": "test-agent"},
+        "risk_class": "RED",
+        "policy_outcome": "human_review_required",
+        "mutations": [
+          {
+            "id": "BAD-MUTATION-001",
+            "action": "create",
+            "resource_type": "entity",
+            "payload": {
+              "id": "BAD-ENTITY-001",
+              "entity_type": "facility",
+              "names": {"en": "Restricted test facility"},
+              "record_status": "active"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "merged entity without target",
+      "schema": "entity.schema.json",
+      "instance": {
+        "id": "BAD-ENTITY-002",
+        "entity_type": "organization",
+        "names": {"en": "Duplicate organization"},
+        "record_status": "merged"
+      }
+    },
+    {
+      "name": "metadata update without target",
+      "schema": "change-proposal.schema.json",
+      "instance": {
+        "id": "BAD-PROPOSAL-002",
+        "created_at": "2026-09-25T13:00:00Z",
+        "created_by": {"kind": "human", "id": "editor-test"},
+        "risk_class": "GREEN",
+        "policy_outcome": "auto_admit_allowed",
+        "mutations": [
+          {
+            "id": "BAD-MUTATION-002",
+            "action": "metadata_update",
+            "resource_type": "entity",
+            "payload": {
+              "id": "TEST-ENTITY-001",
+              "entity_type": "organization",
+              "names": {"en": "Updated test organization"},
+              "record_status": "active"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "document without retrievable identity",
+      "schema": "document.schema.json",
+      "instance": {
+        "id": "BAD-DOC-001",
+        "source_id": "TEST-SOURCE-001",
+        "retrieved_at": "2026-09-25T13:00:00Z",
+        "language": "en",
+        "content_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    {
+      "name": "document with null URL is not identified",
+      "schema": "document.schema.json",
+      "instance": {
+        "id": "BAD-DOC-002",
+        "source_id": "TEST-SOURCE-001",
+        "canonical_url": null,
+        "retrieved_at": "2026-09-25T13:00:00Z",
+        "language": "en",
+        "content_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    },
+    {
+      "name": "evidence without capture provenance",
+      "schema": "evidence.schema.json",
+      "instance": {
+        "id": "BAD-EVIDENCE-001",
+        "document_id": "TEST-DOC-001",
+        "locator": {"paragraph": 1}
+      }
+    },
+    {
+      "name": "resource type cannot disguise claim payload as entity",
+      "schema": "change-proposal.schema.json",
+      "instance": {
+        "id": "BAD-PROPOSAL-003",
+        "created_at": "2026-09-25T13:00:00Z",
+        "created_by": {"kind": "human", "id": "editor-test"},
+        "risk_class": "AMBER",
+        "policy_outcome": "human_review_required",
+        "mutations": [
+          {
+            "id": "BAD-MUTATION-003",
+            "action": "create",
+            "resource_type": "entity",
+            "payload": {
+              "id": "TEST-CLAIM-DISGUISED",
+              "subject_id": "TEST-ENTITY-001",
+              "predicate_id": "inventory.quantity",
+              "value": {"kind": "number", "value": 5},
+              "confidence": "medium",
+              "evidence_links": [{"evidence_id": "TEST-EVIDENCE-001", "role": "supports"}],
+              "claim_state": "active",
+              "created_at": "2026-09-25T13:00:00Z"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "name": "review decision without proposal hash",
+      "schema": "review-decision.schema.json",
+      "instance": {
+        "id": "BAD-DECISION-001",
+        "proposal_id": "TEST-PROPOSAL-001",
+        "decision": "approve",
+        "decided_at": "2026-09-25T13:00:00Z",
+        "decided_by": {"kind": "human", "id": "editor-test"}
+      }
+    }
+  ]
+}

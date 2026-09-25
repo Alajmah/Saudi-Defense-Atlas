@@ -1,0 +1,101 @@
+name: sda-wikibase-spike
+
+services:
+  mysql:
+    image: mariadb:10.11
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-my_wiki}
+      MYSQL_USER: ${DB_USER:-sqluser}
+      MYSQL_PASSWORD: ${DB_PASS:?set DB_PASS in .env}
+      MYSQL_RANDOM_ROOT_PASSWORD: "yes"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: healthcheck.sh --connect --innodb_initialized
+      start_period: 1m
+      interval: 20s
+      timeout: 5s
+
+  wikibase:
+    image: wikibase/wikibase:8
+    depends_on:
+      mysql:
+        condition: service_healthy
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WIKIBASE_PORT:-8181}:80"
+    volumes:
+      - wikibase-config:/config
+      - wikibase-image-data:/var/www/html/images
+    environment:
+      METADATA_CALLBACK: "false"
+      MW_ADMIN_NAME: ${MW_ADMIN_NAME:?set MW_ADMIN_NAME in .env}
+      MW_ADMIN_PASS: ${MW_ADMIN_PASS:?set MW_ADMIN_PASS in .env}
+      MW_ADMIN_EMAIL: ${MW_ADMIN_EMAIL:?set MW_ADMIN_EMAIL in .env}
+      MW_WG_SERVER: http://localhost:${WIKIBASE_PORT:-8181}
+      MW_WG_SITENAME: Saudi Defense Atlas M0 Spike
+      DB_SERVER: mysql:3306
+      DB_USER: ${DB_USER:-sqluser}
+      DB_PASS: ${DB_PASS:?set DB_PASS in .env}
+      DB_NAME: ${DB_NAME:-my_wiki}
+      WDQS_PUBLIC_ENDPOINT_URL: http://localhost:${WDQS_PORT:-9999}/bigdata/namespace/wdq/sparql
+    healthcheck:
+      test: curl --silent --fail localhost/wiki/Main_Page
+      interval: 10s
+      start_period: 5m
+
+  wikibase-jobrunner:
+    image: wikibase/wikibase:8
+    command: jobrunner
+    depends_on:
+      wikibase:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - wikibase-config:/config
+      - wikibase-image-data:/var/www/html/images
+
+  wdqs:
+    image: wikibase/wdqs:2
+    command: /runBlazegraph.sh
+    depends_on:
+      wikibase:
+        condition: service_healthy
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${WDQS_PORT:-9999}:9999"
+    ulimits:
+      nofile:
+        soft: 32768
+        hard: 32768
+    volumes:
+      - wdqs-data:/wdqs/data
+    healthcheck:
+      test: curl --silent --fail localhost:9999/bigdata/namespace/wdq/sparql
+      interval: 10s
+      start_period: 2m
+
+  wdqs-updater:
+    image: wikibase/wdqs:2
+    command: /runUpdate.sh
+    depends_on:
+      wdqs:
+        condition: service_healthy
+    restart: unless-stopped
+    ulimits:
+      nofile:
+        soft: 32768
+        hard: 32768
+    environment:
+      WIKIBASE_HOST: wikibase
+      WIKIBASE_SCHEME: http
+      WIKIBASE_CONCEPT_URI: http://localhost:${WIKIBASE_PORT:-8181}
+      WDQS_HOST: wdqs
+      WDQS_PORT: "9999"
+
+volumes:
+  mysql-data:
+  wikibase-config:
+  wikibase-image-data:
+  wdqs-data:

@@ -1,0 +1,96 @@
+{
+  "valid": [
+    {
+      "name": "green system approval may produce revision",
+      "proposal": {"id": "P-GREEN-001", "risk_class": "GREEN", "policy_outcome": "auto_admit_allowed"},
+      "decision": {"id": "D-GREEN-001", "proposal_id": "P-GREEN-001", "proposal_sha256": "8d44fa80498ac1b1a4816eb946bc09c53b2396e3f99dac27cf59f98f4acf7f5b", "decision": "approve", "decided_by": {"kind": "system", "id": "policy-engine"}},
+      "revision": {"id": "R-GREEN-001", "proposal_id": "P-GREEN-001", "decision_id": "D-GREEN-001"}
+    },
+    {
+      "name": "amber human approval may produce revision",
+      "proposal": {"id": "P-AMBER-001", "risk_class": "AMBER", "policy_outcome": "human_review_required"},
+      "decision": {"id": "D-AMBER-001", "proposal_id": "P-AMBER-001", "proposal_sha256": "ad6f8f7bc41d3e9ee1ca1f485e0c486204c1f2029bb8862e5328c1fa527a3058", "decision": "approve", "decided_by": {"kind": "human", "id": "editor"}},
+      "revision": {"id": "R-AMBER-001", "proposal_id": "P-AMBER-001", "decision_id": "D-AMBER-001"}
+    },
+    {
+      "name": "amber rejection creates no revision",
+      "proposal": {"id": "P-AMBER-002", "risk_class": "AMBER", "policy_outcome": "human_review_required"},
+      "decision": {"id": "D-AMBER-002", "proposal_id": "P-AMBER-002", "proposal_sha256": "140aa9ddfc33e427f5cacdb67d3c119abab2ca5193f74c71aa18e7f4371dfd8d", "decision": "reject", "decided_by": {"kind": "human", "id": "editor"}},
+      "revision": null
+    },
+    {
+      "name": "red proposal remains blocked",
+      "proposal": {"id": "P-RED-001", "risk_class": "RED", "policy_outcome": "blocked"},
+      "decision": null,
+      "revision": null
+    },
+    {
+      "name": "ordered proposal decision revision timestamps are valid",
+      "proposal": {"id": "P-TIME-OK-001", "risk_class": "AMBER", "policy_outcome": "human_review_required", "created_at": "2026-01-01T00:00:00Z"},
+      "decision": {"id": "D-TIME-OK-001", "proposal_id": "P-TIME-OK-001", "proposal_sha256": "1fdecabd85764eeae7c3eea6dd1b0a0626134771c93a81bf30b167ca3da62cfa", "decision": "approve", "decided_by": {"kind": "human", "id": "editor"}, "decided_at": "2026-01-02T00:00:00Z"},
+      "revision": {"id": "R-TIME-OK-001", "proposal_id": "P-TIME-OK-001", "decision_id": "D-TIME-OK-001", "applied_at": "2026-01-03T00:00:00Z"}
+    }
+  ],
+  "invalid": [
+    {
+      "name": "amber system approval forbidden",
+      "proposal": {"id": "P-BAD-001", "risk_class": "AMBER", "policy_outcome": "human_review_required"},
+      "decision": {"id": "D-BAD-001", "proposal_id": "P-BAD-001", "proposal_sha256": "784c0735639cf1b8c752813f2bb3feddd4771adab67bfded9704e7aa23e280c0", "decision": "approve", "decided_by": {"kind": "system", "id": "policy-engine"}},
+      "revision": null
+    },
+    {
+      "name": "red human approval forbidden",
+      "proposal": {"id": "P-BAD-002", "risk_class": "RED", "policy_outcome": "blocked"},
+      "decision": {"id": "D-BAD-002", "proposal_id": "P-BAD-002", "proposal_sha256": "f08d5668f80fa70d0d628287c2bc4a55826120340f85a0ee2e4de76fe4ba056f", "decision": "approve", "decided_by": {"kind": "human", "id": "editor"}},
+      "revision": null
+    },
+    {
+      "name": "rejected proposal cannot produce revision",
+      "proposal": {"id": "P-BAD-003", "risk_class": "AMBER", "policy_outcome": "human_review_required"},
+      "decision": {"id": "D-BAD-003", "proposal_id": "P-BAD-003", "proposal_sha256": "2d30ec157cb5a8a200db8a3dcf28d88ae84afcddf7f85d5be4a1a998217b4820", "decision": "reject", "decided_by": {"kind": "human", "id": "editor"}},
+      "revision": {"id": "R-BAD-003", "proposal_id": "P-BAD-003", "decision_id": "D-BAD-003"}
+    },
+    {
+      "name": "decision must reference proposal ID",
+      "proposal": {"id": "P-BAD-004", "risk_class": "AMBER", "policy_outcome": "human_review_required"},
+      "decision": {"id": "D-BAD-004", "proposal_id": "P-OTHER", "proposal_sha256": "ea05f325aff62cff8c9245413cc22f769b64d77a90511e1b1f44df607134b9db", "decision": "approve", "decided_by": {"kind": "human", "id": "editor"}},
+      "revision": null
+    },
+    {
+      "name": "revision must reference approval",
+      "proposal": {"id": "P-BAD-005", "risk_class": "GREEN", "policy_outcome": "auto_admit_allowed"},
+      "decision": {"id": "D-BAD-005", "proposal_id": "P-BAD-005", "proposal_sha256": "cc72c436ac4ec22c82f8931734b2033721936f59302da2c72d11012f48f6a480", "decision": "approve", "decided_by": {"kind": "system", "id": "policy-engine"}},
+      "revision": {"id": "R-BAD-005", "proposal_id": "P-BAD-005", "decision_id": "D-OTHER"}
+    },
+    {
+      "name": "blocked proposal cannot produce revision",
+      "proposal": {"id": "P-BAD-006", "risk_class": "RED", "policy_outcome": "blocked"},
+      "decision": null,
+      "revision": {"id": "R-BAD-006", "proposal_id": "P-BAD-006", "decision_id": "D-NONE"}
+    },
+    {
+      "name": "pending proposal cannot be approved",
+      "proposal": {"id": "P-BAD-007", "risk_class": "AMBER", "policy_outcome": "pending"},
+      "decision": {"id": "D-BAD-007", "proposal_id": "P-BAD-007", "proposal_sha256": "dbd5e6dc0d110a51d83bbebfe062437df5ee637a375e98271a880ba431475a0c", "decision": "approve", "decided_by": {"kind": "human", "id": "editor"}},
+      "revision": null
+    },
+    {
+      "name": "decision hash must match exact proposal payload",
+      "proposal": {"id": "P-BAD-008", "risk_class": "AMBER", "policy_outcome": "human_review_required"},
+      "decision": {"id": "D-BAD-008", "proposal_id": "P-BAD-008", "proposal_sha256": "0000000000000000000000000000000000000000000000000000000000000000", "decision": "approve", "decided_by": {"kind": "human", "id": "editor"}},
+      "revision": null
+    },
+    {
+      "name": "decision cannot predate proposal",
+      "proposal": {"id": "P-TIME-BAD-001", "risk_class": "AMBER", "policy_outcome": "human_review_required", "created_at": "2026-01-02T00:00:00Z"},
+      "decision": {"id": "D-TIME-BAD-001", "proposal_id": "P-TIME-BAD-001", "proposal_sha256": "067e217504a57a4da93dcfaa7edc5555c45034f114413484cd802062569a4d3d", "decision": "approve", "decided_by": {"kind": "human", "id": "editor"}, "decided_at": "2026-01-01T00:00:00Z"},
+      "revision": null
+    },
+    {
+      "name": "revision cannot predate approval",
+      "proposal": {"id": "P-TIME-BAD-002", "risk_class": "AMBER", "policy_outcome": "human_review_required", "created_at": "2026-01-01T00:00:00Z"},
+      "decision": {"id": "D-TIME-BAD-002", "proposal_id": "P-TIME-BAD-002", "proposal_sha256": "be88d131d9abf8d82f148dde26631d6605b7909d214ce747ef3afde642744e1e", "decision": "approve", "decided_by": {"kind": "human", "id": "editor"}, "decided_at": "2026-01-03T00:00:00Z"},
+      "revision": {"id": "R-TIME-BAD-002", "proposal_id": "P-TIME-BAD-002", "decision_id": "D-TIME-BAD-002", "applied_at": "2026-01-02T00:00:00Z"}
+    }
+  ]
+}

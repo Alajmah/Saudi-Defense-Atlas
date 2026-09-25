@@ -1,0 +1,147 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/common.schema.json",
+  "title": "Saudi Defense Atlas common definitions",
+  "$defs": {
+    "canonical_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "description": "Project-issued stable record identifier. Allocation of an ID does not by itself imply canonical admission. Backend/store-native IDs must be mapped separately."
+    },
+    "localized_text": {
+      "type": "object",
+      "properties": {
+        "ar": { "type": "string", "minLength": 1 },
+        "en": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false,
+      "anyOf": [
+        { "required": ["ar"] },
+        { "required": ["en"] }
+      ]
+    },
+    "alias": {
+      "type": "object",
+      "required": ["value"],
+      "properties": {
+        "value": { "type": "string", "minLength": 1 },
+        "language": { "type": ["string", "null"] },
+        "kind": {
+          "type": "string",
+          "enum": ["official", "abbreviation", "transliteration", "designation", "common", "historical", "search"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "temporal_value": {
+      "type": "object",
+      "required": ["value", "precision"],
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "ISO-like temporal value consistent with the declared precision."
+        },
+        "precision": {
+          "type": "string",
+          "enum": ["year", "month", "day", "second", "unknown"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "validity_interval": {
+      "type": "object",
+      "properties": {
+        "valid_from": { "$ref": "#/$defs/temporal_value" },
+        "valid_to": { "$ref": "#/$defs/temporal_value" },
+        "point_in_time": { "$ref": "#/$defs/temporal_value" }
+      },
+      "additionalProperties": false
+    },
+    "confidence": {
+      "type": "string",
+      "enum": ["verified", "high", "medium", "low", "unverified"]
+    },
+    "actor": {
+      "type": "object",
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": { "type": "string", "enum": ["human", "ai", "system"] },
+        "id": { "type": "string", "minLength": 1 },
+        "provider": { "type": ["string", "null"] },
+        "model": { "type": ["string", "null"] },
+        "version": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "entity_ref_value": {
+      "type": "object",
+      "required": ["kind", "entity_id"],
+      "properties": {
+        "kind": { "const": "entity" },
+        "entity_id": { "$ref": "#/$defs/canonical_id" }
+      },
+      "additionalProperties": false
+    },
+    "string_value": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": { "const": "string" },
+        "value": { "type": "string" },
+        "language": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "number_value": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": { "const": "number" },
+        "value": { "type": "number" },
+        "unit": { "type": ["string", "null"] },
+        "precision": { "type": ["string", "null"] },
+        "lower_bound": { "type": ["number", "null"] },
+        "upper_bound": { "type": ["number", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "date_value": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": { "const": "date" },
+        "value": { "$ref": "#/$defs/temporal_value" }
+      },
+      "additionalProperties": false
+    },
+    "boolean_value": {
+      "type": "object",
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": { "const": "boolean" },
+        "value": { "type": "boolean" }
+      },
+      "additionalProperties": false
+    },
+    "null_value": {
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": { "const": "unknown" },
+        "reason": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false
+    },
+    "claim_value": {
+      "oneOf": [
+        { "$ref": "#/$defs/entity_ref_value" },
+        { "$ref": "#/$defs/string_value" },
+        { "$ref": "#/$defs/number_value" },
+        { "$ref": "#/$defs/date_value" },
+        { "$ref": "#/$defs/boolean_value" },
+        { "$ref": "#/$defs/null_value" }
+      ]
+    }
+  }
+}

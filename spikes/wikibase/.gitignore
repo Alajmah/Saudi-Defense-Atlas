@@ -1,0 +1,6 @@
+.env
+.venv/
+__pycache__/
+state.generated.json
+verification.generated.json
+approved-demo-applied.generated.json

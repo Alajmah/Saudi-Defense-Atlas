@@ -1,0 +1,123 @@
+name: wikibase-m0-spike
+
+on:
+  pull_request:
+    paths:
+      - "spikes/wikibase/**"
+      - "schemas/v0.1/**"
+      - "scripts/validate_schemas.py"
+      - "scripts/validate_workflow.py"
+      - ".github/workflows/wikibase-spike.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify-wikibase:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: spikes/wikibase/requirements.txt
+
+      - name: Install spike dependencies
+        run: python -m pip install -r spikes/wikibase/requirements.txt
+
+      - name: Prepare local-only spike environment
+        working-directory: spikes/wikibase
+        run: cp .env.example .env
+
+      - name: Start Wikibase stack
+        working-directory: spikes/wikibase
+        run: docker compose up -d
+
+      - name: Wait for Wikibase API health
+        working-directory: spikes/wikibase
+        shell: bash
+        run: |
+          set -euo pipefail
+          container_id="$(docker compose ps -q wikibase)"
+          test -n "$container_id"
+
+          healthy=0
+          for _ in $(seq 1 90); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' "$container_id" 2>/dev/null || true)"
+            if [ "$status" = "healthy" ]; then
+              healthy=1
+              break
+            fi
+            sleep 5
+          done
+
+          if [ "$healthy" -ne 1 ]; then
+            echo "Wikibase did not become healthy" >&2
+            docker compose ps
+            exit 1
+          fi
+
+          curl --fail --silent --show-error \
+            'http://127.0.0.1:8181/w/api.php?action=query&meta=siteinfo&format=json' \
+            >/dev/null
+
+      - name: Seed M0 representation fixtures
+        working-directory: spikes/wikibase
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          source ./.env
+          set +a
+          python seed.py
+
+      - name: Verify M0 representation mechanics
+        working-directory: spikes/wikibase
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          source ./.env
+          set +a
+          python verify.py
+
+      - name: Apply one approved synthetic proposal through the adapter gate
+        working-directory: spikes/wikibase
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          source ./.env
+          set +a
+          python apply_approved_demo.py
+
+      - name: Upload M0 verification evidence
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wikibase-m0-verification
+          path: |
+            spikes/wikibase/state.generated.json
+            spikes/wikibase/verification.generated.json
+            spikes/wikibase/approved-demo-applied.generated.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Dump diagnostics on failure
+        if: failure()
+        working-directory: spikes/wikibase
+        run: |
+          docker compose ps || true
+          docker compose logs --no-color --tail=300 || true
+
+      - name: Clean up spike stack
+        if: always()
+        working-directory: spikes/wikibase
+        run: docker compose down -v --remove-orphans || true
