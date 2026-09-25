@@ -26,49 +26,74 @@ The project is **knowledge-first**: facts are modeled as structured entities, cl
 - Publicly documented bases and facilities at an appropriate non-operational level
 - Timelines, relationships, and source-backed analysis
 
-## Architecture Direction
+## Architecture
 
 ```text
 Public sources
     ↓
-Discovery / crawling / document parsing
+Discovery / fetch / document parsing
     ↓
-Structured extraction
+Document + Evidence
+    ↓
+Structured candidate extraction
     ↓
 Entity resolution
     ↓
-Claim + evidence verification
+ChangeProposal
+    ↓
+Policy + evidence validation
     ↓
 Human review when required
     ↓
-Canonical knowledge store
+Backend mutation
     ↓
-Search / API / editorial tools / public website / research assistant
+Canonical Revision + backend receipt
+    ↓
+Wikibase knowledge core
+    ↓
+Read API / public website / search / research tools
 ```
 
-The canonical domain model is implementation-neutral. Wikibase is the first knowledge-core candidate to evaluate during M0, not a permanent dependency until it passes the acceptance tests in the roadmap.
+The **domain model remains implementation-neutral** even though M0 has selected Wikibase as the M1 canonical knowledge-core implementation. SDA domain IDs, claim/evidence semantics, and mutation authority remain project-owned; Wikibase Q/P identifiers and MediaWiki revisions are implementation mappings/receipts rather than public authority.
+
+See [`docs/adr/ADR-0002-knowledge-core.md`](docs/adr/ADR-0002-knowledge-core.md).
 
 ## Repository Structure
 
 ```text
-docs/
-  VISION.md
-  ARCHITECTURE.md
-  ONTOLOGY.md
-  SOURCE_POLICY.md
-  AI_GOVERNANCE.md
-  ROADMAP.md
+architecture/            Architecture Pattern Register and decision/evidence logs
+docs/                    Vision, architecture, ontology, policies, roadmap, ADRs, reviews
+schemas/v0.1/            Implementation-neutral domain/governance JSON Schemas
+scripts/                 Schema and cross-record governance validators
+spikes/wikibase/         Reproducible M0 Wikibase knowledge-core verification
+ tests/fixtures/         Positive/negative schema and workflow fixtures
+.github/workflows/       Validation and M0 knowledge-core CI
 ```
-
-Application and infrastructure directories will be introduced only after M0 validates the data model and knowledge-core choice.
 
 ## Status
 
-**Phase:** Foundation / M0
+**M0 — Foundation and Knowledge-Core Spike: COMPLETE**
 
-The immediate objective is to prove one complete vertical slice from a public source to a structured, referenced, bilingual fact and then expose it through an API and a minimal public page.
+M0 verified the bounded Wikibase representation/query/governance contract and adopted Wikibase for the M1 knowledge-core role. The project does **not** treat that verification as production qualification.
+
+**M1 — First Vertical Slice: NEXT**
+
+The next objective is one end-to-end path from an authoritative public source to a cited Arabic/English equipment page, including deterministic retrieval/deduplication, typed AI proposals, review-gated mutation, canonical Wikibase storage, evidence traceability, and mutation idempotency/reconciliation semantics.
 
 See [`docs/ROADMAP.md`](docs/ROADMAP.md).
+
+## Verification Discipline
+
+Architecture promotion is evidence-based:
+
+```text
+observation != adoption
+a doption? no — see Architecture Pattern Register for canonical status
+implementation != verification
+verification != production qualification
+```
+
+The canonical status vocabulary and evidence are maintained in [`architecture/ARCHITECTURE_PATTERN_REGISTER.md`](architecture/ARCHITECTURE_PATTERN_REGISTER.md).
 
 ## License
 
