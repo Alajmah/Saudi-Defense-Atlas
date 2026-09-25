@@ -38,6 +38,7 @@ def property_defs() -> dict[str, dict[str, str]]:
         "evidence_selector": {"en": "evidence selector", "datatype": "string"},
         "evidence_sha256": {"en": "evidence SHA-256", "datatype": "external-id"},
         "evidence_id": {"en": "SDA evidence ID", "datatype": "external-id"},
+        "evidence_link": {"en": "evidence link", "datatype": "wikibase-item"},
         "evidence_role": {"en": "evidence role", "datatype": "string"},
         "operates_equipment_variant": {
             "en": "operates equipment variant",
