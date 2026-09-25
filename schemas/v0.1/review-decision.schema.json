@@ -3,10 +3,15 @@
   "$id": "https://schemas.saudi-defense-atlas.org/v0.1/review-decision.schema.json",
   "title": "Saudi Defense Atlas Review Decision",
   "type": "object",
-  "required": ["id", "proposal_id", "decision", "decided_at", "decided_by"],
+  "required": ["id", "proposal_id", "proposal_sha256", "decision", "decided_at", "decided_by"],
   "properties": {
     "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
     "proposal_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "proposal_sha256": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$",
+      "description": "SHA-256 of canonical JSON for the exact ChangeProposal payload reviewed."
+    },
     "decision": {
       "type": "string",
       "enum": ["approve", "reject", "return_for_revision"]
