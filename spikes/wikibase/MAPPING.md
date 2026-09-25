@@ -46,7 +46,6 @@ The M0 reference set carries:
 - SDA document ID
 - source URL
 - evidence locator
-- retrieval date when available
 
 One statement may receive multiple Wikibase references to prove that the store can represent multiple evidence records.
 
@@ -61,20 +60,38 @@ For the M0 spike, important procurement/training Events are represented as Items
 
 This is a representational experiment. Event storage may later remain in Wikibase, PostgreSQL, or a hybrid model depending on the M0 decision.
 
-## Proposals, decisions, and revisions
+## Proposals, decisions, revisions, and backend effects
 
 `ChangeProposal`, `ReviewDecision`, and SDA `Revision` remain project governance records outside Wikibase.
 
-The Wikibase adapter may execute writes only when the bundle satisfies:
+### Pre-write authorization
+
+The adapter may begin a backend mutation only when the exact proposed payload has been authorized:
 
 ```text
 proposal.policy_outcome permits admission
 AND decision == approve
 AND reviewer authority satisfies risk class
-AND revision references that exact proposal + decision
+AND decision.proposal_id == proposal.id
+AND decision.proposal_sha256 == SHA256(canonical proposal payload)
 ```
 
-A MediaWiki/Wikibase revision ID is recorded as a **backend receipt** after the approved project revision is applied. It does not replace the project Revision record.
+The project `Revision` is **not** a precondition to the backend call. A Revision records the result of applying an already-authorized proposal and therefore belongs to the post-effect audit boundary.
+
+### Post-write recording
+
+After the backend returns, the adapter creates and validates a project Revision that references the exact proposal and decision and records backend-specific identifiers as receipts:
+
+```text
+authorized proposal + decision
+  -> backend mutation attempt
+  -> backend receipt / observed effect
+  -> project Revision
+```
+
+A MediaWiki/Wikibase revision ID or statement GUID is only a **backend receipt**. It never replaces the project Revision record or becomes project authority.
+
+A production adapter must also define reconciliation semantics for interrupted or ambiguous external effects. The M0 adapter proves the authority ordering and receipt mapping only; it does not claim production-grade exactly-once mutation semantics.
 
 ## Conflict test
 
@@ -84,4 +101,4 @@ The spike therefore creates a clearly marked synthetic fixture with two simultan
 
 ## Trial claim ceiling
 
-Passing this mapping proves only that the tested SDA semantics can be represented and retrieved from the tested local Wikibase configuration. It does not establish production scalability, security, availability, backup/recovery, or long-term operational suitability.
+Passing this mapping proves only that the tested SDA semantics can be represented and retrieved from the tested local Wikibase configuration. It does not establish production scalability, security, availability, backup/recovery, mutation reconciliation, or long-term operational suitability.
