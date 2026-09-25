@@ -1,0 +1,74 @@
+{
+  "proposal": {
+    "id": "SDA-PROPOSAL-M0-DEMO-001",
+    "created_at": "2026-09-25T18:00:00Z",
+    "created_by": {
+      "kind": "ai",
+      "id": "m0-synthetic-extractor",
+      "provider": "fixture",
+      "model": "fixture-only",
+      "version": "1"
+    },
+    "source_document_ids": ["SDA-TEST-DOC-APPROVED-DEMO"],
+    "risk_class": "AMBER",
+    "policy_outcome": "human_review_required",
+    "policy_reasons": ["synthetic quantity mutation exercises the human-review adapter boundary"],
+    "rationale": "Synthetic/non-public M0 adapter fixture only.",
+    "mutations": [
+      {
+        "id": "SDA-MUTATION-M0-DEMO-001",
+        "action": "create",
+        "resource_type": "claim",
+        "payload": {
+          "id": "SDA-TEST-CLAIM-APPROVED-DEMO",
+          "subject_id": "SDA-TEST-CONFLICT-001",
+          "predicate_id": "procurement.quantity",
+          "value": {
+            "kind": "number",
+            "value": 14,
+            "unit": "synthetic systems",
+            "precision": "exact"
+          },
+          "scope": {
+            "quantity_type": "approved",
+            "note": "Synthetic M0 adapter fixture; not factual defense data."
+          },
+          "validity": {
+            "point_in_time": {
+              "value": "2026-01-01",
+              "precision": "day"
+            }
+          },
+          "confidence": "unverified",
+          "evidence_links": [
+            {
+              "evidence_id": "SDA-TEST-EVIDENCE-APPROVED-DEMO",
+              "role": "supports"
+            }
+          ],
+          "claim_state": "active",
+          "created_at": "2026-09-25T18:00:00Z"
+        }
+      }
+    ]
+  },
+  "decision": {
+    "id": "SDA-DECISION-M0-DEMO-001",
+    "proposal_id": "SDA-PROPOSAL-M0-DEMO-001",
+    "decision": "approve",
+    "decided_at": "2026-09-25T18:05:00Z",
+    "decided_by": {
+      "kind": "human",
+      "id": "m0-fixture-reviewer"
+    },
+    "reason_codes": ["evidence_sufficient"],
+    "rationale": "Approval applies only to the synthetic M0 adapter test.",
+    "policy_references": ["docs/AI_GOVERNANCE.md#amber--ai-proposes-human-approves"]
+  },
+  "demo_reference": {
+    "document_id": "SDA-TEST-DOC-APPROVED-DEMO",
+    "url": "https://example.invalid/sda-m0/approved-demo",
+    "locator": "Synthetic adapter evidence; not a real-world source."
+  },
+  "revision_id": "SDA-REVISION-M0-DEMO-001"
+}
