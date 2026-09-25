@@ -56,25 +56,41 @@
               { "type": "null" }
             ]
           },
-          "payload": {
-            "oneOf": [
-              { "$ref": "entity.schema.json" },
-              { "$ref": "claim.schema.json" },
-              { "$ref": "event.schema.json" },
-              { "$ref": "source.schema.json" },
-              { "$ref": "document.schema.json" },
-              { "$ref": "evidence.schema.json" }
-            ]
-          }
+          "payload": {}
         },
         "allOf": [
           {
             "if": {
               "properties": {
                 "action": { "enum": ["supersede", "merge", "metadata_update"] }
-              }
+              },
+              "required": ["action"]
             },
             "then": { "required": ["target_id"] }
+          },
+          {
+            "if": {"properties": {"resource_type": {"const": "entity"}}, "required": ["resource_type"]},
+            "then": {"properties": {"payload": {"$ref": "entity.schema.json"}}}
+          },
+          {
+            "if": {"properties": {"resource_type": {"const": "claim"}}, "required": ["resource_type"]},
+            "then": {"properties": {"payload": {"$ref": "claim.schema.json"}}}
+          },
+          {
+            "if": {"properties": {"resource_type": {"const": "event"}}, "required": ["resource_type"]},
+            "then": {"properties": {"payload": {"$ref": "event.schema.json"}}}
+          },
+          {
+            "if": {"properties": {"resource_type": {"const": "source"}}, "required": ["resource_type"]},
+            "then": {"properties": {"payload": {"$ref": "source.schema.json"}}}
+          },
+          {
+            "if": {"properties": {"resource_type": {"const": "document"}}, "required": ["resource_type"]},
+            "then": {"properties": {"payload": {"$ref": "document.schema.json"}}}
+          },
+          {
+            "if": {"properties": {"resource_type": {"const": "evidence"}}, "required": ["resource_type"]},
+            "then": {"properties": {"payload": {"$ref": "evidence.schema.json"}}}
           }
         ],
         "additionalProperties": false
@@ -83,11 +99,11 @@
   },
   "allOf": [
     {
-      "if": { "properties": { "risk_class": { "const": "RED" } } },
+      "if": { "properties": { "risk_class": { "const": "RED" } }, "required": ["risk_class"] },
       "then": { "properties": { "policy_outcome": { "const": "blocked" } } }
     },
     {
-      "if": { "properties": { "risk_class": { "const": "AMBER" } } },
+      "if": { "properties": { "risk_class": { "const": "AMBER" } }, "required": ["risk_class"] },
       "then": { "properties": { "policy_outcome": { "enum": ["pending", "human_review_required", "blocked"] } } }
     }
   ],
