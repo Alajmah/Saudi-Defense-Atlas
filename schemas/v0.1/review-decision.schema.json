@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sda:schema:v0.1:review-decision",
+  "title": "Saudi Defense Atlas Review Decision",
+  "type": "object",
+  "required": ["id", "proposal_id", "decision", "decided_at", "decided_by"],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "proposal_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "decision": {
+      "type": "string",
+      "enum": ["approve", "reject", "return_for_revision"]
+    },
+    "decided_at": { "type": "string", "format": "date-time" },
+    "decided_by": { "$ref": "common.schema.json#/$defs/actor" },
+    "reason_codes": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "evidence_sufficient",
+          "evidence_insufficient",
+          "entity_ambiguous",
+          "source_authority_mismatch",
+          "conflict_requires_resolution",
+          "restricted_operational_detail",
+          "schema_or_policy_failure",
+          "duplicate",
+          "scope_or_temporal_mismatch",
+          "editorial_correction",
+          "other"
+        ]
+      },
+      "uniqueItems": true,
+      "default": []
+    },
+    "rationale": { "type": ["string", "null"] },
+    "policy_references": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "default": []
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "decided_by": { "properties": { "kind": { "const": "system" } } } } },
+      "then": {
+        "properties": {
+          "decision": { "const": "approve" }
+        }
+      }
+    }
+  ],
+  "additionalProperties": false
+}
