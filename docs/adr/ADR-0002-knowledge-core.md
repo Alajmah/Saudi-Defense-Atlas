@@ -1,98 +1,172 @@
 # ADR-0002 — Canonical Knowledge-Core Implementation
 
-**Status:** Pending Evidence
+**Status:** Accepted
 
-**Decision date:** Not set
+**Decision date:** 2026-09-25
 
-**Pattern:** APR-003 (Wikibase trial) / APR-004 (PostgreSQL fallback)
+**Pattern:** APR-003 (Wikibase) / APR-004 (PostgreSQL fallback)
 
 ## Context
 
-ADR-0001 defines an implementation-neutral knowledge model and explicitly prevents the backing store from becoming the project's authority model. M0 must now determine whether Wikibase can represent and expose those semantics cleanly enough to adopt for the canonical knowledge-core role.
+ADR-0001 defines an implementation-neutral knowledge model and explicitly prevents the backing store from becoming the project's authority model. M0 evaluated whether Wikibase can represent and expose those semantics cleanly enough to adopt for the canonical knowledge-core role.
 
-The decision is intentionally narrower than production deployment. A successful M0 does not establish production security, high availability, backup/recovery, scale, or hosting topology.
+This decision is intentionally narrower than production deployment. Successful M0 verification does not establish production security, high availability, backup/recovery, scale, mutation-reconciliation guarantees, or hosting topology.
+
+## Decision
+
+Adopt **Wikibase** as the canonical knowledge-core implementation for M1, behind the project-native `ChangeProposal -> ReviewDecision -> Revision` authority boundary.
+
+Wikibase is adopted as a storage/query implementation, not as the owner of Saudi Defense Atlas ontology, confidence semantics, evidence policy, mutation authority, or public identity.
+
+Project SDA IDs remain canonical. Wikibase Q/P identifiers remain backend mappings.
 
 ## Candidate A — Wikibase
 
 Trial implementation: `spikes/wikibase/`
 
-Current architecture status:
+Architecture status after this decision:
 
-- pattern_status: `TRIAL-AUTHORIZED`
-- implementation_status: `LINKED`
+- pattern_status: `ACCEPTED`
+- implementation_status: `VERIFIED` for the bounded M0 representation/governance contract
 - planning_disposition: `current-plan-authorized`
 
 ## Candidate B — PostgreSQL claim/evidence store
 
-Current architecture status:
+Architecture status remains:
 
 - pattern_status: `DEFERRED`
 - implementation_status: `NOT-LINKED`
 - planning_disposition: `future-plan-candidate`
 
-It becomes active only if the Wikibase trial fails a critical M0 criterion or demonstrates unacceptable semantic/operational complexity.
+PostgreSQL remains the explicit fallback if later implementation evidence exposes material Wikibase limitations that violate project invariants. Acceptance of Wikibase does not erase fallback knowledge.
 
 ## M0 Acceptance Matrix
 
-| Criterion | Required evidence | Result |
+| Criterion | Observed evidence | Result |
 |---|---|---|
-| Arabic + English labels | same item exposes both labels | PENDING |
-| aliases | `RSAF` resolves to the RSAF item | PENDING |
-| domain/store identity separation | `SDA-ORG-RSAF` maps to, but is not equal to, its Q-ID | PENDING |
-| typed relationships | item-valued statement exists | PENDING |
-| qualifiers | claim ID, quantity type, time, confidence retained | PENDING |
-| multiple references | one claim has at least two references | PENDING |
-| conflicting claims | synthetic 10/12 quantities coexist | PENDING |
-| temporal semantics | day-qualified statements round-trip | PENDING |
-| procurement-stage semantics | possible-FMS notification remains approval/notification, not contract/delivery | PENDING |
-| revision history | multiple backend revisions visible | PENDING |
-| machine read/write API | Action API seed/read succeeds | PENDING |
-| query support | WDQS resolves item by SDA canonical ID | PENDING |
-| review-before-admission | proposal/review/revision tests pass | PENDING |
-| backend remains subordinate to governance | mapping keeps proposals/decisions/revisions outside Wikibase authority | PENDING |
+| Arabic + English labels | RSAF item returned both labels | PASS |
+| aliases | `RSAF` resolved to the same RSAF item | PASS |
+| domain/store identity separation | `SDA-ORG-RSAF` mapped to Q1 while remaining distinct | PASS |
+| typed relationships | item-valued F-15SA relationships were created/read | PASS |
+| qualifiers | claim ID, quantity type, time, and confidence survived round-trip | PASS |
+| multiple references | F-15SA quantity statement retained at least two references | PASS |
+| conflicting claims | synthetic `+10` and `+12` quantities coexisted without overwrite | PASS |
+| temporal semantics | day-qualified statements round-tripped | PASS |
+| procurement-stage semantics | PAC-3 MSE possible-FMS event remained `procurement_approval_or_notification` | PASS |
+| revision history | multiple MediaWiki revisions were observed | PASS |
+| machine read/write API | Action API seed/read/write path succeeded | PASS |
+| query support | WDQS resolved RSAF by SDA canonical ID | PASS |
+| review-before-admission | schema/workflow validation and approved synthetic adapter gate passed | PASS |
+| backend remains subordinate to governance | proposal/decision authorization preceded write; project Revision recorded backend receipt after write | PASS |
 
-## Evidence Sources
+## Verification Evidence
 
-Expected evidence:
+### Exact implementation head
 
-- `schema-validation` GitHub Actions workflow
-- `wikibase-m0-spike` GitHub Actions workflow
-- generated `state.generated.json` artifact
-- generated `verification.generated.json` artifact
-- implementation review findings
+- branch: `bootstrap/foundation`
+- implementation head verified: `e3d08935907d85c20da12531a81a22d43e23f597`
 
-Do not change this ADR to Accepted or Rejected until the relevant evidence is actually observed.
+### Schema and governance validation
 
-## Decision Rule
+GitHub Actions run `36178033709` completed successfully. Its validation job passed both:
 
-### Accept Wikibase if
+- schema/fixture validation;
+- proposal/review/revision mutation-governance validation, including temporal ordering.
 
-All critical representational/governance criteria pass and the adapter does not require material distortion of the project ontology.
+### Wikibase clean-run verification
 
-### Reject Wikibase if
+GitHub Actions run `36178040438`, job `108213344752`, completed successfully on the same implementation head.
 
-Any critical criterion cannot be represented cleanly, the authority boundary must be bypassed, or the adapter complexity is disproportionate to the reuse benefit.
+The clean run successfully executed:
 
-### Defer if
+1. local Wikibase/WDQS stack startup;
+2. API health verification;
+3. M0 fixture seeding;
+4. representation verification;
+5. one human-approved synthetic proposal through the adapter gate;
+6. evidence artifact upload;
+7. clean stack teardown.
 
-The trial is technically inconclusive (for example infrastructure/environment failure unrelated to semantics). Infrastructure failure is not evidence that the data model is unsuitable.
+Artifact `wikibase-m0-verification` (`10883261546`) contains:
 
-## Consequences if accepted
+- `state.generated.json` — project-ID/backend-ID and statement mappings;
+- `verification.generated.json` — bounded representation/query verification report with status `PASS`;
+- `approved-demo-applied.generated.json` — approved synthetic mutation result with project Revision and backend receipt.
 
-Only the canonical knowledge-core role is accepted. Separate ADRs/verification remain required for:
+Observed verification details include:
 
-- production deployment topology
-- authentication/authorization
-- backups and disaster recovery
-- scaling/performance
-- public API hardening
-- upgrade lifecycle
-- monitoring/operability
+- bilingual/alias resolution = PASS;
+- SDA identity distinct from Q-ID (`SDA-ORG-RSAF` / Q1);
+- qualified multi-reference claim = PASS;
+- contradictory synthetic quantities `+10` and `+12` coexist;
+- procurement-stage separation = `procurement_approval_or_notification`;
+- revision history visible;
+- SPARQL lookup = PASS;
+- Action API read = PASS;
+- synthetic approved mutation produced `SDA-REVISION-M0-DEMO-001` with a Wikibase statement/revision recorded only as backend receipt.
 
-## Consequences if rejected
+## Why Wikibase Passed
 
-Activate APR-004 and implement the same domain contracts over PostgreSQL. Do not redesign the ontology merely to match a preferred datastore.
+The trial did not require a material change to project-native semantics:
 
-## Decision
+- SDA IDs remain independent from Q/P IDs;
+- claims map cleanly to statements plus qualifiers;
+- evidence can project to multiple references while the richer `Source -> Document -> Evidence` model remains project-owned;
+- conflicting claims can coexist;
+- multilingual labels/aliases are native;
+- revisions and query/API access are available;
+- governance records remain outside Wikibase and authorize backend writes rather than being replaced by backend revision history.
 
-**PENDING.** No knowledge-core technology is adopted by this ADR yet.
+The adapter is non-trivial but not disproportionate to the infrastructure reuse gained.
+
+## Claim Ceiling
+
+This ADR establishes only:
+
+> The tested Wikibase configuration is suitable to proceed as the Saudi Defense Atlas canonical knowledge-core implementation for M1 under the project-native ontology and mutation-governance boundary.
+
+It does **not** establish:
+
+- production security or authorization design;
+- production availability/HA;
+- backup or disaster recovery;
+- performance/scalability at target dataset size;
+- long-term upgrade compatibility;
+- production observability;
+- exactly-once mutation semantics;
+- reconciliation after ambiguous or interrupted external effects;
+- public API security/hardening.
+
+Those require separate implementation and verification.
+
+## Consequences
+
+### Authorized next work
+
+M1 may implement the first source-to-public-page vertical slice against Wikibase through a project-owned adapter/API boundary.
+
+### Required architectural constraints
+
+- public/application code depends on SDA domain contracts, not raw Q/P identity;
+- no AI/free-form output writes directly to Wikibase;
+- canonical mutations remain proposal/review/revision governed;
+- backend receipts remain audit metadata, not domain authority;
+- production mutation design must add reconciliation semantics for interrupted/ambiguous external effects;
+- source/evidence semantics remain richer than Wikibase reference projections.
+
+### Deferred production decisions
+
+Separate ADRs or verification remain required for:
+
+- production deployment topology;
+- authentication/authorization;
+- backups and disaster recovery;
+- scaling/performance;
+- public API hardening;
+- upgrade lifecycle;
+- monitoring/operability;
+- mutation idempotency/reconciliation.
+
+## Fallback
+
+APR-004 remains `DEFERRED`, not rejected. If M1 or later evidence shows that Wikibase violates a critical project invariant or creates disproportionate operational complexity, the project may activate the PostgreSQL fallback while retaining the same domain contracts.
