@@ -1,6 +1,6 @@
 # Architecture Pattern Register Decision Log
 
-This log records explicit architectural promotion, deferment, rejection, supersession, and trial authorization. Register entries do not promote themselves.
+This log records explicit architectural promotion, deferment, rejection, supersession, trial authorization, and bounded verification. Register entries do not promote themselves.
 
 ## APRD-001 — Adopt claim/evidence canonical knowledge model
 
@@ -58,9 +58,41 @@ This log records explicit architectural promotion, deferment, rejection, superse
 - from_status: CANDIDATE
 - to_status: DEFERRED
 - forcing_function: none while the Wikibase trial remains viable.
-- scope: potential M0 fallback.
+- scope: potential knowledge-core fallback.
 - non_scope: current implementation work.
-- verification_plan: only activate if APR-003 fails a critical acceptance criterion or demonstrates unacceptable complexity.
+- verification_plan: only activate if APR-003 fails a critical project invariant or later evidence demonstrates unacceptable complexity.
 - claim_ceiling: no implementation claim; fallback remains architectural knowledge only.
-- authority_reference: `docs/ARCHITECTURE.md` M0 decision gate.
+- authority_reference: `docs/ARCHITECTURE.md` M0 decision gate / ADR-0002 fallback clause.
 - rationale: Avoid parallel implementation and infrastructure inflation before evidence requires it.
+
+## APRD-005 — Promote Wikibase to accepted knowledge core
+
+- date: 2026-09-25
+- pattern: APR-003
+- from_status: TRIAL-AUTHORIZED
+- to_status: ACCEPTED
+- implementation_status: VERIFIED for the bounded M0 representation/governance contract
+- forcing_function: M1 requires a selected knowledge-core implementation and the M0 trial has now produced clean current-head verification evidence.
+- adopted_invariant: Wikibase is subordinate to SDA domain identity, ontology, evidence semantics, and mutation authority.
+- adaptation: claims project to statements/qualifiers; evidence projects to references without replacing the richer SDA Source/Document/Evidence model; SDA IDs map to Q/P IDs but remain canonical.
+- scope: canonical knowledge storage/query implementation for M1.
+- non_scope: production security, HA, backup/recovery, target-scale performance, exactly-once mutation, ambiguous-effect reconciliation, public API hardening, long-term upgrade qualification.
+- failure_model: Q/P identity leakage; adapter bypass; WDQS convergence lag; production operational burden; ambiguous external effects; future store constraints that distort SDA semantics.
+- verification_plan: completed M0 clean run plus continuing M1 vertical-slice verification; production properties require separate verification.
+- verification_evidence: schema/governance run `36178033709`; Wikibase run `36178040438` / job `108213344752`; artifact `10883261546`; ADR-0002 acceptance matrix.
+- claim_ceiling: Wikibase is suitable to proceed as the M1 canonical knowledge core under the tested project-owned adapter/governance contract.
+- authority_reference: `docs/adr/ADR-0002-knowledge-core.md`.
+- rationale: All critical M0 criteria passed without material ontology distortion or governance bypass.
+
+## APRD-006 — Record bounded verification of review-gated mutation
+
+- date: 2026-09-25
+- pattern: APR-002
+- pattern_status: ACCEPTED (unchanged)
+- implementation_status_from: IN-TRIAL
+- implementation_status_to: VERIFIED
+- scope: tested M0 proposal/review/hash-binding/temporal-order/adapter-receipt contract.
+- non_scope: production exactly-once behavior, retry safety after ambiguous external effects, distributed concurrency, or durable queue semantics.
+- verification_evidence: workflow fixtures and validation; synthetic AMBER approval applied through `apply_approved_demo.py` in run `36178040438`.
+- claim_ceiling: the tested adapter does not write before authorization and records backend identifiers as receipts after the effect; broader mutation reliability remains future work.
+- authority_reference: `docs/AI_GOVERNANCE.md`, `docs/reviews/M0_ADVERSARIAL_REVIEW.md`, ADR-0002.
