@@ -28,3 +28,6 @@ jobs:
 
       - name: Validate schemas and fixtures
         run: python scripts/validate_schemas.py
+
+      - name: Validate mutation governance
+        run: python scripts/validate_workflow.py
