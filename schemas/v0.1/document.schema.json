@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:sda:schema:v0.1:document",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/document.schema.json",
   "title": "Saudi Defense Atlas Document",
   "type": "object",
   "required": ["id", "source_id", "retrieved_at", "content_sha256", "language"],
