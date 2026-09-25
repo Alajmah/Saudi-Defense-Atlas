@@ -8,18 +8,19 @@ This document defines the initial conceptual model for Saudi Defense Atlas. It d
 
 ### Entity
 
-A stable identity for a real-world or conceptual thing.
+A stable project identity for a real-world or conceptual domain thing.
 
-Required fields:
+Required conceptual fields:
 
 - `id`
 - `entity_type`
-- `name_ar`
-- `name_en`
-- `aliases[]`
-- `status`
+- Arabic and/or English canonical names
+- aliases where applicable
+- record lifecycle status
 
-Optional fields may include descriptions, external identifiers, parent entity, and editorial metadata.
+Operational, procurement, inventory, readiness, or service state should not be stored as timeless entity attributes when they are factual assertions that can change. Those belong in sourced claims/events.
+
+Backend identifiers such as Wikibase Q/P IDs or relational primary keys are mappings, not canonical domain identity.
 
 ### Claim
 
@@ -36,40 +37,101 @@ A claim may include:
 - qualifiers
 - valid-from / valid-to
 - point-in-time
+- scope
 - precision
-- confidence
-- status
-- one or more evidence records
+- confidence evaluation
+- lifecycle state such as active/disputed/superseded
+- one or more evidence links
 
-### Evidence
-
-A specific piece of source material supporting, contradicting, or contextualizing a claim.
-
-Minimum fields:
-
-- source
-- source locator or URI
-- publication date when known
-- retrieved date
-- evidence role: `supports | contradicts | contextualizes`
-- excerpt or structured locator where legally appropriate
-- content fingerprint
+A material factual claim cannot be canonical without evidence.
 
 ### Source
 
-The publisher/origin of evidence, including authority class and metadata.
+The publisher or originating authority behind documents, such as a government agency, armed force, manufacturer, specialist publication, or other publisher.
+
+A Source is not the same thing as a retrieved web page/PDF and is not itself evidence for every claim published under its name.
+
+### Document
+
+A specific retrieved or versioned source artifact, for example an official release, procurement notice, report, PDF, manufacturer announcement, or specialist article.
+
+A Document should preserve enough identity/provenance to distinguish revisions and repeated retrievals, including where available:
+
+- source/publisher
+- canonical/retrieved locator
+- publication date
+- retrieval timestamp
+- content fingerprint
+- document type/language
+- archival/version relationship
+
+A URL alone is not assumed to be immutable document identity.
+
+Documents are provenance records, not ordinary military-domain entities by default.
+
+### Evidence
+
+A bounded piece of a Document that bears on a Claim or Event.
+
+Evidence identifies the relevant location/span/section/page or structured observation. Its role is assigned by the Claim/Event link:
+
+- `supports`
+- `contradicts`
+- `contextualizes`
+
+This separation allows one document to support one claim while contradicting or merely contextualizing another.
 
 ### Event
 
-A dated occurrence that may change knowledge state or connect entities, for example contract award, announced procurement, delivery, exercise participation, upgrade, opening, retirement, or localization agreement.
+A dated occurrence that may change knowledge state or connect entities, for example:
+
+- procurement request
+- government approval/notification
+- contract award/signature
+- order
+- delivery/delivery start
+- entry into service
+- upgrade
+- retirement/cancellation/suspension
+- exercise/training
+- localization agreement
+- facility opening
+
+Events are first-class records because procurement/training history cannot be safely reconstructed from a single current status field.
 
 ### Relationship
 
-A typed connection between entities. A relationship requiring factual support is represented as or backed by a claim.
+A typed connection between entities. A relationship requiring factual support is represented as or backed by a Claim.
+
+### ChangeProposal
+
+A candidate set of mutations produced by a human, AI process, or deterministic system. A proposal is explicitly non-canonical until policy/review requirements are satisfied.
+
+### ReviewDecision
+
+A recorded approval, rejection, or return-for-revision decision over an exact ChangeProposal.
+
+Editing a proposal creates a new superseding proposal rather than silently changing the object that was reviewed.
 
 ### Revision
 
-An immutable record of a knowledge change, including who/what proposed it, who/what approved it, timestamps, and rationale.
+An immutable audit record that links an approved proposal/decision to the canonical mutations actually applied, including backend receipts where relevant.
+
+Conceptual mutation boundary:
+
+```text
+candidate extraction
+    ↓
+ChangeProposal
+    ↓
+policy / review
+    ↓
+ReviewDecision
+    ↓
+canonical adapter write
+    ↓
+Revision
+```
 
 ## Entity Types v0.1
 
@@ -128,15 +190,15 @@ Subtypes:
 
 ### Exercise
 
-A named exercise or training event/series.
+A named exercise or training event/series. Individual occurrences may additionally be represented as Events when needed for chronology.
 
 ### ProcurementProgram
 
-Tracks acquisition lifecycle independently of news articles.
+A durable acquisition/program identity that connects procurement events, contracts, equipment, quantities, and status claims.
 
 ### Contract
 
-A documented contract or award. A government approval/notification is not automatically a contract.
+A documented contract or award. A government approval/notification is not automatically a Contract.
 
 ### LocalizationProgram
 
@@ -145,10 +207,6 @@ Industrial participation, local manufacture, technology transfer, MRO, or other 
 ### Country
 
 Used for manufacturers, suppliers, exercise participants, and government-to-government relationships.
-
-### Document
-
-A source artifact such as an official release, contract notice, report, PDF, manufacturer announcement, or specialist publication.
 
 ## Key Predicates v0.1
 
@@ -169,41 +227,57 @@ exercise.participant.organization
 exercise.uses.equipment_variant
 localization_program.related_to.equipment
 facility.associated_with.organization
+equipment.service_state
+procurement_program.lifecycle_state
+inventory.quantity
+procurement.quantity
 ```
 
 Predicates must be centrally registered; arbitrary free-text predicates are not allowed in canonical data.
 
-## Procurement State Machine
+## Procurement Lifecycle Semantics
 
-Use explicit states to prevent the common error of treating an approval as a delivery:
+Procurement is **not** modeled as a mandatory linear finite-state machine.
+
+The common conceptual progression may look like:
 
 ```text
-rumored
-  ↓
-under_evaluation
-  ↓
-announced_or_requested
-  ↓
-approved_or_notified
-  ↓
-contracted
-  ↓
-on_order
-  ↓
-delivery_started
-  ↓
-partially_delivered
-  ↓
-delivered
-  ↓
-operational
+rumored / under evaluation
+        ↓
+request / announcement
+        ↓
+approval or notification
+        ↓
+contract / order
+        ↓
+delivery activity
+        ↓
+entry into service / operational use
 ```
 
-Not every program traverses every state. Cancellation, suspension, and unknown states must be representable.
+But real programs may:
+
+- skip stages visible in public sources;
+- split into tranches or amendments;
+- be suspended/cancelled and later resumed;
+- have approval, contracting, delivery, and operationalization facts that overlap in time;
+- have one stage documented while another remains unknown.
+
+Therefore the canonical history is primarily represented through **typed Events plus temporally bounded Claims**. A lifecycle-state claim is a convenience projection over evidence, not the sole source of procurement history.
+
+The following concepts must always remain distinct:
+
+- request/announcement
+- government approval or notification
+- contract award/signature
+- order
+- delivery start / partial delivery / delivery
+- entry into operational service
+- cancellation / suspension
 
 ## Equipment Service State
 
-Canonical values:
+Canonical values for service-state claims may include:
 
 - `planned`
 - `under_evaluation`
@@ -216,13 +290,13 @@ Canonical values:
 - `cancelled`
 - `unknown`
 
-Status claims require temporal qualification whenever possible.
+Status claims require temporal qualification whenever possible and must not be inferred from procurement approval alone.
 
 ## Quantity Model
 
 Never represent an uncertain inventory number as a timeless scalar.
 
-A quantity claim should support:
+A quantity Claim should support:
 
 ```text
 value
@@ -230,7 +304,7 @@ unit
 quantity_type
 point_in_time / valid interval
 scope
-precision
+precision or bounds
 source/evidence
 confidence
 ```
@@ -239,17 +313,18 @@ confidence
 
 - ordered
 - approved
+- contracted
 - delivered
 - operational estimate
 - original fleet
 - upgraded
 - lost/retired when reliably documented
 
-Conflicting quantities remain separate claims until reconciled.
+Conflicting quantities remain separate Claims until explicitly reconciled or superseded. Different quantity types are not conflicts merely because their numbers differ.
 
 ## Naming and Multilingual Rules
 
-Each entity should support:
+Each Entity should support:
 
 - official Arabic name, if available
 - official English name, if available
@@ -260,6 +335,8 @@ Each entity should support:
 - manufacturer designations
 
 Search aliases do not change canonical naming.
+
+Arabic and English names resolve to the same project Entity ID.
 
 ## Temporal Semantics
 
@@ -274,13 +351,31 @@ Prefer explicit temporal qualifiers:
 - `entered_service_at`
 - `retired_at`
 
-Unknown dates remain unknown; the system must not manufacture precision.
+Temporal values should retain precision (`year`, `month`, `day`, etc.) rather than manufacture a day when only a year is known.
+
+Unknown dates remain unknown.
 
 ## Geographic Semantics
 
 The ontology may represent publicly documented geographic relationships at an appropriate granularity, but the product is not a live order-of-battle or tracking system.
 
-Canonical data must not be designed to infer or publish sensitive real-time positions, movement patterns, readiness, patrol schedules, ammunition storage, or non-public precise coordinates.
+Canonical/public data must not be designed to infer or publish sensitive real-time positions, movement patterns, readiness, patrol schedules, ammunition storage, or non-public precise coordinates.
+
+Public availability alone does not imply that aggregating a detail is operationally appropriate.
+
+## Identity and Deduplication
+
+The project distinguishes:
+
+- domain identity (`SDA` project ID);
+- backend/store identity (for example Wikibase Q/P IDs);
+- source publisher identity;
+- document/artifact identity;
+- content identity/fingerprint.
+
+These are related but not interchangeable.
+
+Idempotent ingestion must rely on explicit document/content and record semantics rather than assuming identical URLs, backend IDs, or prose titles imply identity.
 
 ## Seed Entities for M0
 
@@ -290,8 +385,10 @@ The M0 prototype should model only enough diversity to stress the ontology:
 2. F-15 family
 3. F-15SA variant
 4. Boeing
-5. PAC-3 MSE or another documented air-defense procurement item
-6. one official procurement event
-7. one publicly announced multinational exercise
+5. one documented air-defense procurement item such as PAC-3 MSE
+6. one official procurement Event
+7. one publicly announced multinational Exercise
 
-These are test fixtures, not a claim that the initial public release must be limited to these entities.
+Where M0 needs to demonstrate contradictory claims independent of real-world evidence, it must use an explicitly **synthetic/non-public test fixture** rather than fabricate a conflict about a real entity.
+
+These records are test fixtures for architecture validation; inclusion in M0 does not automatically authorize public publication.
