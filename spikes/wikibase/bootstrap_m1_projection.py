@@ -22,6 +22,7 @@ def property_defs() -> dict[str, dict[str, str]]:
     return {
         "payload_sha256": {"en": "SDA payload SHA-256", "datatype": "external-id"},
         "record_type": {"en": "SDA record type", "datatype": "string"},
+        "created_at_iso": {"en": "created at ISO timestamp", "datatype": "string"},
         "source_class": {"en": "SDA source class", "datatype": "string"},
         "source_homepage": {"en": "source homepage", "datatype": "url"},
         "publisher_type": {"en": "publisher type", "datatype": "string"},
@@ -40,6 +41,10 @@ def property_defs() -> dict[str, dict[str, str]]:
         "evidence_id": {"en": "SDA evidence ID", "datatype": "external-id"},
         "evidence_link": {"en": "evidence link", "datatype": "wikibase-item"},
         "evidence_role": {"en": "evidence role", "datatype": "string"},
+        "captured_at_iso": {"en": "evidence captured at ISO timestamp", "datatype": "string"},
+        "capture_method": {"en": "evidence capture method", "datatype": "string"},
+        "claim_state": {"en": "SDA claim state", "datatype": "string"},
+        "related_claim_id": {"en": "related SDA claim ID", "datatype": "external-id"},
         "operates_equipment_variant": {
             "en": "operates equipment variant",
             "datatype": "wikibase-item",
