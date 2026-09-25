@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:sda:schema:v0.1:evidence",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/evidence.schema.json",
   "title": "Saudi Defense Atlas Evidence",
   "type": "object",
   "required": ["id", "document_id", "locator"],
