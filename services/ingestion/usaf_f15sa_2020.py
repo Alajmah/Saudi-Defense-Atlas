@@ -1,9 +1,8 @@
 """Bounded deterministic parser for the first M1 official release.
 
-The parser extracts only the fields/evidence required by the M1 slice and a
-canonical article-body fingerprint. It fails closed if required source patterns
-are absent or ambiguous. Output remains candidate evidence; this module has no
-canonical-write capability.
+Phase 1 analyzes source content and produces a canonical article fingerprint plus
+Evidence candidates without assigning project IDs. Phase 2 materializes Evidence
+after the caller has derived the final Document ID. This avoids circular identity.
 """
 
 from __future__ import annotations
@@ -49,6 +48,14 @@ class SourceParseError(ValueError):
 
 
 @dataclass(frozen=True)
+class EvidenceCandidate:
+    label: str
+    selector: str
+    text_sha256: str
+    notes: str
+
+
+@dataclass(frozen=True)
 class ParsedF15SARelease:
     title: str
     published_date: str
@@ -56,7 +63,7 @@ class ParsedF15SARelease:
     delivery_year_derived_from_publication: bool
     canonical_content_sha256: str
     canonical_content_length_bytes: int
-    evidence: tuple[dict, ...]
+    evidence_candidates: tuple[EvidenceCandidate, ...]
 
 
 def _unique_block(
@@ -95,51 +102,34 @@ def _evidence_id(document_id: str, label: str, digest: str) -> str:
     return f"SDA-EVID-{suffix}"
 
 
-def _block_evidence(
-    *,
-    document_id: str,
-    label: str,
-    block: TextBlock,
-    article_relative_index: int,
-    captured_at: str,
-) -> dict:
-    return {
-        "id": _evidence_id(document_id, label, block.sha256),
-        "document_id": document_id,
-        "locator": {
-            "fragment": label,
-            "selector": (
-                f"article-block:{block.tag}:{article_relative_index}:"
-                f"sha256:{block.sha256}"
-            ),
-        },
-        "excerpt": None,
-        "excerpt_sha256": block.sha256,
-        "language": "en",
-        "captured_at": captured_at,
-        "capture_method": "deterministic_parser",
-        "notes": "Text is identified by normalized article-relative block hash; source prose is not copied by default.",
-    }
+def _block_candidate(
+    *, label: str, block: TextBlock, article_relative_index: int
+) -> EvidenceCandidate:
+    return EvidenceCandidate(
+        label=label,
+        selector=(
+            f"article-block:{block.tag}:{article_relative_index}:"
+            f"sha256:{block.sha256}"
+        ),
+        text_sha256=block.sha256,
+        notes=(
+            "Text is identified by normalized article-relative block hash; "
+            "source prose is not copied by default."
+        ),
+    )
 
 
-def _metadata_evidence(
-    *, document_id: str, label: str, matched_text: str, captured_at: str
-) -> dict:
+def _metadata_candidate(*, label: str, matched_text: str) -> EvidenceCandidate:
     digest = text_sha256(matched_text)
-    return {
-        "id": _evidence_id(document_id, label, digest),
-        "document_id": document_id,
-        "locator": {
-            "fragment": label,
-            "selector": f"visible-text-regex:{label}:sha256:{digest}",
-        },
-        "excerpt": None,
-        "excerpt_sha256": digest,
-        "language": "en",
-        "captured_at": captured_at,
-        "capture_method": "deterministic_parser",
-        "notes": "Publication metadata match; exact source text is represented by hash, not stored excerpt.",
-    }
+    return EvidenceCandidate(
+        label=label,
+        selector=f"visible-text-regex:{label}:sha256:{digest}",
+        text_sha256=digest,
+        notes=(
+            "Publication metadata match; exact source text is represented by hash, "
+            "not stored excerpt."
+        ),
+    )
 
 
 def _article_material(
@@ -155,10 +145,8 @@ def _article_material(
     return normalized.encode("utf-8")
 
 
-def parse_release(
-    content: bytes, *, document_id: str, captured_at: str
-) -> ParsedF15SARelease:
-    """Parse the registered F-15SA release into bounded candidate evidence."""
+def analyze_release(content: bytes) -> ParsedF15SARelease:
+    """Analyze registered source bytes without assigning project record IDs."""
     blocks = extract_text_blocks(content)
     visible_text = extract_visible_text(content)
 
@@ -229,33 +217,22 @@ def parse_release(
             "cannot safely derive delivery year from publication context"
         )
 
-    evidence = (
-        _metadata_evidence(
-            document_id=document_id,
-            label="publication-date",
-            matched_text=published_marker,
-            captured_at=captured_at,
-        ),
-        _block_evidence(
-            document_id=document_id,
+    candidates = (
+        _metadata_candidate(label="publication-date", matched_text=published_marker),
+        _block_candidate(
             label="final-delivery",
             block=delivery,
             article_relative_index=article_relative[delivery.index],
-            captured_at=captured_at,
         ),
-        _block_evidence(
-            document_id=document_id,
+        _block_candidate(
             label="variant-and-operator",
             block=variant,
             article_relative_index=article_relative[variant.index],
-            captured_at=captured_at,
         ),
-        _block_evidence(
-            document_id=document_id,
+        _block_candidate(
             label="manufacturer-context",
             block=producer,
             article_relative_index=article_relative[producer.index],
-            captured_at=captured_at,
         ),
     )
 
@@ -266,5 +243,32 @@ def parse_release(
         delivery_year_derived_from_publication=True,
         canonical_content_sha256=canonical_digest,
         canonical_content_length_bytes=len(canonical_material),
-        evidence=evidence,
+        evidence_candidates=candidates,
     )
+
+
+def materialize_evidence(
+    parsed: ParsedF15SARelease, *, document_id: str, captured_at: str
+) -> tuple[dict, ...]:
+    """Assign stable Evidence IDs after the final Document ID is known."""
+    records: list[dict] = []
+    for candidate in parsed.evidence_candidates:
+        records.append(
+            {
+                "id": _evidence_id(
+                    document_id, candidate.label, candidate.text_sha256
+                ),
+                "document_id": document_id,
+                "locator": {
+                    "fragment": candidate.label,
+                    "selector": candidate.selector,
+                },
+                "excerpt": None,
+                "excerpt_sha256": candidate.text_sha256,
+                "language": "en",
+                "captured_at": captured_at,
+                "capture_method": "deterministic_parser",
+                "notes": candidate.notes,
+            }
+        )
+    return tuple(records)
