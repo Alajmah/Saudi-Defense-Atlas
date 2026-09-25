@@ -118,6 +118,7 @@
       "instance": {
         "id": "TEST-DECISION-001",
         "proposal_id": "TEST-PROPOSAL-001",
+        "proposal_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "decision": "approve",
         "decided_at": "2026-09-25T12:20:00Z",
         "decided_by": {"kind": "human", "id": "editor-test"},
@@ -277,6 +278,17 @@
             }
           }
         ]
+      }
+    },
+    {
+      "name": "review decision without proposal hash",
+      "schema": "review-decision.schema.json",
+      "instance": {
+        "id": "BAD-DECISION-001",
+        "proposal_id": "TEST-PROPOSAL-001",
+        "decision": "approve",
+        "decided_at": "2026-09-25T13:00:00Z",
+        "decided_by": {"kind": "human", "id": "editor-test"}
       }
     }
   ]
