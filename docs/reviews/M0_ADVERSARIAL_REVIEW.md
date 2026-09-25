@@ -99,13 +99,13 @@ Approval now requires an admission-permitting policy outcome. A dedicated negati
 
 **Provenance:** second/adversarial review finding.
 
-**Finding:** `MAPPING.md` stated that only approved project revisions may reach Wikibase, but `seed.py` necessarily writes directly to construct the representation test and no adapter proof yet demonstrated the governance gate.
+**Finding:** The initial mapping described a governance gate, but `seed.py` necessarily writes directly to construct the representation test and no adapter proof yet demonstrated that an ordinary mutation could be held behind the project proposal/review authority boundary.
 
 **Why it mattered:** Documentation alone was insufficient evidence that the backend could remain subordinate to the project authority contract.
 
 **Resolution:** CONFIRMED; implementation added, runtime verification pending.
 
-`approved-demo-bundle.json` + `apply_approved_demo.py` now exercise an AMBER synthetic proposal that must pass project schemas and cross-record human-review rules before the first backend API call. The output project Revision carries the backend revision/statement identifiers only as receipts.
+`approved-demo-bundle.json` + `apply_approved_demo.py` now exercise an AMBER synthetic proposal that must pass project schemas, exact proposal-hash binding, and cross-record human-review rules before the first backend API call. The post-write project Revision carries backend revision/statement identifiers only as receipts.
 
 No real Saudi-defense record is modified by this adapter test.
 
@@ -167,6 +167,26 @@ Error paths are normalized to tuples of strings for deterministic sorting.
 
 No APR/ADR verification claim may be made from the compose file alone.
 
+---
+
+### R-11 — Mapping inverted the proposal/decision/revision time boundary
+
+**Provenance:** continued adversarial review finding.
+
+**Finding:** `MAPPING.md` stated that a project Revision had to reference the exact proposal and decision before the adapter could execute a backend write. The implemented adapter instead creates the project Revision after receiving backend identifiers, which is the only coherent ordering if those identifiers are receipts for the applied effect.
+
+**Why it mattered:** The documentation described an impossible precondition and blurred authorization evidence with post-effect audit evidence.
+
+**Resolution:** CONFIRMED and fixed.
+
+The mapping now defines:
+
+- pre-write authority = admission-permitting proposal + approving decision + reviewer authority + exact proposal hash binding;
+- backend mutation = execution attempt under that authority;
+- post-write audit = project Revision referencing the proposal/decision and carrying backend identifiers as receipts.
+
+The mapping also explicitly states that M0 does **not** prove production-grade exactly-once mutation or reconciliation of interrupted/ambiguous external effects.
+
 ## Clean areas after second pass
 
 No fundamental issue was found in these reviewed areas:
@@ -178,7 +198,7 @@ No fundamental issue was found in these reviewed areas:
 - PAC-3 MSE test semantics preserve approval/notification versus contract/delivery;
 - negative schema/workflow fixtures exercise rejection paths rather than only happy paths;
 - host ports in the local spike are loopback-bound;
-- production security, HA, backup, scaling, and deployment claims remain outside the M0 claim ceiling.
+- production security, HA, backup, scaling, deployment, and exactly-once effect claims remain outside the M0 claim ceiling.
 
 ## Evidence state at time of this review
 
