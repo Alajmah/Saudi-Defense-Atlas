@@ -14,7 +14,7 @@ It is not a real-time operational-intelligence or force-tracking product.
 
 ## Canonical truth objects
 
-The project currently recognizes these domain truth objects:
+The project recognizes these domain/governance truth objects:
 
 - Entity
 - Claim
@@ -27,7 +27,7 @@ The project currently recognizes these domain truth objects:
 - ReviewDecision
 - Revision
 
-The exact storage mechanism remains unresolved until M0 completes.
+Wikibase is the accepted M1 knowledge-core implementation, but these objects remain project-native semantics rather than Wikibase-native authority.
 
 ## Authority owners
 
@@ -35,11 +35,12 @@ The exact storage mechanism remains unresolved until M0 completes.
 |---|---|
 | Product scope | Project owner + accepted project roadmap |
 | Domain semantics | Accepted architecture/ontology decisions |
-| Canonical mutation | `ChangeProposal -> ReviewDecision -> Revision` contract; production authorization/persistence implementation remains future work |
+| Canonical mutation | `ChangeProposal -> ReviewDecision -> Revision`; adapter executes only an exactly authorized proposal |
 | AI output | Proposal authority only unless a field is explicitly GREEN in policy |
 | Publication of AMBER facts | Human editorial approval |
 | Restricted operational detail | Exclusion/restriction policy; no autonomous publication |
 | Architecture promotion | Explicit ADR/register decision tied to project authority |
+| Backend identity/effect receipts | Implementation metadata only; never canonical domain authority |
 
 ## Constitutional invariants
 
@@ -55,15 +56,17 @@ The exact storage mechanism remains unresolved until M0 completes.
 10. **Public Availability ≠ Operational Suitability** — publicly accessible material may still be excluded when aggregation materially increases operational risk.
 11. **Store Identity ≠ Domain Identity** — backend-native IDs must not silently define public/canonical identity.
 12. **Procurement Approval ≠ Contract ≠ Delivery ≠ Operational Service** — these remain distinct facts/events.
+13. **Authorization ≠ Effect ≠ Revision Evidence** — an approved proposal authorizes a backend attempt; backend receipts describe observed effects; the project Revision records the result.
 
 ## Claim ceiling
 
 A successful technical test establishes only the property tested in the tested environment. In particular:
 
-- a Wikibase spike can demonstrate representational/API suitability; it does not by itself establish production readiness;
+- the verified Wikibase M0 spike establishes representational/query/API suitability for the knowledge-core role; it does not establish production readiness;
 - successful structured extraction does not establish factual correctness without evidence verification;
 - a source-class label does not prove a particular claim;
-- a successful write does not prove that governance requirements were satisfied;
+- a successful write does not by itself prove governance requirements were satisfied;
+- successful M0 mutation gating does not prove exactly-once behavior or ambiguous-effect recovery;
 - public-source discovery does not justify operational inference beyond the source and publication policy.
 
 ## Status vocabulary
@@ -84,12 +87,14 @@ A successful technical test establishes only the property tested in the tested e
 
 | ID | Pattern | Pattern status | Implementation | Planning |
 |---|---|---|---|---|
-| APR-001 | Claim/evidence canonical knowledge model | ACCEPTED | LINKED | current-plan-authorized |
-| APR-002 | Review-gated canonical mutation | ACCEPTED | IN-TRIAL | current-plan-authorized |
-| APR-003 | Wikibase as knowledge-core implementation | TRIAL-AUTHORIZED | IN-TRIAL | current-plan-authorized |
+| APR-001 | Claim/evidence canonical knowledge model | ACCEPTED | VERIFIED | current-plan-authorized |
+| APR-002 | Review-gated canonical mutation | ACCEPTED | VERIFIED | current-plan-authorized |
+| APR-003 | Wikibase as knowledge-core implementation | ACCEPTED | VERIFIED | current-plan-authorized |
 | APR-004 | PostgreSQL claim/evidence knowledge core | DEFERRED | NOT-LINKED | future-plan-candidate |
 | APR-005 | Typed structured AI proposals | ACCEPTED | LINKED | current-plan-authorized |
 | APR-006 | Deterministic-before-generative processing | ACCEPTED | LINKED | current-plan-authorized |
+
+`VERIFIED` above is bounded to the M0 contracts and evidence. It is not a production-qualification label.
 
 ---
 
@@ -114,13 +119,15 @@ A successful technical test establishes only the property tested in the tested e
 **Decision:**
 
 - pattern_status: ACCEPTED
-- implementation_status: LINKED
+- implementation_status: VERIFIED for M0 schema/representation mechanics
 - planning_disposition: current-plan-authorized
-- authority: ADR-0001 / foundation roadmap
+- authority: ADR-0001 / ADR-0002 / foundation roadmap
 
-**Implementation links:** `schemas/v0.1/`, `scripts/validate_schemas.py`, `tests/fixtures/schema-fixtures.json`.
+**Implementation links:** `schemas/v0.1/`, `scripts/validate_schemas.py`, `tests/fixtures/schema-fixtures.json`, `spikes/wikibase/`.
 
-**Verification required:** M0 schemas and knowledge-core spike; M1 source-to-page vertical slice.
+**Verification evidence:** schema-validation run `36178033709`; Wikibase M0 run `36178040438`; artifact `10883261546`.
+
+**Remaining verification:** M1 source-to-page vertical slice and production operational properties.
 
 ---
 
@@ -130,22 +137,24 @@ A successful technical test establishes only the property tested in the tested e
 
 **Invariant:** Candidate mutation and canonical mutation are separate states.
 
-**Mechanism:** `ChangeProposal -> ReviewDecision -> Revision`, with GREEN automation explicitly policy-authorized and AMBER requiring human approval.
+**Mechanism:** `ChangeProposal -> ReviewDecision -> backend effect -> Revision`, with GREEN automation explicitly policy-authorized and AMBER requiring human approval. The decision binds to the exact proposal payload hash.
 
-**Failure modes:** direct model writes; hidden overwrites; ambiguous reviewer authority; rejected proposals becoming facts.
+**Failure modes:** direct model writes; hidden overwrites; ambiguous reviewer authority; rejected proposals becoming facts; stale decision applied to a modified proposal; ambiguous external effect blindly retried.
 
-**Provenance:** project-native; `docs/AI_GOVERNANCE.md`, `docs/SOURCE_POLICY.md`, first-pass finding F-01.
+**Provenance:** project-native; `docs/AI_GOVERNANCE.md`, `docs/SOURCE_POLICY.md`, first-pass finding F-01, M0 adversarial findings.
 
 **Decision:**
 
 - pattern_status: ACCEPTED
-- implementation_status: IN-TRIAL
+- implementation_status: VERIFIED for the bounded M0 authorization/receipt contract
 - planning_disposition: current-plan-authorized
 - authority: M0 acceptance criterion 7 and AI governance policy
 
 **Implementation links:** `schemas/v0.1/change-proposal.schema.json`, `schemas/v0.1/review-decision.schema.json`, `schemas/v0.1/revision.schema.json`, `scripts/validate_workflow.py`, `spikes/wikibase/apply_approved_demo.py`.
 
-**Verification required:** demonstrate a proposed write that remains non-canonical until a valid review decision creates an auditable revision.
+**Verification evidence:** workflow fixtures including proposal-hash and temporal-order checks; current-head schema validation; approved synthetic adapter execution in Wikibase run `36178040438`.
+
+**Claim ceiling:** verified ordering and authority binding for the tested local adapter only. Production exactly-once/idempotency/reconciliation remains unverified and required in M1.
 
 ---
 
@@ -153,36 +162,38 @@ A successful technical test establishes only the property tested in the tested e
 
 **Problem:** The project needs multilingual entities, referenced statements, qualifiers, revisions, and query/API support without building all knowledge infrastructure from scratch.
 
-**Invariant:** Any selected store must preserve the project-native claim/evidence/revision semantics and must not own governance authority.
+**Invariant:** The selected store preserves the project-native claim/evidence/revision semantics and does not own governance authority.
 
-**Mechanism under trial:** Wikibase Suite and its APIs/query service.
+**Mechanism:** Wikibase + Action API + WDQS behind a project-owned adapter boundary.
 
-**Benefits hypothesized:** mature multilingual entity model, qualifiers/references, revision history, query ecosystem.
+**Benefits observed:** native multilingual entity model, qualifiers/references, revision history, query support, API write/read support, coexistence of conflicting claims.
 
-**Liabilities to test:** store-native IDs, statement model ergonomics, proposal workflow integration, operational complexity, query/API suitability, custom confidence/evidence semantics.
+**Liabilities retained:** operational complexity, separate production security/backup/upgrade requirements, projection of richer SDA evidence into Wikibase references, eventual-consistency behavior of WDQS.
 
-**Failure modes:** forcing project ontology into awkward store constraints; bypassing proposal/review boundary; excessive adapter complexity; treating a representational demo as production qualification.
+**Failure modes to continue testing:** backend upgrade friction; query lag; adapter bypass; Q/P identity leakage; ambiguous external effects; excessive operational burden at production scale.
 
-**Forcing function:** M0 must choose a knowledge-core implementation before M1.
+**Forcing function:** M1 requires a selected knowledge-core implementation.
 
 **Decision:**
 
-- pattern_status: TRIAL-AUTHORIZED
-- implementation_status: IN-TRIAL
+- pattern_status: ACCEPTED
+- implementation_status: VERIFIED for the bounded M0 knowledge-core contract
 - planning_disposition: current-plan-authorized
-- authority: `docs/ROADMAP.md` M0 Wikibase Spike
+- authority: `docs/adr/ADR-0002-knowledge-core.md`
 
 **Implementation links:** `spikes/wikibase/`, `.github/workflows/wikibase-spike.yml`, `docs/adr/ADR-0002-knowledge-core.md`.
 
-**Claim ceiling:** successful M0 can justify architectural adoption for the canonical knowledge role; it does not establish production scaling, HA, backup, or operational readiness.
+**Verification evidence:** clean current-head run `36178040438` / job `108213344752`; artifact `10883261546`.
+
+**Claim ceiling:** suitable to proceed as the M1 canonical knowledge core. This does not establish production scaling, security, HA, backup/recovery, mutation reconciliation, or long-term operational qualification.
 
 ---
 
 ## APR-004 — PostgreSQL claim/evidence knowledge core
 
-**Problem:** The project requires a fallback if Wikibase imposes structural or workflow friction.
+**Problem:** The project requires a fallback if later evidence shows Wikibase imposes structural or operational friction that violates project invariants.
 
-**Invariant:** The fallback must preserve the same project-native domain semantics.
+**Invariant:** The fallback preserves the same project-native domain semantics.
 
 **Mechanism:** custom PostgreSQL schema, potentially with JSONB and relational claim/evidence tables.
 
@@ -191,9 +202,9 @@ A successful technical test establishes only the property tested in the tested e
 - pattern_status: DEFERRED
 - implementation_status: NOT-LINKED
 - planning_disposition: future-plan-candidate
-- authority: `docs/ARCHITECTURE.md` fallback decision gate
+- authority: ADR-0002 fallback clause
 
-**Forcing function for promotion:** material Wikibase failure against a critical M0 acceptance criterion or unacceptable complexity demonstrated by the spike.
+**Forcing function for promotion:** material Wikibase failure against a critical project invariant or unacceptable complexity demonstrated by M1/later evidence.
 
 ---
 
@@ -214,7 +225,7 @@ A successful technical test establishes only the property tested in the tested e
 
 **Implementation links:** `schemas/v0.1/`, `scripts/validate_schemas.py`, `tests/fixtures/schema-fixtures.json`.
 
-**Verification required:** schema rejects malformed/unsupported candidate objects and permits explicit unknowns; M1 must prove real model extraction crosses the same boundary.
+**Verification status:** schemas/negative fixtures are verified, but this pattern remains LINKED until M1 proves actual model extraction crosses the same boundary.
 
 ---
 
@@ -222,7 +233,7 @@ A successful technical test establishes only the property tested in the tested e
 
 **Problem:** LLMs add cost and nondeterminism when exact parsing/identity rules are available.
 
-**Invariant:** Deterministic mechanisms should own exact transformations; generative models should be used where semantic ambiguity warrants them.
+**Invariant:** Deterministic mechanisms own exact transformations; generative models are used where semantic ambiguity warrants them.
 
 **Decision:**
 
@@ -231,6 +242,6 @@ A successful technical test establishes only the property tested in the tested e
 - planning_disposition: current-plan-authorized
 - authority: ADR-0001 design rules
 
-**Implementation links:** content hashing/identity schemas, deterministic JSON Schema validators, workflow policy validator, Wikibase adapter gating.
+**Implementation links:** deterministic JSON Schema validators, proposal hashing, workflow policy validator, Wikibase adapter gating.
 
 **Verification required:** M1 pipeline demonstrates deterministic hashing/deduplication and typed validation around actual model extraction.
