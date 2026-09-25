@@ -1,0 +1,166 @@
+{
+  "valid": [
+    {
+      "name": "green system approval may produce revision",
+      "proposal": {
+        "id": "P-GREEN-001",
+        "risk_class": "GREEN",
+        "policy_outcome": "auto_admit_allowed"
+      },
+      "decision": {
+        "id": "D-GREEN-001",
+        "proposal_id": "P-GREEN-001",
+        "decision": "approve",
+        "decided_by": {"kind": "system", "id": "policy-engine"}
+      },
+      "revision": {
+        "id": "R-GREEN-001",
+        "proposal_id": "P-GREEN-001",
+        "decision_id": "D-GREEN-001"
+      }
+    },
+    {
+      "name": "amber human approval may produce revision",
+      "proposal": {
+        "id": "P-AMBER-001",
+        "risk_class": "AMBER",
+        "policy_outcome": "human_review_required"
+      },
+      "decision": {
+        "id": "D-AMBER-001",
+        "proposal_id": "P-AMBER-001",
+        "decision": "approve",
+        "decided_by": {"kind": "human", "id": "editor"}
+      },
+      "revision": {
+        "id": "R-AMBER-001",
+        "proposal_id": "P-AMBER-001",
+        "decision_id": "D-AMBER-001"
+      }
+    },
+    {
+      "name": "amber rejection creates no revision",
+      "proposal": {
+        "id": "P-AMBER-002",
+        "risk_class": "AMBER",
+        "policy_outcome": "human_review_required"
+      },
+      "decision": {
+        "id": "D-AMBER-002",
+        "proposal_id": "P-AMBER-002",
+        "decision": "reject",
+        "decided_by": {"kind": "human", "id": "editor"}
+      },
+      "revision": null
+    },
+    {
+      "name": "red proposal remains blocked",
+      "proposal": {
+        "id": "P-RED-001",
+        "risk_class": "RED",
+        "policy_outcome": "blocked"
+      },
+      "decision": null,
+      "revision": null
+    }
+  ],
+  "invalid": [
+    {
+      "name": "amber system approval forbidden",
+      "proposal": {
+        "id": "P-BAD-001",
+        "risk_class": "AMBER",
+        "policy_outcome": "human_review_required"
+      },
+      "decision": {
+        "id": "D-BAD-001",
+        "proposal_id": "P-BAD-001",
+        "decision": "approve",
+        "decided_by": {"kind": "system", "id": "policy-engine"}
+      },
+      "revision": null
+    },
+    {
+      "name": "red human approval forbidden",
+      "proposal": {
+        "id": "P-BAD-002",
+        "risk_class": "RED",
+        "policy_outcome": "blocked"
+      },
+      "decision": {
+        "id": "D-BAD-002",
+        "proposal_id": "P-BAD-002",
+        "decision": "approve",
+        "decided_by": {"kind": "human", "id": "editor"}
+      },
+      "revision": null
+    },
+    {
+      "name": "rejected proposal cannot produce revision",
+      "proposal": {
+        "id": "P-BAD-003",
+        "risk_class": "AMBER",
+        "policy_outcome": "human_review_required"
+      },
+      "decision": {
+        "id": "D-BAD-003",
+        "proposal_id": "P-BAD-003",
+        "decision": "reject",
+        "decided_by": {"kind": "human", "id": "editor"}
+      },
+      "revision": {
+        "id": "R-BAD-003",
+        "proposal_id": "P-BAD-003",
+        "decision_id": "D-BAD-003"
+      }
+    },
+    {
+      "name": "decision must reference exact proposal",
+      "proposal": {
+        "id": "P-BAD-004",
+        "risk_class": "AMBER",
+        "policy_outcome": "human_review_required"
+      },
+      "decision": {
+        "id": "D-BAD-004",
+        "proposal_id": "P-OTHER",
+        "decision": "approve",
+        "decided_by": {"kind": "human", "id": "editor"}
+      },
+      "revision": null
+    },
+    {
+      "name": "revision must reference approval",
+      "proposal": {
+        "id": "P-BAD-005",
+        "risk_class": "GREEN",
+        "policy_outcome": "auto_admit_allowed"
+      },
+      "decision": {
+        "id": "D-BAD-005",
+        "proposal_id": "P-BAD-005",
+        "decision": "approve",
+        "decided_by": {"kind": "system", "id": "policy-engine"}
+      },
+      "revision": {
+        "id": "R-BAD-005",
+        "proposal_id": "P-BAD-005",
+        "decision_id": "D-OTHER"
+      }
+    },
+    {
+      "name": "blocked proposal cannot produce revision",
+      "proposal": {
+        "id": "P-BAD-006",
+        "risk_class": "RED",
+        "policy_outcome": "blocked"
+      },
+      "decision": null,
+      "revision": {
+        "id": "R-BAD-006",
+        "proposal_id": "P-BAD-006",
+        "decision_id": "D-NONE"
+      }
+    }
+  ]
+}
