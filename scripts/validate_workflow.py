@@ -10,6 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +27,11 @@ def canonical_sha256(payload: dict) -> str:
         payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
     return hashlib.sha256(canonical).hexdigest()
+
+
+def parse_datetime(value: str) -> datetime:
+    """Parse schema-valid RFC3339 timestamps for cross-record ordering checks."""
+    return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
 def validate_case(case: dict) -> list[str]:
@@ -72,6 +78,12 @@ def validate_case(case: dict) -> list[str]:
         if action in {"reject", "return_for_revision"} and revision is not None:
             errors.append(f"{action} decision cannot create a canonical revision")
 
+        proposal_created = proposal.get("created_at")
+        decision_time = decision.get("decided_at")
+        if proposal_created and decision_time:
+            if parse_datetime(decision_time) < parse_datetime(proposal_created):
+                errors.append("decision cannot predate the proposal")
+
     if revision is not None:
         if outcome not in {"auto_admit_allowed", "human_review_required"}:
             errors.append("canonical revision requires a policy outcome that permits admission")
@@ -84,6 +96,12 @@ def validate_case(case: dict) -> list[str]:
                 errors.append("revision decision_id must reference the approving decision")
             if revision["proposal_id"] != proposal["id"]:
                 errors.append("revision proposal_id must reference the reviewed proposal")
+
+            decision_time = decision.get("decided_at")
+            revision_time = revision.get("applied_at")
+            if decision_time and revision_time:
+                if parse_datetime(revision_time) < parse_datetime(decision_time):
+                    errors.append("canonical revision cannot predate its approving decision")
 
     return errors
 
