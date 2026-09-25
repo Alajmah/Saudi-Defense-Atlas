@@ -225,7 +225,7 @@ def analyze_release(content: bytes) -> ParsedF15SARelease:
             article_relative_index=article_relative[delivery.index],
         ),
         _block_candidate(
-            label="variant-and-operator",
+            label="variant-context",
             block=variant,
             article_relative_index=article_relative[variant.index],
         ),

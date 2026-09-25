@@ -28,7 +28,7 @@ from services.intelligence.f15sa_proposal import (  # noqa: E402
     ResolvedF15SAEntities,
     build_f15sa_proposal,
 )
-from m1_backend import WikibaseM1Backend  # noqa: E402
+from m1_backend import PROJECTION_VERSION, WikibaseM1Backend  # noqa: E402
 from m1_wikibase_api import M1WikibaseAPI  # noqa: E402
 
 BASE_STATE = SPIKE_DIR / "state.generated.json"
@@ -45,6 +45,7 @@ def fixture_html() -> bytes:
       <p>Final F-15SA aircraft were delivered Dec. 10 to the Royal Saudi Air Force.</p>
       <p>The Boeing-produced aircraft represented the last delivery in this synthetic fixture.</p>
       <p>The F-15SA is an advanced version of the F-15S and is associated with the Royal Saudi Air Force.</p>
+      <p>This article fixture also mentions associated spares, simulators, training, technical documentation and program support.</p>
       <p>Featured news fixture</p>
     </body></html>
     """
@@ -66,6 +67,13 @@ def qualifier_values(statement: dict[str, Any], property_id: str) -> list[Any]:
     return [
         snak.get("datavalue", {}).get("value")
         for snak in statement.get("qualifiers", {}).get(property_id, [])
+    ]
+
+
+def main_values(entity: dict[str, Any], property_id: str) -> list[Any]:
+    return [
+        statement.get("mainsnak", {}).get("datavalue", {}).get("value")
+        for statement in entity.get("claims", {}).get(property_id, [])
     ]
 
 
@@ -197,14 +205,15 @@ def main() -> int:
         if mutation["resource_type"] == "event"
     )
 
-    rsaf_qid = backend._resolve_domain_item(claim["subject_id"])
-    rsaf = api.get_entity(rsaf_qid)
+    claim_subject_qid = backend._resolve_domain_item(claim["subject_id"])
+    claim_subject = api.get_entity(claim_subject_qid)
+    claim_property = backend._claim_property(claim)
     claim_statements = []
-    for statement in rsaf.get("claims", {}).get(props["operates_equipment_variant"], []):
+    for statement in claim_subject.get("claims", {}).get(claim_property, []):
         if claim["id"] in qualifier_values(statement, base_props["claim_id"]):
             claim_statements.append(statement)
     if len(claim_statements) != 1:
-        raise AssertionError("canonical operator Claim was not uniquely readable")
+        raise AssertionError("canonical manufacturer Claim was not uniquely readable")
     claim_statement = claim_statements[0]
     if len(claim_statement.get("references", [])) != 1:
         raise AssertionError("canonical Claim did not retain exactly one Evidence reference")
@@ -215,6 +224,12 @@ def main() -> int:
         raise AssertionError("Claim reference lost SDA Document ID")
     if props["evidence_selector"] not in reference_snaks:
         raise AssertionError("Claim reference lost Evidence selector")
+    if qualifier_values(claim_statement, props["claim_state"]) != ["active"]:
+        raise AssertionError("Claim projection lost claim_state")
+    if qualifier_values(claim_statement, props["created_at_iso"]) != [claim["created_at"]]:
+        raise AssertionError("Claim projection lost created_at")
+    if qualifier_values(claim_statement, props["projection_version"]) != [PROJECTION_VERSION]:
+        raise AssertionError("Claim projection version is missing or changed")
 
     event_qid = backend._resolve_domain_item(event["id"])
     event_item = api.get_entity(event_qid)
@@ -227,8 +242,29 @@ def main() -> int:
         for statement in participant_statements
         for value in qualifier_values(statement, props["participant_role"])
     )
-    if participant_roles != ["operator", "supplier"]:
+    if participant_roles != ["manufacturer", "recipient"]:
         raise AssertionError(f"Event participant roles changed: {participant_roles}")
+    if main_values(event_item, props["related_claim_id"]) != event["related_claim_ids"]:
+        raise AssertionError("Event projection lost related Claim IDs")
+    if main_values(event_item, props["created_at_iso"]) != [event["created_at"]]:
+        raise AssertionError("Event projection lost created_at")
+    if main_values(event_item, props["projection_version"]) != [PROJECTION_VERSION]:
+        raise AssertionError("Event projection version is missing or changed")
+
+    evidence_payload = next(
+        mutation["payload"]
+        for mutation in proposal["mutations"]
+        if mutation["resource_type"] == "evidence"
+        and mutation["payload"].get("locator", {}).get("fragment") == "final-delivery"
+    )
+    evidence_qid = backend._resolve_domain_item(evidence_payload["id"])
+    evidence_item = api.get_entity(evidence_qid)
+    if main_values(evidence_item, props["captured_at_iso"]) != [evidence_payload["captured_at"]]:
+        raise AssertionError("Evidence projection lost captured_at")
+    if main_values(evidence_item, props["capture_method"]) != [evidence_payload["capture_method"]]:
+        raise AssertionError("Evidence projection lost capture_method")
+    if main_values(evidence_item, props["projection_version"]) != [PROJECTION_VERSION]:
+        raise AssertionError("Evidence projection version is missing or changed")
 
     item_mappings = {}
     for mutation in proposal["mutations"]:
@@ -255,20 +291,25 @@ def main() -> int:
         "item_mappings": item_mappings,
         "claim": {
             "id": claim["id"],
-            "subject_qid": rsaf_qid,
+            "subject_qid": claim_subject_qid,
+            "predicate": claim["predicate_id"],
             "reference_evidence_id_preserved": True,
             "reference_document_id_preserved": True,
             "reference_selector_preserved": True,
+            "projection_version": PROJECTION_VERSION,
         },
         "event": {
             "id": event["id"],
             "qid": event_qid,
             "evidence_link_count": len(evidence_links),
             "participant_roles": participant_roles,
+            "related_claim_ids_preserved": True,
+            "projection_version": PROJECTION_VERSION,
         },
         "claim_ceiling": (
             "This verifies the bounded M1 adapter, exact replay/idempotency semantics, "
-            "and project Revision construction in the local stack; it is not production qualification."
+            "projection completeness markers, and project Revision construction in the "
+            "local stack; it is not production or concurrent-writer qualification."
         ),
     }
     OUTPUT.write_text(json.dumps(output, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")

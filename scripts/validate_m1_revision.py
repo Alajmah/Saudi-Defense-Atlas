@@ -129,6 +129,20 @@ def main() -> int:
         failures,
     )
 
+    same_revision = build_revision(
+        proposal=proposal,
+        decision=decision,
+        execution=execution,
+        backend_name=backend.name,
+        applied_at="2026-01-01T00:02:00Z",
+        adapter_id="test-revision-adapter",
+    )
+    expect(
+        same_revision == revision,
+        "identical Revision content must derive identical project Revision identity",
+        failures,
+    )
+
     replay = execute_authorized_proposal(
         proposal=proposal, decision=decision, backend=backend
     )
@@ -141,15 +155,13 @@ def main() -> int:
         adapter_id="test-revision-adapter",
     )
     expect(
-        replay_revision["id"] == revision["id"],
-        "same proposal/decision must derive the same project Revision identity",
+        replay_revision["id"] != revision["id"],
+        "different Revision content must not reuse the same project Revision identity",
         failures,
     )
 
     unknown_execution = execute_authorized_proposal(
-        proposal=proposal,
-        decision=decision,
-        backend=EquivalentBackend(unknown=True),
+        proposal=proposal, decision=decision, backend=EquivalentBackend(unknown=True),
     )
     try:
         build_revision(
@@ -172,7 +184,7 @@ def main() -> int:
 
     print(
         "Validated schema-valid project Revision construction after full convergence, "
-        "stable Revision identity on replay, and rejection of effect_unknown execution."
+        "content-addressed Revision identity, and rejection of effect_unknown execution."
     )
     return 0
 

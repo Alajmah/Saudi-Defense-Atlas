@@ -27,14 +27,14 @@ The source is classified **A — Primary / Official** under `docs/SOURCE_POLICY.
 The document is useful without requiring sensitive operational detail. It can support a compact but meaningful graph around:
 
 - F-15SA equipment variant;
-- F-15 family relationship;
-- Royal Saudi Air Force operator relationship;
-- Boeing manufacturer context;
+- F-15 family relationship context;
+- Royal Saudi Air Force delivery-recipient relationship;
+- Boeing manufacturer relationship;
 - dated final-delivery event;
 - source/document/evidence provenance;
 - Arabic/English public projection.
 
-The vertical slice must not infer current aircraft location, readiness, sortie generation, unit disposition, or other operational state beyond what approved evidence explicitly establishes.
+The vertical slice must not infer current aircraft location, readiness, sortie generation, unit disposition, a timeless operator relationship, or other operational state beyond what approved evidence explicitly establishes.
 
 ## Source-supported facts targeted for extraction
 
@@ -42,9 +42,11 @@ The implementation may propose only facts supported by bounded evidence from the
 
 1. the document was published on 2020-12-11;
 2. it reports final F-15SA aircraft delivery on 2020-12-10;
-3. the recipient/operator named in the release is the Royal Saudi Air Force;
+3. the recipient named in the delivery statement is the Royal Saudi Air Force;
 4. it describes F-15SA as an advanced version of the F-15S;
 5. it identifies Boeing as producer of the delivered aircraft.
+
+The first canonical Claim is intentionally limited to the directly stated Boeing/F-15SA manufacturer relationship. The F-15SA operator relationship is not admitted from the sentence stating that F-15SA is an advanced version of the F-15S currently operated by the RSAF; that grammar directly attributes operation to F-15S, not F-15SA. The delivery Event separately records RSAF as recipient.
 
 These are candidate claims/events until admitted through the project governance path.
 
@@ -87,7 +89,10 @@ Before generalizing Wikibase mutation:
 - distinguish `not_attempted`, `applied`, `failed`, and `effect_unknown`;
 - never blindly retry `effect_unknown`;
 - reconcile by reading backend state using SDA claim/entity identifiers;
+- include an explicit projection version in equivalence checks so an older/incomplete projection cannot pass on payload hash alone;
 - record backend receipts only after an authorized attempt.
+
+The current M1 runtime proof is single-writer only. Concurrent canonical writers are outside the present qualification boundary and require an explicit coordination/uniqueness mechanism before production mutation is authorized.
 
 ### Increment E — public projection
 
@@ -112,10 +117,12 @@ The M1 vertical slice will be reviewed across:
 - exact proposal-hash binding;
 - backend idempotency and ambiguous effects;
 - Wikibase adapter/domain identity separation;
+- projection-version and read-field completeness;
 - bilingual rendering from one canonical record set;
 - citation completeness;
 - restricted operational-detail filtering;
-- test reproducibility and network-independent CI fixtures.
+- test reproducibility and network-independent CI fixtures;
+- concurrent-writer behavior as a separate, currently unqualified boundary.
 
 ## Initial claim ceiling
 

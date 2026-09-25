@@ -131,13 +131,23 @@ def main() -> int:
     if claim_payloads:
         claim = claim_payloads[0]
         expect(
-            claim["predicate_id"] == "organization.operates.equipment_variant",
-            "slice must not broaden beyond the supported operator relationship",
+            claim["predicate_id"] == "manufacturer.manufactures.equipment",
+            "slice Claim must stay within the directly supported manufacturer relationship",
+            failures,
+        )
+        expect(
+            claim["subject_id"] == resolved.boeing_id,
+            "manufacturer Claim subject must be Boeing",
+            failures,
+        )
+        expect(
+            claim["value"] == {"kind": "entity", "entity_id": resolved.f15sa_id},
+            "manufacturer Claim value must be F-15SA",
             failures,
         )
         expect(
             claim["validity"]["point_in_time"]["value"] == "2020-12-11",
-            "operator claim must be time-qualified to the source publication date",
+            "manufacturer Claim must be time-qualified to the source publication date",
             failures,
         )
         expect(
@@ -158,13 +168,13 @@ def main() -> int:
             (item["entity_id"], item["role"]) for item in event["participants"]
         }
         expect(
-            (resolved.rsaf_id, "operator") in participant_roles,
-            "delivery Event must retain RSAF operator role",
+            (resolved.rsaf_id, "recipient") in participant_roles,
+            "delivery Event must retain RSAF recipient role",
             failures,
         )
         expect(
-            (resolved.boeing_id, "supplier") in participant_roles,
-            "delivery Event must retain Boeing supplier role",
+            (resolved.boeing_id, "manufacturer") in participant_roles,
+            "delivery Event must retain Boeing manufacturer role",
             failures,
         )
         expect(
@@ -173,8 +183,14 @@ def main() -> int:
             "event notes must not imply current inventory",
             failures,
         )
+        expect(
+            "operator relationship" in (event.get("notes") or "").casefold(),
+            "event notes must explicitly reject a timeless operator inference",
+            failures,
+        )
 
     forbidden_predicates = {
+        "organization.operates.equipment_variant",
         "inventory.quantity",
         "procurement.quantity",
         "equipment.service_state",
@@ -185,7 +201,7 @@ def main() -> int:
     }
     expect(
         not (observed_predicates & forbidden_predicates),
-        "first slice inferred quantity/service/procurement-state claims",
+        "first slice inferred operator/quantity/service/procurement-state claims",
         failures,
     )
 
@@ -253,7 +269,7 @@ def main() -> int:
 
     print(
         "Validated typed AMBER proposal generation, resolved-identity requirement, "
-        "bounded Claim/Event scope, Evidence closure, and deterministic output."
+        "bounded manufacturer Claim/delivery Event scope, Evidence closure, and deterministic output."
     )
     return 0
 

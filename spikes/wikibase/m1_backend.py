@@ -25,6 +25,8 @@ from services.governance.proposal_auth import canonical_sha256  # noqa: E402
 from wikibase_api import WikibaseAPIError, item_value, time_value  # noqa: E402
 from m1_wikibase_api import M1WikibaseAPI  # noqa: E402
 
+PROJECTION_VERSION = "m1-v1"
+
 
 class WikibaseM1Backend:
     name = "wikibase"
@@ -91,24 +93,36 @@ class WikibaseM1Backend:
             )
         qid = matches[0]
         entity = self.api.get_entity(qid)
-        statements = entity.get("claims", {}).get(self.props["payload_sha256"], [])
-        hashes = [self._main_value(statement) for statement in statements]
+        hashes = [
+            self._main_value(statement)
+            for statement in entity.get("claims", {}).get(self.props["payload_sha256"], [])
+        ]
+        versions = [
+            self._main_value(statement)
+            for statement in entity.get("claims", {}).get(self.props["projection_version"], [])
+        ]
         expected = self._payload_digest(mutation)
-        if hashes == [expected]:
-            return EffectInspection("equivalent", receipt=f"item={qid}")
-        if expected in hashes and len(hashes) == 1:
+        if hashes == [expected] and versions == [PROJECTION_VERSION]:
             return EffectInspection("equivalent", receipt=f"item={qid}")
         return EffectInspection(
             "conflict",
             receipt=f"item={qid}",
-            detail=f"payload hash mismatch or multiplicity: {hashes}",
+            detail=(
+                f"payload/projection mismatch or multiplicity: "
+                f"hashes={hashes}; versions={versions}"
+            ),
         )
 
     def _claim_property(self, payload: Mapping[str, Any]) -> str:
         predicate = str(payload.get("predicate_id"))
-        if predicate != "organization.operates.equipment_variant":
+        mapping = {
+            "organization.operates.equipment_variant": "operates_equipment_variant",
+            "manufacturer.manufactures.equipment": "manufactures_equipment",
+        }
+        property_key = mapping.get(predicate)
+        if property_key is None:
             raise DefinitiveWriteError(f"unsupported M1 predicate: {predicate}")
-        return self.props["operates_equipment_variant"]
+        return self.props[property_key]
 
     def _claim_inspection(self, mutation: Mapping[str, Any]) -> EffectInspection:
         payload = mutation["payload"]
@@ -133,18 +147,24 @@ class WikibaseM1Backend:
 
         statement = matches[0]
         hashes = self._qualifier_values(statement, self.props["payload_sha256"])
+        versions = self._qualifier_values(statement, self.props["projection_version"])
         expected = self._payload_digest(mutation)
         receipt = f"item={subject_qid};statement={statement.get('id')}"
-        if hashes == [expected]:
+        if hashes == [expected] and versions == [PROJECTION_VERSION]:
             return EffectInspection("equivalent", receipt=receipt)
         return EffectInspection(
-            "conflict", receipt=receipt, detail=f"claim payload hash mismatch: {hashes}"
+            "conflict",
+            receipt=receipt,
+            detail=(
+                f"claim payload/projection mismatch: "
+                f"hashes={hashes}; versions={versions}"
+            ),
         )
 
     def inspect_effect(
         self, *, idempotency_key: str, mutation: Mapping[str, Any]
     ) -> EffectInspection:
-        del idempotency_key  # semantic equivalence is record ID + exact payload hash.
+        del idempotency_key  # semantic equivalence is record ID + payload + projection version.
         if mutation.get("action") != "create":
             return EffectInspection(
                 "conflict", detail=f"unsupported M1 action: {mutation.get('action')}"
@@ -171,6 +191,9 @@ class WikibaseM1Backend:
             ),
             self._simple_statement(
                 self.props["payload_sha256"], "external-id", canonical_sha256(payload)
+            ),
+            self._simple_statement(
+                self.props["projection_version"], "string", PROJECTION_VERSION
             ),
             self._simple_statement(self.props["record_type"], "string", resource_type),
         ]
@@ -262,10 +285,18 @@ class WikibaseM1Backend:
         document_qid = self._resolve_domain_item(str(payload["document_id"]))
         selector = payload.get("locator", {}).get("selector")
         statements = self._identity_statements("evidence", payload)
-        statements.append(
-            self._simple_statement(
-                self.props["evidence_document"], "wikibase-item", item_value(document_qid)
-            )
+        statements.extend(
+            [
+                self._simple_statement(
+                    self.props["evidence_document"], "wikibase-item", item_value(document_qid)
+                ),
+                self._simple_statement(
+                    self.props["captured_at_iso"], "string", payload["captured_at"]
+                ),
+                self._simple_statement(
+                    self.props["capture_method"], "string", payload["capture_method"]
+                ),
+            ]
         )
         if selector:
             statements.append(
@@ -294,6 +325,9 @@ class WikibaseM1Backend:
                         str(payload["occurred_at"]["precision"]),
                     ),
                 ),
+                self._simple_statement(
+                    self.props["created_at_iso"], "string", payload["created_at"]
+                ),
             ]
         )
         for participant in payload.get("participants", []):
@@ -316,6 +350,12 @@ class WikibaseM1Backend:
             statements.append(
                 self._simple_statement(
                     self.base_props["related_item"], "wikibase-item", item_value(qid)
+                )
+            )
+        for claim_id in payload.get("related_claim_ids", []):
+            statements.append(
+                self._simple_statement(
+                    self.props["related_claim_id"], "external-id", str(claim_id)
                 )
             )
         for link in payload.get("evidence_links", []):
@@ -390,7 +430,7 @@ class WikibaseM1Backend:
         subject_qid = self._resolve_domain_item(str(payload["subject_id"]))
         value = payload.get("value", {})
         if value.get("kind") != "entity":
-            raise DefinitiveWriteError("M1 operator Claim requires an entity value")
+            raise DefinitiveWriteError("M1 Claim requires an entity value")
         object_qid = self._resolve_domain_item(str(value["entity_id"]))
         property_id = self._claim_property(payload)
         qualifiers: dict[str, list[dict[str, Any]]] = {
@@ -404,8 +444,19 @@ class WikibaseM1Backend:
                     canonical_sha256(payload),
                 )
             ],
+            self.props["projection_version"]: [
+                self._snak(
+                    self.props["projection_version"], "string", PROJECTION_VERSION
+                )
+            ],
             self.base_props["confidence"]: [
                 self._snak(self.base_props["confidence"], "string", payload["confidence"])
+            ],
+            self.props["claim_state"]: [
+                self._snak(self.props["claim_state"], "string", payload["claim_state"])
+            ],
+            self.props["created_at_iso"]: [
+                self._snak(self.props["created_at_iso"], "string", payload["created_at"])
             ],
         }
         point = payload.get("validity", {}).get("point_in_time")

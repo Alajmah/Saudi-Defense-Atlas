@@ -55,7 +55,7 @@ def _evidence_by_label(evidence: Sequence[Mapping[str, Any]]) -> dict[str, Mappi
     required = {
         "publication-date",
         "final-delivery",
-        "variant-and-operator",
+        "variant-context",
         "manufacturer-context",
     }
     missing = sorted(required - result.keys())
@@ -86,22 +86,21 @@ def build_f15sa_proposal(
         if record.get("document_id") != document_id:
             raise ProposalBuildError("all Evidence must reference the supplied Document")
 
-    operator_evidence_id = str(evidence["variant-and-operator"]["id"])
     delivery_evidence_id = str(evidence["final-delivery"]["id"])
     manufacturer_evidence_id = str(evidence["manufacturer-context"]["id"])
 
-    operator_claim_seed = {
-        "subject_id": resolved.rsaf_id,
-        "predicate_id": "organization.operates.equipment_variant",
+    manufacturer_claim_seed = {
+        "subject_id": resolved.boeing_id,
+        "predicate_id": "manufacturer.manufactures.equipment",
         "object_id": resolved.f15sa_id,
         "point_in_time": published_date,
-        "evidence_id": operator_evidence_id,
+        "evidence_id": manufacturer_evidence_id,
     }
-    operator_claim_id = f"SDA-CLAIM-{_stable_suffix(operator_claim_seed)}"
-    operator_claim = {
-        "id": operator_claim_id,
-        "subject_id": resolved.rsaf_id,
-        "predicate_id": "organization.operates.equipment_variant",
+    manufacturer_claim_id = f"SDA-CLAIM-{_stable_suffix(manufacturer_claim_seed)}"
+    manufacturer_claim = {
+        "id": manufacturer_claim_id,
+        "subject_id": resolved.boeing_id,
+        "predicate_id": "manufacturer.manufactures.equipment",
         "value": {"kind": "entity", "entity_id": resolved.f15sa_id},
         "scope": {"entity_ids": [resolved.f15sa_id], "quantity_type": None, "note": None},
         "validity": {
@@ -109,7 +108,7 @@ def build_f15sa_proposal(
         },
         "confidence": "high",
         "evidence_links": [
-            {"evidence_id": operator_evidence_id, "role": "supports"}
+            {"evidence_id": manufacturer_evidence_id, "role": "supports"}
         ],
         "claim_state": "active",
         "supersedes_claim_ids": [],
@@ -121,8 +120,8 @@ def build_f15sa_proposal(
         "event_type": "delivery",
         "date": delivery_date,
         "equipment": resolved.f15sa_id,
-        "operator": resolved.rsaf_id,
-        "supplier": resolved.boeing_id,
+        "recipient": resolved.rsaf_id,
+        "manufacturer": resolved.boeing_id,
         "evidence": [delivery_evidence_id, manufacturer_evidence_id],
     }
     event_id = f"SDA-EVENT-{delivery_date}-{_stable_suffix(event_seed, 16)}"
@@ -133,11 +132,11 @@ def build_f15sa_proposal(
         "occurred_at": {"value": delivery_date, "precision": "day"},
         "ended_at": None,
         "participants": [
-            {"entity_id": resolved.rsaf_id, "role": "operator"},
-            {"entity_id": resolved.boeing_id, "role": "supplier"},
+            {"entity_id": resolved.rsaf_id, "role": "recipient"},
+            {"entity_id": resolved.boeing_id, "role": "manufacturer"},
         ],
         "related_entity_ids": [resolved.f15sa_id],
-        "related_claim_ids": [operator_claim_id],
+        "related_claim_ids": [manufacturer_claim_id],
         "confidence": "high",
         "evidence_links": [
             {"evidence_id": delivery_evidence_id, "role": "supports"},
@@ -145,7 +144,8 @@ def build_f15sa_proposal(
         ],
         "notes": (
             "Candidate event represents the dated final-delivery statement only; "
-            "it does not imply current inventory, location, readiness, or serviceability."
+            "it does not imply current inventory, location, readiness, serviceability, "
+            "or a timeless operator relationship."
         ),
         "created_at": created_at,
     }
@@ -176,10 +176,10 @@ def build_f15sa_proposal(
     mutations.extend(
         [
             {
-                "id": f"SDA-MUT-CLAIM-{_stable_suffix(operator_claim)}",
+                "id": f"SDA-MUT-CLAIM-{_stable_suffix(manufacturer_claim)}",
                 "action": "create",
                 "resource_type": "claim",
-                "payload": operator_claim,
+                "payload": manufacturer_claim,
             },
             {
                 "id": f"SDA-MUT-EVENT-{_stable_suffix(delivery_event)}",
@@ -208,13 +208,13 @@ def build_f15sa_proposal(
         "risk_class": "AMBER",
         "policy_outcome": "human_review_required",
         "policy_reasons": [
-            "substantive operator relationship",
+            "substantive manufacturer relationship",
             "dated delivery event",
             "first vertical-slice canonical admission",
         ],
         "rationale": (
             "Deterministic source adapter proposes source/document/evidence records, "
-            "one operator claim, and one dated delivery event from bounded official evidence."
+            "one manufacturer claim, and one dated delivery event from bounded official evidence."
         ),
         "supersedes_proposal_id": None,
         "mutations": mutations,

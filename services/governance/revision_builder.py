@@ -29,9 +29,9 @@ def _canonical_sha256(value: Mapping[str, Any]) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _revision_id(proposal_id: str, decision_id: str, proposal_sha256: str) -> str:
-    seed = f"{proposal_id}|{decision_id}|{proposal_sha256}".encode("utf-8")
-    suffix = hashlib.sha256(seed).hexdigest()[:24].upper()
+def _revision_id(body: Mapping[str, Any]) -> str:
+    """Derive Revision identity from the exact canonical Revision body."""
+    suffix = _canonical_sha256(body)[:24].upper()
     return f"SDA-REVISION-{suffix}"
 
 
@@ -99,10 +99,7 @@ def build_revision(
                 }
             )
 
-    return {
-        "id": _revision_id(
-            str(proposal["id"]), str(decision["id"]), proposal_digest
-        ),
+    body = {
         "proposal_id": str(proposal["id"]),
         "decision_id": str(decision["id"]),
         "parent_revision_ids": [],
@@ -115,3 +112,4 @@ def build_revision(
             "as equivalent in the canonical backend."
         ),
     }
+    return {"id": _revision_id(body), **body}

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Create M1-only Wikibase projection properties after the M0 seed.
 
-The property set is an adapter vocabulary, not the SDA ontology. In particular,
-`operates_equipment_variant` preserves the accepted project predicate direction
-instead of reusing the reversed M0 trial `operator` property.
+The property set is an adapter vocabulary, not the SDA ontology. Projection
+version is explicit so exact payload equivalence cannot hide an older/incomplete
+backend representation.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ OUTPUT_PATH = SPIKE_DIR / "m1_projection_state.generated.json"
 def property_defs() -> dict[str, dict[str, str]]:
     return {
         "payload_sha256": {"en": "SDA payload SHA-256", "datatype": "external-id"},
+        "projection_version": {"en": "SDA projection version", "datatype": "string"},
         "record_type": {"en": "SDA record type", "datatype": "string"},
         "created_at_iso": {"en": "created at ISO timestamp", "datatype": "string"},
         "source_class": {"en": "SDA source class", "datatype": "string"},
@@ -47,6 +48,10 @@ def property_defs() -> dict[str, dict[str, str]]:
         "related_claim_id": {"en": "related SDA claim ID", "datatype": "external-id"},
         "operates_equipment_variant": {
             "en": "operates equipment variant",
+            "datatype": "wikibase-item",
+        },
+        "manufactures_equipment": {
+            "en": "manufactures equipment",
             "datatype": "wikibase-item",
         },
         "participant_role": {"en": "participant role", "datatype": "string"},
