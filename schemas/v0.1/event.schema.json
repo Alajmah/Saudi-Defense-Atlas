@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:sda:schema:v0.1:event",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/event.schema.json",
   "title": "Saudi Defense Atlas Event",
   "type": "object",
   "required": ["id", "event_type", "occurred_at", "confidence", "evidence_links"],
