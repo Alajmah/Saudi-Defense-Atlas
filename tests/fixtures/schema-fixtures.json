@@ -105,6 +105,7 @@
               "validity": {"point_in_time": {"value": "2026", "precision": "year"}},
               "confidence": "medium",
               "evidence_links": [{"evidence_id": "TEST-EVIDENCE-001", "role": "supports"}],
+              "claim_state": "active",
               "created_at": "2026-09-25T12:15:00Z"
             }
           }
@@ -155,7 +156,9 @@
         "predicate_id": "inventory.quantity",
         "value": {"kind": "number", "value": 12},
         "confidence": "medium",
-        "evidence_links": []
+        "evidence_links": [],
+        "claim_state": "active",
+        "created_at": "2026-09-25T13:00:00Z"
       }
     },
     {
@@ -225,6 +228,55 @@
         "retrieved_at": "2026-09-25T13:00:00Z",
         "language": "en",
         "content_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      }
+    },
+    {
+      "name": "document with null URL is not identified",
+      "schema": "document.schema.json",
+      "instance": {
+        "id": "BAD-DOC-002",
+        "source_id": "TEST-SOURCE-001",
+        "canonical_url": null,
+        "retrieved_at": "2026-09-25T13:00:00Z",
+        "language": "en",
+        "content_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      }
+    },
+    {
+      "name": "evidence without capture provenance",
+      "schema": "evidence.schema.json",
+      "instance": {
+        "id": "BAD-EVIDENCE-001",
+        "document_id": "TEST-DOC-001",
+        "locator": {"paragraph": 1}
+      }
+    },
+    {
+      "name": "resource type cannot disguise claim payload as entity",
+      "schema": "change-proposal.schema.json",
+      "instance": {
+        "id": "BAD-PROPOSAL-003",
+        "created_at": "2026-09-25T13:00:00Z",
+        "created_by": {"kind": "human", "id": "editor-test"},
+        "risk_class": "AMBER",
+        "policy_outcome": "human_review_required",
+        "mutations": [
+          {
+            "id": "BAD-MUTATION-003",
+            "action": "create",
+            "resource_type": "entity",
+            "payload": {
+              "id": "TEST-CLAIM-DISGUISED",
+              "subject_id": "TEST-ENTITY-001",
+              "predicate_id": "inventory.quantity",
+              "value": {"kind": "number", "value": 5},
+              "confidence": "medium",
+              "evidence_links": [{"evidence_id": "TEST-EVIDENCE-001", "role": "supports"}],
+              "claim_state": "active",
+              "created_at": "2026-09-25T13:00:00Z"
+            }
+          }
+        ]
       }
     }
   ]
