@@ -10,7 +10,7 @@ from wikibase_api import CreatedEntity, WikibaseAPI
 
 
 class M1WikibaseAPI(WikibaseAPI):
-    """Add atomic item/statement writes and strongly consistent item lookup."""
+    """Add atomic writes and strongly consistent item lookup for the M1 spike."""
 
     def create_item_with_statements(
         self,
@@ -75,21 +75,50 @@ class M1WikibaseAPI(WikibaseAPI):
             result["references"] = normalized
         return result
 
+    def item_namespace_id(self) -> int:
+        """Return the MediaWiki namespace that stores Wikibase Items.
+
+        The local stack exposes Items through an explicit ``Item:`` namespace,
+        while other Wikibase deployments may use main namespace 0. Discover the
+        configured Item namespace from current Action API siteinfo and fall back
+        to namespace 0 only when no explicit Item namespace is registered.
+        """
+        data = self.get(action="query", meta="siteinfo", siprop="namespaces")
+        namespaces = data.get("query", {}).get("namespaces", {})
+        for raw_id, definition in namespaces.items():
+            if not isinstance(definition, dict):
+                continue
+            names = {
+                str(definition.get("canonical", "")).casefold(),
+                str(definition.get("*", "")).casefold(),
+            }
+            if "item" in names:
+                return int(definition.get("id", raw_id))
+        return 0
+
+    @staticmethod
+    def _entity_id_from_page_title(title: str) -> str | None:
+        """Extract a Q-id from either ``Q1`` or a namespaced ``Item:Q1`` title."""
+        candidate = title.rsplit(":", 1)[-1]
+        if re.fullmatch(r"Q\d+", candidate):
+            return candidate
+        return None
+
     def item_ids(self) -> list[str]:
         """List Q-IDs from MediaWiki itself, avoiding asynchronous WDQS state."""
         result: list[str] = []
         params: dict[str, Any] = {
             "action": "query",
             "list": "allpages",
-            "apnamespace": 0,
+            "apnamespace": self.item_namespace_id(),
             "aplimit": "max",
         }
         while True:
             data = self.get(**params)
             for page in data.get("query", {}).get("allpages", []):
-                title = str(page.get("title", ""))
-                if re.fullmatch(r"Q\d+", title):
-                    result.append(title)
+                entity_id = self._entity_id_from_page_title(str(page.get("title", "")))
+                if entity_id is not None:
+                    result.append(entity_id)
             continuation = data.get("continue")
             if not continuation:
                 break
@@ -97,6 +126,7 @@ class M1WikibaseAPI(WikibaseAPI):
         return result
 
     def find_items_by_string_claim(self, property_id: str, value: str) -> list[str]:
+        """Find exact string-claim matches from current MediaWiki entity state."""
         matches: list[str] = []
         for entity_id in self.item_ids():
             entity = self.get_entity(entity_id)

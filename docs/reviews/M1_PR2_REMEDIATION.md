@@ -96,6 +96,24 @@ The adapter now projects Evidence `captured_at`/`capture_method`, Claim `claim_s
 
 M1 remains a local single-writer proof. Production mutation must not be authorized until a project-owned coordination or uniqueness mechanism is selected and independently verified. CI/runtime claim text now states that concurrent-writer qualification is not established.
 
+---
+
+## M1-F16 — Action API identity lookup assumed Items lived in namespace 0
+
+**Area:** canonical mutation / strongly consistent reconciliation
+
+**Finding:** The first real post-remediation adapter run reached M1 preflight but could not resolve seeded `SDA-ORG-BOEING`. M0 had created Boeing correctly; the inverse lookup enumerated `allpages` only in namespace 0 and accepted only bare `Q...` titles, while the verified M0 client addresses entity pages through the configured `Item:` namespace.
+
+**Why it matters:** The guard correctly failed closed, but the claimed Action-API reconciliation path was not actually complete for this Wikibase configuration. A reconciliation index that misses existing canonical entities cannot prove absent/equivalent/conflict state.
+
+**Severity:** High
+
+**Confidence:** High
+
+**Resolution:** FIXED in implementation; clean-stack rerun pending.
+
+M1 now discovers the configured Item namespace from Action API `siteinfo`, enumerates that namespace directly from MediaWiki state, and extracts Q-IDs from either bare or namespaced page titles. The clean-stack runtime test explicitly proves that the seeded RSAF, Boeing, and F-15SA canonical IDs resolve to their expected Q-IDs before proposal execution begins. WDQS remains excluded from mutation reconciliation because its index is asynchronous.
+
 ## Verification boundary after remediation
 
 The branch must re-establish both green schema/governance validation and a green clean-stack `wikibase-verification` run at the remediation commit. Until those checks pass, fixes above are implementation changes rather than verified results.

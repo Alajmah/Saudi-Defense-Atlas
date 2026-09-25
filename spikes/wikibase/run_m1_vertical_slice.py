@@ -77,6 +77,35 @@ def main_values(entity: dict[str, Any], property_id: str) -> list[Any]:
     ]
 
 
+def verify_base_identity_lookup(
+    api: M1WikibaseAPI, base_state: dict[str, Any]
+) -> dict[str, str]:
+    """Prove Action-API canonical-ID lookup for the preexisting M0 entities M1 needs."""
+    canonical_ids = {
+        "rsaf": "SDA-ORG-RSAF",
+        "boeing": "SDA-ORG-BOEING",
+        "f15sa": "SDA-EQUIP-F15SA",
+    }
+    property_id = base_state["properties"]["canonical_id"]
+    mappings: dict[str, str] = {}
+    for key, canonical_id in canonical_ids.items():
+        expected_qid = str(base_state["items"][key])
+        entity = api.get_entity(expected_qid)
+        observed = main_values(entity, property_id)
+        if observed != [canonical_id]:
+            raise AssertionError(
+                f"seeded {key} canonical ID mismatch: expected {canonical_id}, observed {observed}"
+            )
+        matches = api.find_items_by_string_claim(property_id, canonical_id)
+        if matches != [expected_qid]:
+            raise AssertionError(
+                f"Action API canonical lookup for {canonical_id} returned {matches}, "
+                f"expected {[expected_qid]}"
+            )
+        mappings[canonical_id] = expected_qid
+    return mappings
+
+
 def main() -> int:
     if OUTPUT.exists():
         raise SystemExit("reset the spike before rerunning M1 verification")
@@ -154,6 +183,7 @@ def main() -> int:
 
     api = M1WikibaseAPI(base_url, username, password)
     api.login()
+    base_identity_mappings = verify_base_identity_lookup(api, base_state)
     backend = WikibaseM1Backend(
         api=api,
         base_state=base_state,
@@ -280,6 +310,8 @@ def main() -> int:
         "proposal_id": proposal["id"],
         "decision_id": decision["id"],
         "revision": revision,
+        "item_namespace_id": api.item_namespace_id(),
+        "base_identity_mappings": base_identity_mappings,
         "first_execution": {
             "status": first.status,
             "effects": [effect.status for effect in first.effects],
