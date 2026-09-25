@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sda:schema:v0.1:evidence",
+  "title": "Saudi Defense Atlas Evidence",
+  "type": "object",
+  "required": ["id", "document_id", "locator"],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "document_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "locator": {
+      "type": "object",
+      "properties": {
+        "page": { "type": ["integer", "null"], "minimum": 1 },
+        "section": { "type": ["string", "null"] },
+        "paragraph": { "type": ["integer", "null"], "minimum": 1 },
+        "fragment": { "type": ["string", "null"] },
+        "start_offset": { "type": ["integer", "null"], "minimum": 0 },
+        "end_offset": { "type": ["integer", "null"], "minimum": 0 },
+        "selector": { "type": ["string", "null"] }
+      },
+      "additionalProperties": false,
+      "minProperties": 1
+    },
+    "excerpt": { "type": ["string", "null"] },
+    "excerpt_sha256": {
+      "type": ["string", "null"],
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    },
+    "language": { "type": ["string", "null"] },
+    "captured_at": { "type": "string", "format": "date-time" },
+    "capture_method": {
+      "type": "string",
+      "enum": ["human", "deterministic_parser", "model_extraction", "imported"]
+    },
+    "notes": { "type": ["string", "null"] }
+  },
+  "additionalProperties": false
+}
