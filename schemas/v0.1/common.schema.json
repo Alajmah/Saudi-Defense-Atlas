@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:sda:schema:v0.1:common",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/common.schema.json",
   "title": "Saudi Defense Atlas common definitions",
   "$defs": {
     "canonical_id": {
       "type": "string",
       "minLength": 1,
       "maxLength": 128,
-      "description": "Project-domain stable identifier. Backend/store-native IDs must be mapped separately."
+      "description": "Project-issued stable record identifier. Allocation of an ID does not by itself imply canonical admission. Backend/store-native IDs must be mapped separately."
     },
     "localized_text": {
       "type": "object",
