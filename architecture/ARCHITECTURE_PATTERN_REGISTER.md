@@ -35,7 +35,7 @@ The exact storage mechanism remains unresolved until M0 completes.
 |---|---|
 | Product scope | Project owner + accepted project roadmap |
 | Domain semantics | Accepted architecture/ontology decisions |
-| Canonical mutation | `ChangeProposal -> ReviewDecision -> Revision` contract; concrete implementation pending M0 |
+| Canonical mutation | `ChangeProposal -> ReviewDecision -> Revision` contract; production authorization/persistence implementation remains future work |
 | AI output | Proposal authority only unless a field is explicitly GREEN in policy |
 | Publication of AMBER facts | Human editorial approval |
 | Restricted operational detail | Exclusion/restriction policy; no autonomous publication |
@@ -84,12 +84,12 @@ A successful technical test establishes only the property tested in the tested e
 
 | ID | Pattern | Pattern status | Implementation | Planning |
 |---|---|---|---|---|
-| APR-001 | Claim/evidence canonical knowledge model | ACCEPTED | NOT-LINKED | current-plan-authorized |
-| APR-002 | Review-gated canonical mutation | ACCEPTED | NOT-LINKED | current-plan-authorized |
-| APR-003 | Wikibase as knowledge-core implementation | TRIAL-AUTHORIZED | NOT-LINKED | current-plan-authorized |
+| APR-001 | Claim/evidence canonical knowledge model | ACCEPTED | LINKED | current-plan-authorized |
+| APR-002 | Review-gated canonical mutation | ACCEPTED | IN-TRIAL | current-plan-authorized |
+| APR-003 | Wikibase as knowledge-core implementation | TRIAL-AUTHORIZED | IN-TRIAL | current-plan-authorized |
 | APR-004 | PostgreSQL claim/evidence knowledge core | DEFERRED | NOT-LINKED | future-plan-candidate |
-| APR-005 | Typed structured AI proposals | ACCEPTED | NOT-LINKED | current-plan-authorized |
-| APR-006 | Deterministic-before-generative processing | ACCEPTED | NOT-LINKED | current-plan-authorized |
+| APR-005 | Typed structured AI proposals | ACCEPTED | LINKED | current-plan-authorized |
+| APR-006 | Deterministic-before-generative processing | ACCEPTED | LINKED | current-plan-authorized |
 
 ---
 
@@ -114,9 +114,11 @@ A successful technical test establishes only the property tested in the tested e
 **Decision:**
 
 - pattern_status: ACCEPTED
-- implementation_status: NOT-LINKED
+- implementation_status: LINKED
 - planning_disposition: current-plan-authorized
 - authority: ADR-0001 / foundation roadmap
+
+**Implementation links:** `schemas/v0.1/`, `scripts/validate_schemas.py`, `tests/fixtures/schema-fixtures.json`.
 
 **Verification required:** M0 schemas and knowledge-core spike; M1 source-to-page vertical slice.
 
@@ -137,9 +139,11 @@ A successful technical test establishes only the property tested in the tested e
 **Decision:**
 
 - pattern_status: ACCEPTED
-- implementation_status: NOT-LINKED
+- implementation_status: IN-TRIAL
 - planning_disposition: current-plan-authorized
 - authority: M0 acceptance criterion 7 and AI governance policy
+
+**Implementation links:** `schemas/v0.1/change-proposal.schema.json`, `schemas/v0.1/review-decision.schema.json`, `schemas/v0.1/revision.schema.json`, `scripts/validate_workflow.py`, `spikes/wikibase/apply_approved_demo.py`.
 
 **Verification required:** demonstrate a proposed write that remains non-canonical until a valid review decision creates an auditable revision.
 
@@ -164,9 +168,11 @@ A successful technical test establishes only the property tested in the tested e
 **Decision:**
 
 - pattern_status: TRIAL-AUTHORIZED
-- implementation_status: NOT-LINKED
+- implementation_status: IN-TRIAL
 - planning_disposition: current-plan-authorized
 - authority: `docs/ROADMAP.md` M0 Wikibase Spike
+
+**Implementation links:** `spikes/wikibase/`, `.github/workflows/wikibase-spike.yml`, `docs/adr/ADR-0002-knowledge-core.md`.
 
 **Claim ceiling:** successful M0 can justify architectural adoption for the canonical knowledge role; it does not establish production scaling, HA, backup, or operational readiness.
 
@@ -202,11 +208,13 @@ A successful technical test establishes only the property tested in the tested e
 **Decision:**
 
 - pattern_status: ACCEPTED
-- implementation_status: NOT-LINKED
+- implementation_status: LINKED
 - planning_disposition: current-plan-authorized
 - authority: AI governance policy + M0/M1 roadmap
 
-**Verification required:** schema rejects malformed/unsupported candidate objects and permits explicit unknowns.
+**Implementation links:** `schemas/v0.1/`, `scripts/validate_schemas.py`, `tests/fixtures/schema-fixtures.json`.
+
+**Verification required:** schema rejects malformed/unsupported candidate objects and permits explicit unknowns; M1 must prove real model extraction crosses the same boundary.
 
 ---
 
@@ -219,8 +227,10 @@ A successful technical test establishes only the property tested in the tested e
 **Decision:**
 
 - pattern_status: ACCEPTED
-- implementation_status: NOT-LINKED
+- implementation_status: LINKED
 - planning_disposition: current-plan-authorized
 - authority: ADR-0001 design rules
 
-**Verification required:** M1 pipeline demonstrates deterministic hashing/deduplication and typed validation around any model extraction.
+**Implementation links:** content hashing/identity schemas, deterministic JSON Schema validators, workflow policy validator, Wikibase adapter gating.
+
+**Verification required:** M1 pipeline demonstrates deterministic hashing/deduplication and typed validation around actual model extraction.
