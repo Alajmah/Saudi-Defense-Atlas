@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -21,11 +22,21 @@ from services.ingestion.document_identity import (  # noqa: E402
     validate_policy,
     validate_retrieved_url,
 )
+from services.ingestion.registry import load_registered_document  # noqa: E402
 
 
 def expect(condition: bool, message: str, failures: list[str]) -> None:
     if not condition:
         failures.append(message)
+
+
+def validate_instance(validator: Draft202012Validator, record: dict, label: str) -> list[str]:
+    errors = list(validator.iter_errors(record))
+    if not errors:
+        return []
+    return [
+        f"{label} failed schema: " + "; ".join(error.message for error in errors)
+    ]
 
 
 def main() -> int:
@@ -138,19 +149,43 @@ def main() -> int:
     except IngestionContractError:
         pass
 
-    schemas, registry = build_registry()
-    validator = Draft202012Validator(
+    schemas, schema_registry = build_registry()
+    document_validator = Draft202012Validator(
         schemas["document.schema.json"],
-        registry=registry,
+        registry=schema_registry,
         format_checker=FormatChecker(),
     )
+    source_validator = Draft202012Validator(
+        schemas["source.schema.json"],
+        registry=schema_registry,
+        format_checker=FormatChecker(),
+    )
+
     for label, record in (("first", first.document), ("changed", changed.document)):
-        errors = list(validator.iter_errors(record))
-        if errors:
-            failures.append(
-                f"{label} generated Document failed schema: "
-                + "; ".join(error.message for error in errors)
-            )
+        failures.extend(validate_instance(document_validator, dict(record), label))
+
+    source_path = ROOT / "data" / "sources" / "usaf.json"
+    with source_path.open("r", encoding="utf-8") as handle:
+        source_record = json.load(handle)
+    failures.extend(validate_instance(source_validator, source_record, "USAF source"))
+
+    try:
+        registered_policy, metadata = load_registered_document(
+            "USAF_F15SA_FINAL_DELIVERY_2020"
+        )
+        expect(
+            registered_policy.source_id == source_record["id"],
+            "registered document source_id must resolve to the checked-in Source record",
+            failures,
+        )
+        expect(
+            metadata.get("expected_title")
+            == "AFLCMC delivers final F-15SA to Royal Saudi Air Force",
+            "registered M1 document title changed unexpectedly",
+            failures,
+        )
+    except Exception as exc:  # noqa: BLE001
+        failures.append(f"registered M1 document policy failed validation: {exc}")
 
     if failures:
         print("M1 ingestion validation failed:", file=sys.stderr)
@@ -158,7 +193,10 @@ def main() -> int:
             print(f"- {failure}", file=sys.stderr)
         return 1
 
-    print("Validated deterministic M1 acquisition, idempotency, versioning, and URL policy.")
+    print(
+        "Validated deterministic M1 acquisition, idempotency, versioning, URL policy, "
+        "and registered source/document metadata."
+    )
     return 0
 
 
