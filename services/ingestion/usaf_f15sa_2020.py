@@ -1,8 +1,9 @@
 """Bounded deterministic parser for the first M1 official release.
 
-The parser extracts only the fields/evidence required by the M1 slice. It fails
-closed if required source patterns are absent or ambiguous. Output remains
-candidate evidence; this module has no canonical-write capability.
+The parser extracts only the fields/evidence required by the M1 slice and a
+canonical article-body fingerprint. It fails closed if required source patterns
+are absent or ambiguous. Output remains candidate evidence; this module has no
+canonical-write capability.
 """
 
 from __future__ import annotations
@@ -13,7 +14,13 @@ from dataclasses import dataclass
 from datetime import date
 from typing import Iterable
 
-from .html_paragraphs import TextBlock, extract_text_blocks, extract_visible_text, text_sha256
+from .html_paragraphs import (
+    TextBlock,
+    extract_text_blocks,
+    extract_visible_text,
+    normalize_text,
+    text_sha256,
+)
 
 _EXPECTED_TITLE = "AFLCMC delivers final F-15SA to Royal Saudi Air Force"
 _MONTHS = {
@@ -47,6 +54,8 @@ class ParsedF15SARelease:
     published_date: str
     reported_delivery_date: str
     delivery_year_derived_from_publication: bool
+    canonical_content_sha256: str
+    canonical_content_length_bytes: int
     evidence: tuple[dict, ...]
 
 
@@ -77,7 +86,7 @@ def _parse_publication_date(visible_text: str) -> tuple[date, str]:
     if month is None:
         raise SourceParseError(f"unsupported publication month: {match.group(1)}")
     parsed = date(int(match.group(3)), month, int(match.group(2)))
-    return parsed, match.group(0)
+    return parsed, normalize_text(match.group(0))
 
 
 def _evidence_id(document_id: str, label: str, digest: str) -> str:
@@ -87,21 +96,29 @@ def _evidence_id(document_id: str, label: str, digest: str) -> str:
 
 
 def _block_evidence(
-    *, document_id: str, label: str, block: TextBlock, captured_at: str
+    *,
+    document_id: str,
+    label: str,
+    block: TextBlock,
+    article_relative_index: int,
+    captured_at: str,
 ) -> dict:
     return {
         "id": _evidence_id(document_id, label, block.sha256),
         "document_id": document_id,
         "locator": {
             "fragment": label,
-            "selector": f"html-block:{block.tag}:{block.index}:sha256:{block.sha256}",
+            "selector": (
+                f"article-block:{block.tag}:{article_relative_index}:"
+                f"sha256:{block.sha256}"
+            ),
         },
         "excerpt": None,
         "excerpt_sha256": block.sha256,
         "language": "en",
         "captured_at": captured_at,
         "capture_method": "deterministic_parser",
-        "notes": "Text is identified by normalized block hash; source prose is not copied by default.",
+        "notes": "Text is identified by normalized article-relative block hash; source prose is not copied by default.",
     }
 
 
@@ -123,6 +140,19 @@ def _metadata_evidence(
         "capture_method": "deterministic_parser",
         "notes": "Publication metadata match; exact source text is represented by hash, not stored excerpt.",
     }
+
+
+def _article_material(
+    *, title: str, published_marker: str, body_blocks: list[TextBlock]
+) -> bytes:
+    normalized = "\n".join(
+        [
+            normalize_text(title),
+            normalize_text(published_marker),
+            *(normalize_text(block.text) for block in body_blocks),
+        ]
+    )
+    return normalized.encode("utf-8")
 
 
 def parse_release(
@@ -158,6 +188,39 @@ def parse_release(
         label="producer",
         required_tokens=("Boeing-produced", "aircraft"),
     )
+    article_end = _unique_block(
+        blocks,
+        label="article end",
+        required_tokens=(
+            "spares",
+            "simulators",
+            "training",
+            "technical documentation",
+            "program support",
+        ),
+    )
+
+    if not (delivery.index <= producer.index <= article_end.index):
+        raise SourceParseError("producer evidence falls outside the bounded article body")
+    if not (delivery.index <= variant.index <= article_end.index):
+        raise SourceParseError("variant evidence falls outside the bounded article body")
+
+    body_blocks = [
+        block for block in blocks if delivery.index <= block.index <= article_end.index
+    ]
+    if not body_blocks or body_blocks[0] != delivery or body_blocks[-1] != article_end:
+        raise SourceParseError("could not form a stable bounded article body")
+
+    article_relative = {
+        block.index: index for index, block in enumerate(body_blocks, start=1)
+    }
+
+    canonical_material = _article_material(
+        title=_EXPECTED_TITLE,
+        published_marker=published_marker,
+        body_blocks=body_blocks,
+    )
+    canonical_digest = hashlib.sha256(canonical_material).hexdigest()
 
     delivery_date = date(published.year, 12, 10)
     delta_days = (published - delivery_date).days
@@ -177,18 +240,21 @@ def parse_release(
             document_id=document_id,
             label="final-delivery",
             block=delivery,
+            article_relative_index=article_relative[delivery.index],
             captured_at=captured_at,
         ),
         _block_evidence(
             document_id=document_id,
             label="variant-and-operator",
             block=variant,
+            article_relative_index=article_relative[variant.index],
             captured_at=captured_at,
         ),
         _block_evidence(
             document_id=document_id,
             label="manufacturer-context",
             block=producer,
+            article_relative_index=article_relative[producer.index],
             captured_at=captured_at,
         ),
     )
@@ -198,5 +264,7 @@ def parse_release(
         published_date=published.isoformat(),
         reported_delivery_date=delivery_date.isoformat(),
         delivery_year_derived_from_publication=True,
+        canonical_content_sha256=canonical_digest,
+        canonical_content_length_bytes=len(canonical_material),
         evidence=evidence,
     )
