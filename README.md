@@ -66,7 +66,7 @@ docs/                    Vision, architecture, ontology, policies, roadmap, ADRs
 schemas/v0.1/            Implementation-neutral domain/governance JSON Schemas
 scripts/                 Schema and cross-record governance validators
 spikes/wikibase/         Reproducible M0 Wikibase knowledge-core verification
- tests/fixtures/         Positive/negative schema and workflow fixtures
+tests/fixtures/          Positive/negative schema and workflow fixtures
 .github/workflows/       Validation and M0 knowledge-core CI
 ```
 
@@ -88,7 +88,7 @@ Architecture promotion is evidence-based:
 
 ```text
 observation != adoption
-a doption? no — see Architecture Pattern Register for canonical status
+adoption != implementation
 implementation != verification
 verification != production qualification
 ```
