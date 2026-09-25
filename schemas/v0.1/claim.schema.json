@@ -3,7 +3,7 @@
   "$id": "https://schemas.saudi-defense-atlas.org/v0.1/claim.schema.json",
   "title": "Saudi Defense Atlas Claim",
   "type": "object",
-  "required": ["id", "subject_id", "predicate_id", "value", "confidence", "evidence_links"],
+  "required": ["id", "subject_id", "predicate_id", "value", "confidence", "evidence_links", "claim_state", "created_at"],
   "properties": {
     "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
     "subject_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
@@ -77,8 +77,7 @@
     },
     "claim_state": {
       "type": "string",
-      "enum": ["active", "disputed", "superseded", "withdrawn"],
-      "default": "active"
+      "enum": ["active", "disputed", "superseded", "withdrawn"]
     },
     "supersedes_claim_ids": {
       "type": "array",
