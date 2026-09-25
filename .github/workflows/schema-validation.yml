@@ -41,3 +41,6 @@ jobs:
 
       - name: Validate M1 mutation reconciliation
         run: python scripts/validate_m1_mutation_guard.py
+
+      - name: Validate M1 project Revision construction
+        run: python scripts/validate_m1_revision.py
