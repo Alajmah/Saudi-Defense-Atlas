@@ -23,6 +23,12 @@
       "proposal": {"id": "P-RED-001", "risk_class": "RED", "policy_outcome": "blocked"},
       "decision": null,
       "revision": null
+    },
+    {
+      "name": "ordered proposal decision revision timestamps are valid",
+      "proposal": {"id": "P-TIME-OK-001", "risk_class": "AMBER", "policy_outcome": "human_review_required", "created_at": "2026-01-01T00:00:00Z"},
+      "decision": {"id": "D-TIME-OK-001", "proposal_id": "P-TIME-OK-001", "proposal_sha256": "1fdecabd85764eeae7c3eea6dd1b0a0626134771c93a81bf30b167ca3da62cfa", "decision": "approve", "decided_by": {"kind": "human", "id": "editor"}, "decided_at": "2026-01-02T00:00:00Z"},
+      "revision": {"id": "R-TIME-OK-001", "proposal_id": "P-TIME-OK-001", "decision_id": "D-TIME-OK-001", "applied_at": "2026-01-03T00:00:00Z"}
     }
   ],
   "invalid": [
@@ -73,6 +79,18 @@
       "proposal": {"id": "P-BAD-008", "risk_class": "AMBER", "policy_outcome": "human_review_required"},
       "decision": {"id": "D-BAD-008", "proposal_id": "P-BAD-008", "proposal_sha256": "0000000000000000000000000000000000000000000000000000000000000000", "decision": "approve", "decided_by": {"kind": "human", "id": "editor"}},
       "revision": null
+    },
+    {
+      "name": "decision cannot predate proposal",
+      "proposal": {"id": "P-TIME-BAD-001", "risk_class": "AMBER", "policy_outcome": "human_review_required", "created_at": "2026-01-02T00:00:00Z"},
+      "decision": {"id": "D-TIME-BAD-001", "proposal_id": "P-TIME-BAD-001", "proposal_sha256": "067e217504a57a4da93dcfaa7edc5555c45034f114413484cd802062569a4d3d", "decision": "approve", "decided_by": {"kind": "human", "id": "editor"}, "decided_at": "2026-01-01T00:00:00Z"},
+      "revision": null
+    },
+    {
+      "name": "revision cannot predate approval",
+      "proposal": {"id": "P-TIME-BAD-002", "risk_class": "AMBER", "policy_outcome": "human_review_required", "created_at": "2026-01-01T00:00:00Z"},
+      "decision": {"id": "D-TIME-BAD-002", "proposal_id": "P-TIME-BAD-002", "proposal_sha256": "be88d131d9abf8d82f148dde26631d6605b7909d214ce747ef3afde642744e1e", "decision": "approve", "decided_by": {"kind": "human", "id": "editor"}, "decided_at": "2026-01-03T00:00:00Z"},
+      "revision": {"id": "R-TIME-BAD-002", "proposal_id": "P-TIME-BAD-002", "decision_id": "D-TIME-BAD-002", "applied_at": "2026-01-02T00:00:00Z"}
     }
   ]
 }
