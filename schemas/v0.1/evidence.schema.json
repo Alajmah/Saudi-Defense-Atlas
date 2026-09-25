@@ -3,7 +3,7 @@
   "$id": "https://schemas.saudi-defense-atlas.org/v0.1/evidence.schema.json",
   "title": "Saudi Defense Atlas Evidence",
   "type": "object",
-  "required": ["id", "document_id", "locator"],
+  "required": ["id", "document_id", "locator", "captured_at", "capture_method"],
   "properties": {
     "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
     "document_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
