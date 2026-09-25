@@ -1,0 +1,12 @@
+{
+  "id": "SDA-SOURCE-USAF",
+  "publisher": {
+    "en": "United States Air Force"
+  },
+  "source_class": "A",
+  "publisher_type": "government",
+  "homepage": "https://www.af.mil/",
+  "jurisdiction": "United States",
+  "notes": "Official public publisher record for the M1 source slice.",
+  "active": true
+}
