@@ -56,9 +56,18 @@
     "licensing_notes": { "type": ["string", "null"] }
   },
   "anyOf": [
-    { "required": ["canonical_url"] },
-    { "required": ["retrieved_url"] },
-    { "required": ["publisher_document_id"] }
+    {
+      "required": ["canonical_url"],
+      "properties": {"canonical_url": {"type": "string", "format": "uri"}}
+    },
+    {
+      "required": ["retrieved_url"],
+      "properties": {"retrieved_url": {"type": "string", "format": "uri"}}
+    },
+    {
+      "required": ["publisher_document_id"],
+      "properties": {"publisher_document_id": {"type": "string", "minLength": 1}}
+    }
   ],
   "additionalProperties": false
 }
