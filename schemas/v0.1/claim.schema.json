@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:sda:schema:v0.1:claim",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/claim.schema.json",
   "title": "Saudi Defense Atlas Claim",
   "type": "object",
   "required": ["id", "subject_id", "predicate_id", "value", "confidence", "evidence_links"],
