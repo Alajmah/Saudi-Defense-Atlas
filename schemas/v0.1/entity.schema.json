@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:sda:schema:v0.1:entity",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/entity.schema.json",
   "title": "Saudi Defense Atlas Entity",
   "type": "object",
   "required": ["id", "entity_type", "names", "record_status"],
