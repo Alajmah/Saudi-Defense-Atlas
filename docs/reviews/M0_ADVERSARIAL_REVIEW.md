@@ -103,11 +103,11 @@ Approval now requires an admission-permitting policy outcome. A dedicated negati
 
 **Why it mattered:** Documentation alone was insufficient evidence that the backend could remain subordinate to the project authority contract.
 
-**Resolution:** CONFIRMED; implementation added, runtime verification pending.
+**Resolution:** CONFIRMED and verified.
 
-`approved-demo-bundle.json` + `apply_approved_demo.py` now exercise an AMBER synthetic proposal that must pass project schemas, exact proposal-hash binding, and cross-record human-review rules before the first backend API call. The post-write project Revision carries backend revision/statement identifiers only as receipts.
+`approved-demo-bundle.json` + `apply_approved_demo.py` exercise an AMBER synthetic proposal that must pass project schemas, exact proposal-hash binding, and cross-record human-review rules before the first backend API call. The post-write project Revision carries backend revision/statement identifiers only as receipts.
 
-No real Saudi-defense record is modified by this adapter test.
+Current-head Wikibase run `36178040438` executed this adapter path successfully. No real Saudi-defense record is modified by the adapter test.
 
 ---
 
@@ -129,15 +129,11 @@ Error paths are normalized to tuples of strings for deterministic sorting.
 
 **Provenance:** second/adversarial review hypothesis.
 
-**Finding:** The spike first uses `action=login`; if it does not return Success, the `clientlogin` fallback reuses the fetched login token. Whether that fallback path is valid for the tested Wikibase Suite image must be demonstrated by runtime evidence.
+**Finding:** The spike first uses `action=login`; if it does not return Success, the `clientlogin` fallback reuses the fetched login token.
 
-**Severity:** Medium
+**Resolution:** NOT EXERCISED / NOT AN M0 BLOCKER.
 
-**Confidence:** Medium
-
-**Status:** UNRESOLVED pending clean CI execution. The normal local admin login path may never enter the fallback.
-
-**Required verification:** Inspect `wikibase-m0-spike` job evidence/logs. If authentication fails in the fallback path, implement the current supported token flow and rerun from a clean instance.
+Clean CI runs authenticated successfully through the tested normal path. The fallback path itself remains unverified and must not be described as supported merely because normal authentication passed. Production authentication design is deferred.
 
 ---
 
@@ -145,15 +141,11 @@ Error paths are normalized to tuples of strings for deterministic sorting.
 
 **Provenance:** second/adversarial review hypothesis.
 
-**Finding:** The verifier polls WDQS after writes, but updater initialization/lag is external to the Action API write. A timeout could represent query-updater convergence failure rather than inability to model the data.
+**Finding:** WDQS is eventually updated separately from Action API writes; convergence behavior is an operational dependency.
 
-**Severity:** Medium
+**Resolution:** M0 criterion PASSED, operational caveat retained.
 
-**Confidence:** High
-
-**Status:** UNRESOLVED pending clean CI execution.
-
-**Interpretation rule:** If WDQS alone times out while Action API representation tests pass, classify M0 as technically inconclusive for the query criterion rather than immediately rejecting the data model.
+Current-head run `36178040438` successfully resolved an SDA canonical ID through WDQS. This demonstrates the tested query path, not a production latency/SLA guarantee.
 
 ---
 
@@ -161,11 +153,11 @@ Error paths are normalized to tuples of strings for deterministic sorting.
 
 **Provenance:** second/adversarial review hypothesis.
 
-**Finding:** The trial mirrors current upstream major images/configuration, but only an actual clean environment can prove the selected subset starts together and exposes the expected APIs.
+**Finding:** Static Compose inspection cannot prove the selected service images start and interoperate.
 
-**Status:** UNRESOLVED pending CI.
+**Resolution:** CONFIRMED by runtime for the tested configuration.
 
-No APR/ADR verification claim may be made from the compose file alone.
+Current-head run `36178040438` started the clean stack, passed health checks, seeded, queried, wrote, uploaded evidence, and tore down successfully. This does not qualify upgrades or production topology.
 
 ---
 
@@ -173,7 +165,7 @@ No APR/ADR verification claim may be made from the compose file alone.
 
 **Provenance:** continued adversarial review finding.
 
-**Finding:** `MAPPING.md` stated that a project Revision had to reference the exact proposal and decision before the adapter could execute a backend write. The implemented adapter instead creates the project Revision after receiving backend identifiers, which is the only coherent ordering if those identifiers are receipts for the applied effect.
+**Finding:** `MAPPING.md` stated that a project Revision had to reference the exact proposal and decision before the adapter could execute a backend write. The implemented adapter instead creates the project Revision after receiving backend identifiers, which is the coherent ordering when those identifiers are receipts for the applied effect.
 
 **Why it mattered:** The documentation described an impossible precondition and blurred authorization evidence with post-effect audit evidence.
 
@@ -185,7 +177,27 @@ The mapping now defines:
 - backend mutation = execution attempt under that authority;
 - post-write audit = project Revision referencing the proposal/decision and carrying backend identifiers as receipts.
 
-The mapping also explicitly states that M0 does **not** prove production-grade exactly-once mutation or reconciliation of interrupted/ambiguous external effects.
+The mapping explicitly states that M0 does **not** prove production-grade exactly-once mutation or reconciliation of interrupted/ambiguous external effects.
+
+---
+
+### R-12 — Cross-record governance did not enforce temporal ordering
+
+**Provenance:** continued adversarial review finding.
+
+**Finding:** Earlier workflow fixtures verified identity, hash binding, risk authority, and approval/rejection semantics but did not reject a decision dated before its proposal or a Revision dated before its approving decision.
+
+**Why it mattered:** An internally inconsistent audit chain could pass cross-record governance validation even when each standalone record was schema-valid.
+
+**Resolution:** CONFIRMED and fixed.
+
+`validate_workflow.py` now enforces temporal ordering when the relevant timestamps are present, and fixtures cover:
+
+- valid proposal → decision → Revision ordering;
+- invalid decision-before-proposal;
+- invalid Revision-before-decision.
+
+Schema/governance run `36178033709` passed the updated tests.
 
 ## Clean areas after second pass
 
@@ -198,17 +210,57 @@ No fundamental issue was found in these reviewed areas:
 - PAC-3 MSE test semantics preserve approval/notification versus contract/delivery;
 - negative schema/workflow fixtures exercise rejection paths rather than only happy paths;
 - host ports in the local spike are loopback-bound;
+- decision binds to the exact proposal payload hash;
+- project Revision is distinct from backend MediaWiki revision receipts;
 - production security, HA, backup, scaling, deployment, and exactly-once effect claims remain outside the M0 claim ceiling.
 
-## Evidence state at time of this review
+## Final evidence state
 
-- Schema/governance validation has produced a successful GitHub Actions run on an implementation head.
-- The complete Wikibase clean-run evidence, including approved-adapter execution, is still required before architectural promotion.
-- ADR-0002 therefore remains `Pending Evidence`.
-- APR-003 must not be marked `VERIFIED` merely because the trial code exists.
+Exact implementation head verified: `e3d08935907d85c20da12531a81a22d43e23f597`.
+
+### Schema/governance
+
+GitHub Actions run `36178033709` completed successfully, including schema fixtures and mutation-governance tests.
+
+### Wikibase trial
+
+GitHub Actions run `36178040438`, job `108213344752`, completed successfully on the same implementation head. It passed:
+
+- clean Wikibase stack startup and health;
+- M0 fixture seeding;
+- representation/query verification;
+- approved synthetic proposal through the adapter gate;
+- verification artifact upload;
+- cleanup.
+
+Artifact `10883261546` reports `PASS` and records:
+
+- Arabic/English/alias resolution;
+- SDA domain ID distinct from Q-ID;
+- qualified multi-reference claim;
+- simultaneous synthetic conflicting quantities;
+- procurement-stage separation;
+- backend revision history;
+- WDQS lookup;
+- Action API read;
+- post-write project Revision with backend receipt for the approved synthetic adapter proof.
+
+## Remaining uncertainty
+
+M0 intentionally does not establish:
+
+- production authentication/authorization;
+- target-scale performance;
+- HA or backup/recovery;
+- long-term upgrade compatibility;
+- exactly-once mutation;
+- retry/reconciliation behavior after interrupted or ambiguous external effects;
+- production observability/operations.
+
+These are later verification surfaces, not reasons to inflate or reject the M0 claim.
 
 ## Second-review judgment
 
-The implementation is suitable to proceed to clean runtime verification **after the confirmed defects above were fixed**.
+**M0 knowledge-core and governance acceptance criteria are satisfied at the bounded claim level.**
 
-The remaining material uncertainties are runtime/tool-integration questions rather than known domain-model contradictions. Evidence from the clean Wikibase workflow must resolve them before the knowledge-core decision is promoted.
+ADR-0002 may promote Wikibase to the accepted M1 canonical knowledge-core implementation while retaining the production limitations above and keeping PostgreSQL as a deferred fallback.
