@@ -3,7 +3,7 @@
   "$id": "https://schemas.saudi-defense-atlas.org/v0.1/event.schema.json",
   "title": "Saudi Defense Atlas Event",
   "type": "object",
-  "required": ["id", "event_type", "occurred_at", "confidence", "evidence_links"],
+  "required": ["id", "event_type", "occurred_at", "confidence", "evidence_links", "created_at"],
   "properties": {
     "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
     "event_type": {
