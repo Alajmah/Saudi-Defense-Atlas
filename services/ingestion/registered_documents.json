@@ -1,0 +1,12 @@
+{
+  "USAF_F15SA_FINAL_DELIVERY_2020": {
+    "source_id": "SDA-SOURCE-USAF",
+    "document_key": "USAF-2444558-F15SA-FINAL-DELIVERY",
+    "canonical_url": "https://www.af.mil/News/Article-Display/Article/2444558/aflcmc-delivers-final-f-15sa-to-royal-saudi-air-force/",
+    "allowed_hosts": ["www.af.mil"],
+    "language": "en",
+    "document_type": "article",
+    "publisher_document_id": "2444558",
+    "expected_title": "AFLCMC delivers final F-15SA to Royal Saudi Air Force"
+  }
+}
