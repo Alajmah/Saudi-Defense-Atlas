@@ -55,6 +55,7 @@
   "decision": {
     "id": "SDA-DECISION-M0-DEMO-001",
     "proposal_id": "SDA-PROPOSAL-M0-DEMO-001",
+    "proposal_sha256": "164998b93bc8ef222cf878fcd7d32e2d6dc061689340f2ad1b526bef0207f4ad",
     "decision": "approve",
     "decided_at": "2026-09-25T18:05:00Z",
     "decided_by": {
