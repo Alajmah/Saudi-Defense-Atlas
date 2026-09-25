@@ -1,12 +1,15 @@
-name: wikibase-m0-spike
+name: wikibase-verification
 
 on:
   pull_request:
     paths:
       - "spikes/wikibase/**"
       - "schemas/v0.1/**"
+      - "services/**"
+      - "data/**"
       - "scripts/validate_schemas.py"
       - "scripts/validate_workflow.py"
+      - "scripts/validate_m1_*.py"
       - ".github/workflows/wikibase-spike.yml"
   workflow_dispatch:
 
@@ -16,7 +19,7 @@ permissions:
 jobs:
   verify-wikibase:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -88,7 +91,7 @@ jobs:
           set +a
           python verify.py
 
-      - name: Apply one approved synthetic proposal through the adapter gate
+      - name: Apply M0 approved synthetic proposal
         working-directory: spikes/wikibase
         shell: bash
         run: |
@@ -98,15 +101,37 @@ jobs:
           set +a
           python apply_approved_demo.py
 
-      - name: Upload M0 verification evidence
+      - name: Bootstrap M1 projection vocabulary
+        working-directory: spikes/wikibase
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          source ./.env
+          set +a
+          python bootstrap_m1_projection.py
+
+      - name: Verify M1 guarded vertical-slice convergence and replay
+        working-directory: spikes/wikibase
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          source ./.env
+          set +a
+          python run_m1_vertical_slice.py
+
+      - name: Upload Wikibase verification evidence
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: wikibase-m0-verification
+          name: wikibase-verification
           path: |
             spikes/wikibase/state.generated.json
             spikes/wikibase/verification.generated.json
             spikes/wikibase/approved-demo-applied.generated.json
+            spikes/wikibase/m1_projection_state.generated.json
+            spikes/wikibase/m1_vertical_slice.generated.json
           if-no-files-found: error
           retention-days: 14
 
@@ -115,7 +140,7 @@ jobs:
         working-directory: spikes/wikibase
         run: |
           docker compose ps || true
-          docker compose logs --no-color --tail=300 || true
+          docker compose logs --no-color --tail=400 || true
 
       - name: Clean up spike stack
         if: always()
