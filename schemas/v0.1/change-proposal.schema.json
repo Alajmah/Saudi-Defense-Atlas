@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sda:schema:v0.1:change-proposal",
+  "title": "Saudi Defense Atlas Change Proposal",
+  "type": "object",
+  "required": ["id", "created_at", "created_by", "risk_class", "policy_outcome", "mutations"],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "created_by": { "$ref": "common.schema.json#/$defs/actor" },
+    "source_document_ids": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
+      "uniqueItems": true,
+      "default": []
+    },
+    "risk_class": {
+      "type": "string",
+      "enum": ["GREEN", "AMBER", "RED"]
+    },
+    "policy_outcome": {
+      "type": "string",
+      "enum": ["pending", "auto_admit_allowed", "human_review_required", "blocked"]
+    },
+    "policy_reasons": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "default": []
+    },
+    "rationale": { "type": ["string", "null"] },
+    "supersedes_proposal_id": {
+      "oneOf": [
+        { "$ref": "common.schema.json#/$defs/canonical_id" },
+        { "type": "null" }
+      ]
+    },
+    "mutations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["id", "action", "resource_type", "payload"],
+        "properties": {
+          "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "action": {
+            "type": "string",
+            "enum": ["create", "supersede", "merge", "metadata_update"]
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": ["entity", "claim", "event", "source", "document", "evidence"]
+          },
+          "target_id": {
+            "oneOf": [
+              { "$ref": "common.schema.json#/$defs/canonical_id" },
+              { "type": "null" }
+            ]
+          },
+          "payload": {
+            "oneOf": [
+              { "$ref": "entity.schema.json" },
+              { "$ref": "claim.schema.json" },
+              { "$ref": "event.schema.json" },
+              { "$ref": "source.schema.json" },
+              { "$ref": "document.schema.json" },
+              { "$ref": "evidence.schema.json" }
+            ]
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "action": { "enum": ["supersede", "merge", "metadata_update"] }
+              }
+            },
+            "then": { "required": ["target_id"] }
+          }
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "risk_class": { "const": "RED" } } },
+      "then": { "properties": { "policy_outcome": { "const": "blocked" } } }
+    },
+    {
+      "if": { "properties": { "risk_class": { "const": "AMBER" } } },
+      "then": { "properties": { "policy_outcome": { "enum": ["pending", "human_review_required", "blocked"] } } }
+    }
+  ],
+  "additionalProperties": false
+}
