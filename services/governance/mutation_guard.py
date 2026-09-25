@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
-from .proposal_auth import canonical_sha256, validate_approval
+from .proposal_auth import validate_approval
 
 
 class DefinitiveWriteError(RuntimeError):
@@ -34,7 +34,7 @@ class EffectInspection:
 class EffectResult:
     mutation_id: str
     idempotency_key: str
-    status: str  # already_applied | applied | failed | effect_unknown
+    status: str  # not_attempted | already_applied | applied | failed | effect_unknown
     write_attempted: bool
     receipt: str | None = None
     detail: str | None = None
@@ -111,6 +111,34 @@ def _find_mutations(proposal: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return result
 
 
+def _result_from_inspection(
+    *, mutation: Mapping[str, Any], key: str, inspection: EffectInspection
+) -> EffectResult:
+    if inspection.state == "equivalent":
+        status = "already_applied"
+    elif inspection.state in {"conflict", "unknown"}:
+        status = "effect_unknown"
+    else:
+        status = "not_attempted"
+    return EffectResult(
+        mutation_id=str(mutation["id"]),
+        idempotency_key=key,
+        status=status,
+        write_attempted=False,
+        receipt=inspection.receipt,
+        detail=inspection.detail,
+    )
+
+
+def _remaining_results(
+    preflight: list[tuple[Mapping[str, Any], str, EffectInspection]], start: int
+) -> list[EffectResult]:
+    return [
+        _result_from_inspection(mutation=mutation, key=key, inspection=inspection)
+        for mutation, key, inspection in preflight[start:]
+    ]
+
+
 def execute_authorized_proposal(
     *,
     proposal: Mapping[str, Any],
@@ -120,10 +148,10 @@ def execute_authorized_proposal(
     """Converge an approved proposal without blind retries.
 
     The function performs a full preflight before any write. Existing equivalent
-    effects are skipped. Any preflight conflict/unknown state blocks new writes.
-    During execution, each absent effect receives at most one write attempt. If a
-    write outcome is ambiguous, the backend is inspected once; only observed
-    equivalence is accepted as success.
+    effects are skipped. Any preflight conflict/unknown state blocks all new
+    writes. During execution, each absent effect receives at most one write
+    attempt. If a write outcome is ambiguous, the backend is inspected once;
+    only observed equivalence is accepted as success.
     """
     proposal_digest = validate_approval(proposal, decision)
     proposal_id = str(proposal["id"])
@@ -142,43 +170,28 @@ def execute_authorized_proposal(
             raise ValueError(f"backend returned invalid inspection state: {inspection.state}")
         preflight.append((mutation, key, inspection))
 
-    blockers = [entry for entry in preflight if entry[2].state in {"conflict", "unknown"}]
-    if blockers:
-        effects = tuple(
-            EffectResult(
-                mutation_id=str(mutation["id"]),
-                idempotency_key=key,
-                status=(
-                    "already_applied"
-                    if inspection.state == "equivalent"
-                    else "effect_unknown"
-                    if inspection.state in {"conflict", "unknown"}
-                    else "failed"
-                ),
-                write_attempted=False,
-                receipt=inspection.receipt,
-                detail=inspection.detail,
-            )
-            for mutation, key, inspection in preflight
-        )
+    if any(
+        inspection.state in {"conflict", "unknown"}
+        for _, _, inspection in preflight
+    ):
         return ProposalExecutionResult(
             status="effect_unknown",
             proposal_sha256=proposal_digest,
-            effects=effects,
+            effects=tuple(
+                _result_from_inspection(
+                    mutation=mutation, key=key, inspection=inspection
+                )
+                for mutation, key, inspection in preflight
+            ),
         )
 
     results: list[EffectResult] = []
-    for mutation, key, inspection in preflight:
+    for index, (mutation, key, inspection) in enumerate(preflight):
         mutation_id = str(mutation["id"])
         if inspection.state == "equivalent":
             results.append(
-                EffectResult(
-                    mutation_id=mutation_id,
-                    idempotency_key=key,
-                    status="already_applied",
-                    write_attempted=False,
-                    receipt=inspection.receipt,
-                    detail=inspection.detail,
+                _result_from_inspection(
+                    mutation=mutation, key=key, inspection=inspection
                 )
             )
             continue
@@ -195,6 +208,7 @@ def execute_authorized_proposal(
                     detail=str(exc),
                 )
             )
+            results.extend(_remaining_results(preflight, index + 1))
             return ProposalExecutionResult(
                 status="failed",
                 proposal_sha256=proposal_digest,
@@ -224,6 +238,7 @@ def execute_authorized_proposal(
                     detail=f"{exc}; reconciliation={reconciled.state}",
                 )
             )
+            results.extend(_remaining_results(preflight, index + 1))
             return ProposalExecutionResult(
                 status="effect_unknown",
                 proposal_sha256=proposal_digest,
@@ -242,6 +257,7 @@ def execute_authorized_proposal(
                     detail=f"write returned but reconciliation={reconciled.state}",
                 )
             )
+            results.extend(_remaining_results(preflight, index + 1))
             return ProposalExecutionResult(
                 status="effect_unknown",
                 proposal_sha256=proposal_digest,
