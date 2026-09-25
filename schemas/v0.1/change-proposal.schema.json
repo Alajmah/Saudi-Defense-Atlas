@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:sda:schema:v0.1:change-proposal",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/change-proposal.schema.json",
   "title": "Saudi Defense Atlas Change Proposal",
   "type": "object",
   "required": ["id", "created_at", "created_by", "risk_class", "policy_outcome", "mutations"],
