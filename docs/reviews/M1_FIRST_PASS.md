@@ -23,6 +23,7 @@ M1 is being reviewed across:
 - ambiguous effects and retry behavior;
 - project Revision creation threshold;
 - backend identity versus SDA domain identity;
+- project predicate semantics versus backend projection direction;
 - bilingual projection and citations;
 - restricted operational-detail exclusion;
 - CI reproducibility and negative-path coverage.
@@ -144,6 +145,24 @@ A fake-backend matrix tests clean convergence, replay, preflight unknown, defini
 
 ---
 
+### M1-F06 — The M0 trial projection reverses the accepted operator predicate
+
+**Area:** ontology / backend mapping
+
+**Finding:** The accepted ontology defines `organization.operates.equipment_variant` (organization → equipment variant), while the M0 Wikibase spike created an `operator` statement on the equipment item pointing to the organization (equipment → organization).
+
+**Why it matters:** Reusing the M0 property merely because it already exists would let a trial backend vocabulary override project-native predicate direction and would make the M1 Claim payload semantically inconsistent with its storage projection.
+
+**Severity:** High
+
+**Confidence:** High
+
+**Resolution:** M1 MAPPING DECISION RECORDED; runtime proof pending.
+
+M1 will introduce/use a Wikibase projection property corresponding to `organization.operates.equipment_variant` and place the statement on the organization item. The legacy M0 `operator` property remains trial evidence only and is not canonical SDA predicate authority.
+
+---
+
 ## Areas currently considered sound at this review stage
 
 - registered source URLs are HTTPS-only;
@@ -162,13 +181,14 @@ A fake-backend matrix tests clean convergence, replay, preflight unknown, defini
 - Does the source-specific canonicalization remain stable against the live USAF page while still detecting material article edits?
 - Does the Wikibase adapter implement `inspect_effect` strongly enough to distinguish equivalent/conflict/unknown for every resource type in this proposal?
 - How are Source/Document/Evidence projected into Wikibase without losing project-native provenance semantics?
+- Does the M1 Wikibase mapping preserve canonical SDA predicate direction rather than inheriting M0 trial direction?
 - How is a fully converged proposal transformed into one schema-valid project Revision with complete backend receipts?
 - How are Arabic labels introduced with explicit provenance or editorial terminology authority rather than inferred from the English source?
 - Can one public bilingual page be rendered entirely from canonical SDA records with citations and no independent CMS truth copy?
 
 ## FIRST-PASS REVIEW CHECKPOINT
 
-Known findings: M1-F01 through M1-F05 above.
+Known findings: M1-F01 through M1-F06 above.
 
 Suspected findings: live-page canonicalization drift and backend inspection-strength differences by resource type require runtime verification.
 
