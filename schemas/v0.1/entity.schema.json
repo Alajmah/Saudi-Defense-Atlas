@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:sda:schema:v0.1:entity",
+  "title": "Saudi Defense Atlas Entity",
+  "type": "object",
+  "required": ["id", "entity_type", "names", "record_status"],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "entity_type": {
+      "type": "string",
+      "enum": [
+        "organization",
+        "military_unit",
+        "equipment",
+        "equipment_variant",
+        "facility",
+        "exercise",
+        "procurement_program",
+        "contract",
+        "localization_program",
+        "country"
+      ]
+    },
+    "subtype": { "type": ["string", "null"] },
+    "names": { "$ref": "common.schema.json#/$defs/localized_text" },
+    "aliases": {
+      "type": "array",
+      "items": { "$ref": "common.schema.json#/$defs/alias" },
+      "default": []
+    },
+    "descriptions": { "$ref": "common.schema.json#/$defs/localized_text" },
+    "external_identifiers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["scheme", "value"],
+        "properties": {
+          "scheme": { "type": "string", "minLength": 1 },
+          "value": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "backend_identifiers": {
+      "type": "array",
+      "description": "Adapter mappings only. These identifiers do not define domain identity.",
+      "items": {
+        "type": "object",
+        "required": ["backend", "value"],
+        "properties": {
+          "backend": { "type": "string", "minLength": 1 },
+          "value": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      },
+      "default": []
+    },
+    "record_status": {
+      "type": "string",
+      "enum": ["active", "superseded", "merged", "deprecated"]
+    },
+    "merged_into": {
+      "oneOf": [
+        { "$ref": "common.schema.json#/$defs/canonical_id" },
+        { "type": "null" }
+      ]
+    },
+    "created_at": { "type": "string", "format": "date-time" },
+    "updated_at": { "type": "string", "format": "date-time" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "record_status": { "const": "merged" } } },
+      "then": { "required": ["merged_into"] }
+    }
+  ],
+  "additionalProperties": false
+}
