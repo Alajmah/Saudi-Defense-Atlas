@@ -7,6 +7,7 @@ following references across ChangeProposal, ReviewDecision, and Revision records
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -18,6 +19,13 @@ FIXTURE_FILE = ROOT / "tests" / "fixtures" / "workflow-fixtures.json"
 def load_json(path: Path) -> dict:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def canonical_sha256(payload: dict) -> str:
+    canonical = json.dumps(
+        payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def validate_case(case: dict) -> list[str]:
@@ -42,7 +50,11 @@ def validate_case(case: dict) -> list[str]:
 
     if decision is not None:
         if decision["proposal_id"] != proposal["id"]:
-            errors.append("decision must reference the exact proposal")
+            errors.append("decision must reference the proposal ID")
+
+        expected_hash = canonical_sha256(proposal)
+        if decision.get("proposal_sha256") != expected_hash:
+            errors.append("decision must bind to the exact proposal payload hash")
 
         actor_kind = decision["decided_by"]["kind"]
         action = decision["decision"]
