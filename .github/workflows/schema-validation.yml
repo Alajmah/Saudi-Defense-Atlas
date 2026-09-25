@@ -6,6 +6,7 @@ on:
     branches:
       - main
       - "bootstrap/**"
+      - "m1/**"
 
 permissions:
   contents: read
@@ -31,3 +32,6 @@ jobs:
 
       - name: Validate mutation governance
         run: python scripts/validate_workflow.py
+
+      - name: Validate M1 deterministic ingestion
+        run: python scripts/validate_m1_ingestion.py
