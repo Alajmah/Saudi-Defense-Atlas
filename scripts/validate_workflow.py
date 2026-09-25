@@ -47,6 +47,9 @@ def validate_case(case: dict) -> list[str]:
         actor_kind = decision["decided_by"]["kind"]
         action = decision["decision"]
 
+        if action == "approve" and outcome in {"pending", "blocked"}:
+            errors.append("proposal cannot be approved before policy permits admission")
+
         if action == "approve" and actor_kind == "system":
             if risk != "GREEN" or outcome != "auto_admit_allowed":
                 errors.append("system approval is allowed only for GREEN auto-admit proposals")
@@ -58,6 +61,8 @@ def validate_case(case: dict) -> list[str]:
             errors.append(f"{action} decision cannot create a canonical revision")
 
     if revision is not None:
+        if outcome not in {"auto_admit_allowed", "human_review_required"}:
+            errors.append("canonical revision requires a policy outcome that permits admission")
         if decision is None:
             errors.append("canonical revision requires a review decision")
         else:
