@@ -42,15 +42,19 @@
           "names": { "$ref": "common.schema.json#/$defs/localized_text" },
           "match": {
             "type": "object",
-            "required": ["type", "language", "field", "value"],
+            "required": ["type", "language", "field", "value", "source_record_id"],
             "properties": {
               "type": {
                 "type": "string",
                 "enum": ["exact", "normalized_exact", "token_prefix", "contains"]
               },
               "language": { "type": "string", "enum": ["ar", "en", "und"] },
-              "field": { "type": "string", "enum": ["canonical_name", "alias"] },
-              "value": { "type": "string", "minLength": 1 }
+              "field": {
+                "type": "string",
+                "enum": ["canonical_name", "alias", "merged_name", "merged_alias"]
+              },
+              "value": { "type": "string", "minLength": 1 },
+              "source_record_id": { "$ref": "common.schema.json#/$defs/canonical_id" }
             },
             "additionalProperties": false
           }
