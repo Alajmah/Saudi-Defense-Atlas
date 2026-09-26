@@ -65,7 +65,7 @@ The M1 web shell is intentionally framework-neutral. Selection of a production f
 
 - **M0:** complete — foundation and verified Wikibase knowledge core.
 - **M1 write/provenance increment:** merged.
-- **M1 public/read increment:** implemented in PR #3 and gated by exact-head static plus clean-stack verification.
+- **M1 public/read increment:** implemented in PR #3 and qualified by static plus clean-stack verification gates.
 - **M1-F15:** concurrent-writer canonical-ID uniqueness remains unresolved; production automated canonical mutation workers stay disabled until that mechanism is designed and verified.
 
 See `docs/ROADMAP.md` and `docs/M1_PUBLIC_PROJECTION.md` for milestone scope and qualification boundaries.
