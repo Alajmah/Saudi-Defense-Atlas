@@ -30,105 +30,54 @@ _ASCII_ALNUM_RE = re.compile(r"[a-z0-9]")
 
 _TRANSLATION = str.maketrans(
     {
-        "أ": "ا",
-        "إ": "ا",
-        "آ": "ا",
-        "ٱ": "ا",
-        "ى": "ي",
-        "٠": "0",
-        "١": "1",
-        "٢": "2",
-        "٣": "3",
-        "٤": "4",
-        "٥": "5",
-        "٦": "6",
-        "٧": "7",
-        "٨": "8",
-        "٩": "9",
-        "۰": "0",
-        "۱": "1",
-        "۲": "2",
-        "۳": "3",
-        "۴": "4",
-        "۵": "5",
-        "۶": "6",
-        "۷": "7",
-        "۸": "8",
-        "۹": "9",
-        "‐": "-",
-        "‑": "-",
-        "‒": "-",
-        "–": "-",
-        "—": "-",
-        "−": "-",
+        "أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا", "ى": "ي",
+        "٠": "0", "١": "1", "٢": "2", "٣": "3", "٤": "4",
+        "٥": "5", "٦": "6", "٧": "7", "٨": "8", "٩": "9",
+        "۰": "0", "۱": "1", "۲": "2", "۳": "3", "۴": "4",
+        "۵": "5", "۶": "6", "۷": "7", "۸": "8", "۹": "9",
+        "‐": "-", "‑": "-", "‒": "-", "–": "-", "—": "-", "−": "-",
     }
 )
 
 _ENTITY_TYPES = {
-    "organization",
-    "military_unit",
-    "equipment",
-    "equipment_variant",
-    "facility",
-    "exercise",
-    "procurement_program",
-    "contract",
-    "localization_program",
-    "country",
+    "organization", "military_unit", "equipment", "equipment_variant",
+    "facility", "exercise", "procurement_program", "contract",
+    "localization_program", "country",
 }
 _ALIAS_KINDS = {
-    "official",
-    "abbreviation",
-    "transliteration",
-    "designation",
-    "common",
-    "historical",
-    "search",
+    "official", "abbreviation", "transliteration", "designation",
+    "common", "historical", "search",
 }
 _FACET_KEYS = (
-    "service_ids",
-    "manufacturer_ids",
-    "country_ids",
-    "equipment_classes",
-    "status_values",
+    "service_ids", "manufacturer_ids", "country_ids",
+    "equipment_classes", "status_values",
 )
 _QUERY_FILTER_KEYS = {"entity_types", *_FACET_KEYS}
 _QUERY_KEYS = {"query", "locale", "limit", "filters"}
-_SEARCH_DOCUMENT_KEYS = {
-    "id",
-    "entity_type",
-    "subtype",
-    "names",
-    "aliases",
-    "descriptions",
-    "normalized_terms",
-    "facets",
-    "projected_at",
-    "revision_ids",
+
+# Keep schema-required and schema-allowed fields separate. subtype/descriptions
+# are intentionally optional in search-document.schema.json.
+_SEARCH_DOCUMENT_REQUIRED_KEYS = {
+    "id", "entity_type", "names", "aliases", "normalized_terms",
+    "facets", "projected_at", "revision_ids",
 }
+_SEARCH_DOCUMENT_ALLOWED_KEYS = {
+    *_SEARCH_DOCUMENT_REQUIRED_KEYS, "subtype", "descriptions",
+}
+
 _QUALITY_ORDER = {
-    "exact_id": 0,
-    "exact_name": 1,
-    "exact_alias": 2,
-    "prefix": 3,
-    "token": 4,
+    "exact_id": 0, "exact_name": 1, "exact_alias": 2,
+    "prefix": 3, "token": 4,
 }
 
 
 def normalize_search_text(value: str) -> str:
-    """Return conservative orthographic folding for lexical search only.
-
-    The fold intentionally does not stem Arabic, strip the definite article,
-    transliterate between scripts, or merge taa marbuta/haa. Those behaviors
-    require separate evidence because they can change meaning or recall/precision.
-    """
-
+    """Return conservative orthographic folding for lexical search only."""
     if not isinstance(value, str):
         raise SearchContractError("search text must be a string")
     text = unicodedata.normalize("NFKC", value).casefold()
     text = text.replace("ـ", "")
     text = _ARABIC_DIACRITICS_RE.sub("", text).translate(_TRANSLATION)
-
     folded: list[str] = []
     for char in text:
         if char == "-" or char.isalnum() or _ARABIC_RE.fullmatch(char):
@@ -136,7 +85,6 @@ def normalize_search_text(value: str) -> str:
             continue
         category = unicodedata.category(char)
         folded.append(" " if category.startswith(("P", "S", "Z")) else char)
-
     return _WHITESPACE_RE.sub(" ", "".join(folded)).strip()
 
 
@@ -146,8 +94,7 @@ def _normalized_variants(value: str, *, compact: bool = False) -> set[str]:
         return set()
     variants = {normalized}
     if (
-        compact
-        and len(normalized) <= 64
+        compact and len(normalized) <= 64
         and _ASCII_ALNUM_RE.search(normalized)
         and _COMPACT_RE.search(normalized)
     ):
@@ -182,7 +129,9 @@ def _public_localized(value: Any, label: str) -> dict[str, str]:
         raise SearchContractError(f"{label} must be localized text")
     unknown = sorted(set(value) - {"ar", "en"})
     if unknown:
-        raise SearchContractError(f"{label} contains unsupported locales: {', '.join(unknown)}")
+        raise SearchContractError(
+            f"{label} contains unsupported locales: {', '.join(unknown)}"
+        )
     result: dict[str, str] = {}
     for locale in ("ar", "en"):
         item = value.get(locale)
@@ -249,16 +198,23 @@ def _string_array(
     return result
 
 
-def _facets(value: Mapping[str, Sequence[str]] | None) -> dict[str, list[str]]:
-    if value is not None and not isinstance(value, Mapping):
-        raise SearchContractError("facets must be an object")
-    provided = dict(value or {})
+def _facets(value: Any, *, require_complete: bool = False) -> dict[str, list[str]]:
+    if not isinstance(value, Mapping):
+        if value is None and not require_complete:
+            value = {}
+        else:
+            raise SearchContractError("facets must be an object")
+    provided = dict(value)
+    missing = sorted(set(_FACET_KEYS) - set(provided))
     unknown = sorted(set(provided) - set(_FACET_KEYS))
+    if require_complete and missing:
+        raise SearchContractError("facets missing required keys: " + ", ".join(missing))
     if unknown:
         raise SearchContractError("unknown search facets: " + ", ".join(unknown))
     result: dict[str, list[str]] = {}
     for key in _FACET_KEYS:
-        result[key] = sorted(_string_array(provided.get(key, ()), f"facet {key}"))
+        raw = provided[key] if key in provided else ()
+        result[key] = sorted(_string_array(raw, f"facet {key}"))
     return result
 
 
@@ -281,6 +237,28 @@ def _query_filters(value: Any) -> dict[str, list[str]]:
     return result
 
 
+def _normalized_terms_from_public_fields(
+    *,
+    entity_id: str,
+    names: Mapping[str, str],
+    aliases: Sequence[Mapping[str, Any]],
+    descriptions: Mapping[str, str] | None,
+) -> dict[str, list[str]]:
+    """Derive the one authoritative normalized-term projection."""
+    terms: dict[str, set[str]] = {"ar": set(), "en": set(), "neutral": set()}
+    terms["neutral"].update(_normalized_variants(entity_id, compact=True))
+    for locale, value in names.items():
+        terms[locale].update(_normalized_variants(value, compact=True))
+    if descriptions:
+        for locale, value in descriptions.items():
+            terms[locale].update(_normalized_variants(value, compact=False))
+    for alias in aliases:
+        language = alias.get("language")
+        channel = language if language in {"ar", "en"} else "neutral"
+        terms[channel].update(_normalized_variants(str(alias["value"]), compact=True))
+    return {locale: sorted(values) for locale, values in terms.items()}
+
+
 def build_search_document(
     *,
     entity: Mapping[str, Any],
@@ -288,12 +266,7 @@ def build_search_document(
     projected_at: str,
     revision_ids: Sequence[str],
 ) -> dict[str, Any]:
-    """Project one active public Entity into an engine-neutral search document.
-
-    Facets are caller-supplied projections. This function never infers service,
-    manufacturer, country, status, or equipment class from raw claims.
-    """
-
+    """Project one active public Entity into an engine-neutral search document."""
     entity_id = entity.get("id")
     entity_type = entity.get("entity_type")
     if not isinstance(entity_id, str) or not entity_id:
@@ -306,50 +279,36 @@ def build_search_document(
     names = _public_localized(entity.get("names"), "names")
     aliases = _aliases(entity.get("aliases", []))
     descriptions_raw = entity.get("descriptions")
-    descriptions = (
-        None
-        if descriptions_raw is None
-        else _public_localized(descriptions_raw, "descriptions")
+    descriptions = None if descriptions_raw is None else _public_localized(
+        descriptions_raw, "descriptions"
     )
-
-    revisions = sorted(
-        set(_string_array(revision_ids, "revision_ids", require_unique=True))
-    )
+    revisions = sorted(set(_string_array(revision_ids, "revision_ids")))
     if not revisions:
         raise SearchContractError("search document requires at least one Revision ID")
-
-    terms: dict[str, set[str]] = {"ar": set(), "en": set(), "neutral": set()}
-    terms["neutral"].update(_normalized_variants(entity_id, compact=True))
-
-    for locale, value in names.items():
-        terms[locale].update(_normalized_variants(value, compact=True))
-    if descriptions:
-        for locale, value in descriptions.items():
-            terms[locale].update(_normalized_variants(value, compact=False))
-
-    for alias in aliases:
-        language = alias.get("language")
-        channel = language if language in {"ar", "en"} else "neutral"
-        terms[channel].update(_normalized_variants(str(alias["value"]), compact=True))
-
     subtype = entity.get("subtype")
     if subtype is not None and not isinstance(subtype, str):
         raise SearchContractError("Entity subtype must be string or null")
 
-    return {
+    document: dict[str, Any] = {
         "id": entity_id,
         "entity_type": entity_type,
-        "subtype": subtype,
         "names": names,
         "aliases": aliases,
-        "descriptions": descriptions,
-        "normalized_terms": {
-            locale: sorted(values) for locale, values in terms.items()
-        },
+        "normalized_terms": _normalized_terms_from_public_fields(
+            entity_id=entity_id,
+            names=names,
+            aliases=aliases,
+            descriptions=descriptions,
+        ),
         "facets": _facets(facets),
         "projected_at": _parse_utc(projected_at, "projected_at"),
         "revision_ids": revisions,
     }
+    if subtype is not None:
+        document["subtype"] = subtype
+    if descriptions is not None:
+        document["descriptions"] = descriptions
+    return document
 
 
 def resolve_query_locale(query: str, requested_locale: str) -> str:
@@ -360,48 +319,85 @@ def resolve_query_locale(query: str, requested_locale: str) -> str:
     return "ar" if _ARABIC_RE.search(query) else "en"
 
 
-def _validate_search_document(document: Mapping[str, Any]) -> None:
-    missing = sorted(_SEARCH_DOCUMENT_KEYS - set(document))
-    unknown = sorted(set(document) - _SEARCH_DOCUMENT_KEYS)
+def _validate_search_document(document: Mapping[str, Any]) -> dict[str, Any]:
+    missing = sorted(_SEARCH_DOCUMENT_REQUIRED_KEYS - set(document))
+    unknown = sorted(set(document) - _SEARCH_DOCUMENT_ALLOWED_KEYS)
     if missing:
         raise SearchContractError("search document missing fields: " + ", ".join(missing))
     if unknown:
-        raise SearchContractError("search document contains unknown fields: " + ", ".join(unknown))
-    if not isinstance(document.get("id"), str) or not document["id"]:
+        raise SearchContractError(
+            "search document contains unknown fields: " + ", ".join(unknown)
+        )
+
+    entity_id = document.get("id")
+    if not isinstance(entity_id, str) or not entity_id:
         raise SearchContractError("search document requires canonical ID")
-    if document.get("entity_type") not in _ENTITY_TYPES:
+    entity_type = document.get("entity_type")
+    if entity_type not in _ENTITY_TYPES:
         raise SearchContractError("search document has unsupported entity_type")
-    _public_localized(document.get("names"), "search document names")
-    _aliases(document.get("aliases"))
-    descriptions = document.get("descriptions")
-    if descriptions is not None:
-        _public_localized(descriptions, "search document descriptions")
-    _facets(document.get("facets"))
-    _parse_utc(document.get("projected_at"), "search document projected_at")
-    revisions = _string_array(document.get("revision_ids"), "search document revision_ids")
+    subtype = document.get("subtype")
+    if "subtype" in document and subtype is not None and not isinstance(subtype, str):
+        raise SearchContractError("search document subtype must be string or null")
+
+    names = _public_localized(document.get("names"), "search document names")
+    aliases = _aliases(document.get("aliases"))
+    descriptions_raw = document.get("descriptions")
+    descriptions = None if descriptions_raw is None else _public_localized(
+        descriptions_raw, "search document descriptions"
+    )
+    facets = _facets(document.get("facets"), require_complete=True)
+    projected_at = _parse_utc(
+        document.get("projected_at"), "search document projected_at"
+    )
+    revisions = _string_array(
+        document.get("revision_ids"), "search document revision_ids"
+    )
     if not revisions:
         raise SearchContractError("search document requires at least one Revision ID")
 
     normalized_terms = document.get("normalized_terms")
-    if not isinstance(normalized_terms, Mapping) or set(normalized_terms) != {"ar", "en", "neutral"}:
+    if not isinstance(normalized_terms, Mapping) or set(normalized_terms) != {
+        "ar", "en", "neutral"
+    }:
         raise SearchContractError("search document normalized_terms is malformed")
+    actual_terms: dict[str, list[str]] = {}
     for locale in ("ar", "en", "neutral"):
-        _string_array(normalized_terms[locale], f"normalized_terms.{locale}")
+        actual_terms[locale] = sorted(
+            _string_array(normalized_terms[locale], f"normalized_terms.{locale}")
+        )
+    expected_terms = _normalized_terms_from_public_fields(
+        entity_id=entity_id,
+        names=names,
+        aliases=aliases,
+        descriptions=descriptions,
+    )
+    if actual_terms != expected_terms:
+        raise SearchContractError(
+            "search document normalized_terms do not match the deterministic public-field projection"
+        )
+
+    return {
+        "id": entity_id,
+        "entity_type": entity_type,
+        "subtype": subtype,
+        "names": names,
+        "aliases": aliases,
+        "descriptions": descriptions,
+        "normalized_terms": actual_terms,
+        "facets": facets,
+        "projected_at": projected_at,
+        "revision_ids": revisions,
+    }
 
 
 def _filters_match(document: Mapping[str, Any], filters: Mapping[str, list[str]]) -> bool:
     entity_types = filters["entity_types"]
     if entity_types and document.get("entity_type") not in set(entity_types):
         return False
-
     facets = document["facets"]
     for key in _FACET_KEYS:
         requested = filters[key]
-        if not requested:
-            continue
-        actual = facets[key]
-        # OR within one facet, AND across different facet categories.
-        if not set(requested).intersection(actual):
+        if requested and not set(requested).intersection(facets[key]):
             return False
     return True
 
@@ -409,18 +405,13 @@ def _filters_match(document: Mapping[str, Any], filters: Mapping[str, list[str]]
 def _field_terms(document: Mapping[str, Any], locale: str) -> dict[str, set[str]]:
     fields: dict[str, set[str]] = {
         "id": _normalized_variants(str(document["id"]), compact=True),
-        "name": set(),
-        "alias": set(),
-        "description": set(),
+        "name": set(), "alias": set(), "description": set(),
     }
-    names = document["names"]
-    for value in names.values():
+    for value in document["names"].values():
         fields["name"].update(_normalized_variants(value, compact=True))
-
     for alias in document["aliases"]:
         fields["alias"].update(_normalized_variants(alias["value"], compact=True))
-
-    descriptions = document["descriptions"]
+    descriptions = document.get("descriptions")
     if isinstance(descriptions, Mapping):
         preferred = descriptions.get(locale)
         if isinstance(preferred, str):
@@ -428,29 +419,29 @@ def _field_terms(document: Mapping[str, Any], locale: str) -> dict[str, set[str]
         for other_locale, value in descriptions.items():
             if other_locale != locale:
                 fields["description"].update(_normalized_variants(value))
-    return fields
+
+    declared: set[str] = set()
+    for values in document["normalized_terms"].values():
+        declared.update(values)
+    return {field: values.intersection(declared) for field, values in fields.items()}
 
 
 def _match_document(
     document: Mapping[str, Any], normalized_query: str, locale: str
 ) -> tuple[str, list[str]] | None:
     fields = _field_terms(document, locale)
-
     if normalized_query in fields["id"]:
         return "exact_id", ["id"]
     if normalized_query in fields["name"]:
         return "exact_name", ["name"]
     if normalized_query in fields["alias"]:
         return "exact_alias", ["alias"]
-
     prefix_fields = [
-        field
-        for field in ("name", "alias")
+        field for field in ("name", "alias")
         if any(term.startswith(normalized_query) for term in fields[field])
     ]
     if prefix_fields:
         return "prefix", prefix_fields
-
     query_tokens = _tokens({normalized_query})
     if not query_tokens:
         return None
@@ -460,8 +451,7 @@ def _match_document(
         combined_tokens.update(values)
     if query_tokens.issubset(combined_tokens):
         matched_fields = [
-            field
-            for field in ("id", "name", "alias", "description")
+            field for field in ("id", "name", "alias", "description")
             if query_tokens.intersection(field_tokens[field])
         ]
         return "token", matched_fields or ["name"]
@@ -469,17 +459,9 @@ def _match_document(
 
 
 def execute_reference_lexical_search(
-    *,
-    documents: Sequence[Mapping[str, Any]],
-    query: Mapping[str, Any],
+    *, documents: Sequence[Mapping[str, Any]], query: Mapping[str, Any]
 ) -> dict[str, Any]:
-    """Execute deterministic reference semantics for the v0.1 lexical contract.
-
-    This function is an acceptance oracle, not the chosen production search engine.
-    Future adapters may rank more intelligently, but must preserve canonical identity,
-    query/filter semantics, display locale behavior, and the declared capability ceiling.
-    """
-
+    """Execute deterministic reference semantics for v0.1 lexical search."""
     if not isinstance(query, Mapping):
         raise SearchContractError("query must be an object")
     missing_query = sorted(_QUERY_KEYS - set(query))
@@ -500,22 +482,21 @@ def execute_reference_lexical_search(
         raise SearchContractError("locale must be ar, en, or auto")
     if not isinstance(limit, int) or isinstance(limit, bool) or not 1 <= limit <= 50:
         raise SearchContractError("limit must be an integer from 1 to 50")
-    filters = _query_filters(query["filters"])
 
+    filters = _query_filters(query["filters"])
     locale = resolve_query_locale(raw_query, requested_locale)
     normalized_query = normalize_search_text(raw_query)
     if not normalized_query:
         raise SearchContractError("query is empty after normalization")
-
     if not isinstance(documents, Sequence) or isinstance(documents, (str, bytes)):
         raise SearchContractError("documents must be an array")
 
     candidates: list[tuple[int, str, str, Mapping[str, Any], str, list[str]]] = []
     seen_ids: set[str] = set()
-    for document in documents:
-        if not isinstance(document, Mapping):
+    for raw_document in documents:
+        if not isinstance(raw_document, Mapping):
             raise SearchContractError("search document must be an object")
-        _validate_search_document(document)
+        document = _validate_search_document(raw_document)
         document_id = str(document["id"])
         if document_id in seen_ids:
             raise SearchContractError(f"duplicate search document ID: {document_id}")
@@ -528,37 +509,26 @@ def execute_reference_lexical_search(
         quality, matched_fields = match
         names = document["names"]
         display_name = names.get(locale) or names.get("ar") or names.get("en") or document_id
-        candidates.append(
-            (
-                _QUALITY_ORDER[quality],
-                normalize_search_text(str(display_name)),
-                document_id,
-                document,
-                quality,
-                matched_fields,
-            )
-        )
+        candidates.append((
+            _QUALITY_ORDER[quality], normalize_search_text(str(display_name)),
+            document_id, document, quality, matched_fields,
+        ))
 
     candidates.sort(key=lambda item: (item[0], item[1], item[2]))
     hits: list[dict[str, Any]] = []
     for rank, (_, _, document_id, document, quality, matched_fields) in enumerate(
         candidates[:limit], start=1
     ):
-        hits.append(
-            {
-                "rank": rank,
-                "id": document_id,
-                "entity_type": document["entity_type"],
-                "names": dict(document["names"]),
-                "descriptions": (
-                    None
-                    if document["descriptions"] is None
-                    else dict(document["descriptions"])
-                ),
-                "match_quality": quality,
-                "matched_fields": sorted(set(matched_fields)),
-            }
-        )
+        descriptions = document.get("descriptions")
+        hits.append({
+            "rank": rank,
+            "id": document_id,
+            "entity_type": document["entity_type"],
+            "names": dict(document["names"]),
+            "descriptions": None if descriptions is None else dict(descriptions),
+            "match_quality": quality,
+            "matched_fields": sorted(set(matched_fields)),
+        })
 
     return {
         "query": raw_query,

@@ -196,32 +196,11 @@ def main() -> int:
             failures,
         )
 
-    # Orthographic folding is search-only and deliberately conservative.
-    expect(
-        normalize_search_text("تَايْفُون") == "تايفون",
-        "Arabic diacritics were not removed deterministically",
-        failures,
-    )
-    expect(
-        normalize_search_text("ٱلقُوَّات") == "القوات",
-        "Arabic alef variants/diacritics were not normalized",
-        failures,
-    )
-    expect(
-        normalize_search_text("اف-۱۵") == "اف-15",
-        "Eastern Arabic/Persian digits were not normalized",
-        failures,
-    )
-    expect(
-        normalize_search_text("القوة") != normalize_search_text("القوه"),
-        "normalizer over-collapsed taa marbuta/haa",
-        failures,
-    )
-    expect(
-        normalize_search_text("القوات") != normalize_search_text("قوات"),
-        "normalizer silently applied Arabic article stemming",
-        failures,
-    )
+    expect(normalize_search_text("تَايْفُون") == "تايفون", "Arabic diacritics were not removed deterministically", failures)
+    expect(normalize_search_text("ٱلقُوَّات") == "القوات", "Arabic alef variants/diacritics were not normalized", failures)
+    expect(normalize_search_text("اف-۱۵") == "اف-15", "Eastern Arabic/Persian digits were not normalized", failures)
+    expect(normalize_search_text("القوة") != normalize_search_text("القوه"), "normalizer over-collapsed taa marbuta/haa", failures)
+    expect(normalize_search_text("القوات") != normalize_search_text("قوات"), "normalizer silently applied Arabic article stemming", failures)
 
     test_queries = [
         query("F-15SA", locale="en"),
@@ -241,65 +220,29 @@ def main() -> int:
 
     result_f15 = execute_reference_lexical_search(documents=documents, query=test_queries[0])
     validate_instance("search-result.schema.json", result_f15, failures)
-    expect(
-        result_f15["hits"] and result_f15["hits"][0]["id"] == "SDA-EQUIP-F15SA",
-        "exact English equipment name did not resolve F-15SA first",
-        failures,
-    )
-    expect(
-        result_f15["hits"][0]["match_quality"] == "exact_name",
-        "exact name match quality changed",
-        failures,
-    )
+    expect(result_f15["hits"] and result_f15["hits"][0]["id"] == "SDA-EQUIP-F15SA", "exact English equipment name did not resolve F-15SA first", failures)
+    expect(result_f15["hits"][0]["match_quality"] == "exact_name", "exact name match quality changed", failures)
 
     compact = execute_reference_lexical_search(documents=documents, query=test_queries[1])
     validate_instance("search-result.schema.json", compact, failures)
-    expect(
-        compact["hits"] and compact["hits"][0]["id"] == "SDA-EQUIP-F15SA",
-        "compact equipment designation did not resolve through explicit alias",
-        failures,
-    )
+    expect(compact["hits"] and compact["hits"][0]["id"] == "SDA-EQUIP-F15SA", "compact equipment designation did not resolve through explicit alias", failures)
 
     arabic = execute_reference_lexical_search(documents=documents, query=test_queries[2])
     validate_instance("search-result.schema.json", arabic, failures)
-    expect(
-        arabic["locale"] == "ar"
-        and arabic["hits"]
-        and arabic["hits"][0]["id"] == "SDA-EQUIP-TYPHOON",
-        "Arabic auto-locale/diacritic folding did not resolve Typhoon",
-        failures,
-    )
+    expect(arabic["locale"] == "ar" and arabic["hits"] and arabic["hits"][0]["id"] == "SDA-EQUIP-TYPHOON", "Arabic auto-locale/diacritic folding did not resolve Typhoon", failures)
 
     rsaf_result = execute_reference_lexical_search(documents=documents, query=test_queries[3])
     validate_instance("search-result.schema.json", rsaf_result, failures)
-    expect(
-        rsaf_result["hits"] and rsaf_result["hits"][0]["id"] == "SDA-ORG-RSAF",
-        "Arabic alef-variant query did not resolve RSAF",
-        failures,
-    )
+    expect(rsaf_result["hits"] and rsaf_result["hits"][0]["id"] == "SDA-ORG-RSAF", "Arabic alef-variant query did not resolve RSAF", failures)
 
     filtered = execute_reference_lexical_search(documents=documents, query=test_queries[4])
     validate_instance("search-result.schema.json", filtered, failures)
-    expect(
-        [hit["id"] for hit in filtered["hits"]] == ["SDA-EQUIP-F15SA"],
-        "facet semantics changed: OR within manufacturer facet / AND across facets expected",
-        failures,
-    )
+    expect([hit["id"] for hit in filtered["hits"]] == ["SDA-EQUIP-F15SA"], "facet semantics changed: OR within manufacturer facet / AND across facets expected", failures)
 
-    # Result ordering must not depend on index input order.
-    reverse_result = execute_reference_lexical_search(
-        documents=list(reversed(documents)), query=query("fighter", locale="en")
-    )
-    forward_result = execute_reference_lexical_search(
-        documents=documents, query=query("fighter", locale="en")
-    )
-    expect(
-        forward_result == reverse_result,
-        "reference lexical ranking depends on input document order",
-        failures,
-    )
+    reverse_result = execute_reference_lexical_search(documents=list(reversed(documents)), query=query("fighter", locale="en"))
+    forward_result = execute_reference_lexical_search(documents=documents, query=query("fighter", locale="en"))
+    expect(forward_result == reverse_result, "reference lexical ranking depends on input document order", failures)
 
-    # Missing descriptions are valid; cross-script vocabulary is never invented.
     arabic_only = entity(
         "SDA-EQUIP-ARABIC-ONLY",
         "equipment",
@@ -314,19 +257,11 @@ def main() -> int:
         revision_ids=["SDA-REV-M3-ARABIC-ONLY"],
     )
     validate_instance("search-document.schema.json", arabic_only_doc, failures)
-    expect(
-        arabic_only_doc["descriptions"] is None,
-        "optional Entity description was not preserved as unknown/null in search projection",
-        failures,
-    )
+    expect(arabic_only_doc.get("descriptions") is None, "optional Entity description was not preserved as unknown/absent in search projection", failures)
     no_transliteration = execute_reference_lexical_search(
         documents=[arabic_only_doc], query=query("experimental system", locale="en")
     )
-    expect(
-        no_transliteration["total"] == 0,
-        "search contract invented cross-script transliteration not present in canonical aliases",
-        failures,
-    )
+    expect(no_transliteration["total"] == 0, "search contract invented cross-script transliteration not present in canonical aliases", failures)
 
     merged = copy.deepcopy(f15)
     merged["record_status"] = "merged"
@@ -343,10 +278,7 @@ def main() -> int:
         pass
 
     try:
-        execute_reference_lexical_search(
-            documents=documents,
-            query=query("   ", locale="auto"),
-        )
+        execute_reference_lexical_search(documents=documents, query=query("   ", locale="auto"))
         failures.append("whitespace-only search query was accepted")
     except SearchContractError:
         pass
