@@ -102,13 +102,18 @@ def main() -> int:
         failures.append("description text was compacted into an invented designation-like term")
 
     # Schema-optional SearchDocument fields must also be optional at runtime.
-    optional_omitted = copy.deepcopy(document)
+    optional_omitted = build_search_document(
+        entity=entity(),
+        facets={},
+        projected_at="2026-01-12T00:00:00Z",
+        revision_ids=["SDA-REV-M3-OPTIONAL"],
+    )
     optional_omitted.pop("subtype", None)
     optional_omitted.pop("descriptions", None)
     optional_result = execute_reference_lexical_search(
         documents=[optional_omitted], query=query("Chair System")
     )
-    if not optional_result["hits"] or optional_result["hits"][0]["id"] != document["id"]:
+    if not optional_result["hits"] or optional_result["hits"][0]["id"] != optional_omitted["id"]:
         failures.append("schema-valid document without optional fields was not searchable")
 
     bad_filter_key = query()
