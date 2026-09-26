@@ -116,7 +116,7 @@
     },
     "event_node": {
       "type": "object",
-      "required": ["id", "node_kind", "event_type", "names", "occurred_at", "confidence", "citations"],
+      "required": ["id", "node_kind", "event_type", "names", "occurred_at", "ended_at", "confidence", "citations"],
       "properties": {
         "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
         "node_kind": { "const": "event" },
@@ -128,6 +128,12 @@
           ]
         },
         "occurred_at": { "$ref": "common.schema.json#/$defs/temporal_value" },
+        "ended_at": {
+          "oneOf": [
+            { "$ref": "common.schema.json#/$defs/temporal_value" },
+            { "type": "null" }
+          ]
+        },
         "confidence": { "$ref": "common.schema.json#/$defs/confidence" },
         "citations": {
           "type": "array",
@@ -178,7 +184,7 @@
     },
     "timeline_event": {
       "type": "object",
-      "required": ["event_id", "event_type", "names", "occurred_at", "confidence", "citations"],
+      "required": ["event_id", "event_type", "names", "occurred_at", "ended_at", "confidence", "citations"],
       "properties": {
         "event_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
         "event_type": { "type": "string", "minLength": 1 },
@@ -189,6 +195,12 @@
           ]
         },
         "occurred_at": { "$ref": "common.schema.json#/$defs/temporal_value" },
+        "ended_at": {
+          "oneOf": [
+            { "$ref": "common.schema.json#/$defs/temporal_value" },
+            { "type": "null" }
+          ]
+        },
         "confidence": { "$ref": "common.schema.json#/$defs/confidence" },
         "citations": {
           "type": "array",
