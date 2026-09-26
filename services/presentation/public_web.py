@@ -2,7 +2,7 @@
 
 This module deliberately uses only the Python standard library. It proves the
 public contract without silently adopting a frontend framework before the APR
-process selects one.
+process selects one. The module is part of the exact-head M1 acceptance gate.
 """
 
 from __future__ import annotations
