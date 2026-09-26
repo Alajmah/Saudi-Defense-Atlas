@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from typing import Any
 
 from .projection_support import (
@@ -55,13 +56,34 @@ def _claim_ids_from_graph(graph: Mapping[str, Any]) -> set[str]:
     return result
 
 
+def _normalized_instant(value: Any, label: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise ProjectionError(f"{label} requires an ISO date-time or null")
+    normalized = value[:-1] + "+00:00" if value.endswith("Z") else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError as exc:
+        raise ProjectionError(f"{label} is not a valid ISO date-time") from exc
+    if parsed.tzinfo is None:
+        raise ProjectionError(f"{label} must be timezone-aware")
+    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _staleness_for_claims(
     staleness_report: Mapping[str, Any],
     claim_ids: set[str],
     *,
     claims_by_id: Mapping[str, Mapping[str, Any]],
-) -> list[dict[str, Any]]:
+) -> dict[str, Any]:
+    as_of = staleness_report.get("as_of")
+    policy = staleness_report.get("policy")
     items = staleness_report.get("items")
+    if not isinstance(as_of, str) or not as_of:
+        raise ProjectionError("staleness report requires as_of")
+    if not isinstance(policy, Mapping):
+        raise ProjectionError("staleness report requires policy")
     if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
         raise ProjectionError("staleness report requires items")
 
@@ -94,8 +116,28 @@ def _staleness_for_claims(
                 raise ProjectionError(
                     f"staleness item for Claim {claim_id} disagrees on {field}"
                 )
+        if _normalized_instant(
+            item.get("verified_at"), f"staleness item {claim_id} verified_at"
+        ) != _normalized_instant(
+            claim.get("verified_at"), f"Claim {claim_id} verified_at"
+        ):
+            raise ProjectionError(
+                f"staleness item for Claim {claim_id} disagrees on verified_at"
+            )
         rendered.append(dict(item))
-    return rendered
+
+    summary = {
+        "total": len(rendered),
+        "fresh": sum(item.get("status") == "fresh" for item in rendered),
+        "due": sum(item.get("status") == "due" for item in rendered),
+        "unverified": sum(item.get("status") == "unverified" for item in rendered),
+    }
+    return {
+        "as_of": _normalized_instant(as_of, "staleness report as_of"),
+        "policy": dict(policy),
+        "summary": summary,
+        "items": rendered,
+    }
 
 
 def _procurement_facts(
