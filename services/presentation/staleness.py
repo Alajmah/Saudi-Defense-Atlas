@@ -31,6 +31,10 @@ def _parse_utc(value: str, label: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+def _format_utc(value: datetime) -> str:
+    return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 def _positive_days(value: Any, label: str) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
         raise StalenessError(f"{label} must be an integer >= 1")
@@ -85,6 +89,8 @@ def build_staleness_report(
         verified_at = claim.get("verified_at")
 
         if verified_at is None:
+            normalized_verified_at = None
+            review_due_at = None
             status = "unverified"
             age_days = None
             reason = "Claim has no verified_at timestamp; re-verification is required."
@@ -94,19 +100,22 @@ def build_staleness_report(
                 raise StalenessError(
                     f"Claim {claim_id} verified_at occurs after report as_of"
                 )
+            normalized_verified_at = _format_utc(verified_dt)
+            review_due_dt = verified_dt + timedelta(days=review_days)
+            review_due_at = _format_utc(review_due_dt)
             elapsed = as_of_dt - verified_dt
             age_days = int(elapsed.total_seconds() // 86400)
-            due = elapsed > timedelta(days=review_days)
+            due = as_of_dt >= review_due_dt
             if due:
                 status = "due"
                 reason = (
-                    f"Claim age exceeds its {review_days}-day review window; "
+                    f"Claim has reached its {review_days}-day review deadline; "
                     "re-verification is due, but the Claim is not automatically false."
                 )
             else:
                 status = "fresh"
                 reason = (
-                    f"Claim remains within its {review_days}-day review window."
+                    f"Claim remains before its {review_days}-day review deadline."
                 )
 
         items.append(
@@ -116,9 +125,10 @@ def build_staleness_report(
                 "predicate_id": predicate_id,
                 "claim_state": claim_state,
                 "confidence": confidence,
-                "verified_at": verified_at,
+                "verified_at": normalized_verified_at,
                 "age_days": age_days,
                 "review_after_days": review_days,
+                "review_due_at": review_due_at,
                 "status": status,
                 "reason": reason,
             }
@@ -133,7 +143,7 @@ def build_staleness_report(
     }
 
     return {
-        "as_of": as_of,
+        "as_of": _format_utc(as_of_dt),
         "policy": {
             "default_review_days": default_days,
             "predicate_review_days": dict(sorted(predicate_policy.items())),
