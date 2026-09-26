@@ -1,8 +1,9 @@
 """Policy-driven acquisition freshness for registered SDA sources.
 
-This module reports monitoring/retrieval health only. A source being due does
-not mean the source is unreliable, that its content is stale, or that any SDA
-Claim is false. Claim re-verification remains a separate concern.
+Freshness is based on successful retrieval receipts, not Document creation.
+An unchanged re-fetch therefore refreshes acquisition health without mutating
+canonical Document identity. `due` never implies that source content or SDA
+Claims are stale or false.
 """
 
 from __future__ import annotations
@@ -13,7 +14,13 @@ from typing import Any
 
 
 class SourceFreshnessError(ValueError):
-    """Raised when source/document freshness inputs are inconsistent."""
+    """Raised when source/receipt freshness inputs are inconsistent."""
+
+
+def _field(record: Any, name: str) -> Any:
+    if isinstance(record, Mapping):
+        return record.get(name)
+    return getattr(record, name, None)
 
 
 def _parse_utc(value: Any, label: str) -> datetime:
@@ -42,7 +49,7 @@ def _positive_days(value: Any, label: str) -> int:
 def build_source_freshness_report(
     *,
     sources: Sequence[Mapping[str, Any]],
-    documents: Sequence[Mapping[str, Any]],
+    retrieval_receipts: Sequence[Any],
     as_of: str,
     default_poll_days: int,
     source_poll_days: Mapping[str, int] | None = None,
@@ -73,30 +80,27 @@ def build_source_freshness_report(
             "source polling policy references unknown Sources: " + ", ".join(unknown_policy)
         )
 
-    documents_by_source: dict[str, list[tuple[datetime, str]]] = {
+    receipts_by_source: dict[str, list[datetime]] = {
         source_id: [] for source_id in source_by_id
     }
-    seen_documents: set[str] = set()
-    for document in documents:
-        document_id = document.get("id")
-        source_id = document.get("source_id")
-        if not isinstance(document_id, str) or not document_id:
-            raise SourceFreshnessError("Document requires canonical ID")
-        if document_id in seen_documents:
-            raise SourceFreshnessError(f"duplicate Document ID: {document_id}")
-        seen_documents.add(document_id)
+    for index, receipt in enumerate(retrieval_receipts):
+        source_id = _field(receipt, "source_id")
+        observed_at = _field(receipt, "observed_at")
+        status_code = _field(receipt, "status_code")
         if not isinstance(source_id, str) or source_id not in source_by_id:
             raise SourceFreshnessError(
-                f"Document {document_id} references unknown Source {source_id!r}"
+                f"retrieval receipt {index} references unknown Source {source_id!r}"
             )
-        retrieved_dt = _parse_utc(
-            document.get("retrieved_at"), f"Document {document_id} retrieved_at"
-        )
-        if retrieved_dt > as_of_dt:
+        if status_code != 200:
             raise SourceFreshnessError(
-                f"Document {document_id} retrieved_at occurs after report as_of"
+                f"retrieval receipt {index} is not a successful HTTP 200 observation"
             )
-        documents_by_source[source_id].append((retrieved_dt, document_id))
+        observed_dt = _parse_utc(observed_at, f"retrieval receipt {index} observed_at")
+        if observed_dt > as_of_dt:
+            raise SourceFreshnessError(
+                f"retrieval receipt {index} observed_at occurs after report as_of"
+            )
+        receipts_by_source[source_id].append(observed_dt)
 
     items: list[dict[str, Any]] = []
     for source_id in sorted(source_by_id):
@@ -112,51 +116,47 @@ def build_source_freshness_report(
             raise SourceFreshnessError(f"Source {source_id} has invalid source_class")
 
         poll_days = policy.get(source_id, default_days)
-        source_documents = documents_by_source[source_id]
-        if not source_documents:
+        source_receipts = receipts_by_source[source_id]
+        if not source_receipts:
             items.append(
                 {
                     "source_id": source_id,
                     "publisher": dict(publisher),
                     "source_class": source_class,
-                    "document_count": 0,
-                    "latest_document_id": None,
-                    "latest_retrieved_at": None,
+                    "receipt_count": 0,
+                    "latest_observed_at": None,
                     "age_days": None,
                     "poll_after_days": poll_days,
-                    "next_retrieval_due_at": None,
+                    "next_check_due_at": None,
                     "status": "never_retrieved",
                     "reason": (
-                        "No Document retrieval is recorded for this active Source; "
+                        "No successful retrieval receipt is recorded for this active Source; "
                         "acquisition coverage has not yet been demonstrated."
                     ),
                 }
             )
             continue
 
-        latest_dt, latest_document_id = max(
-            source_documents, key=lambda value: (value[0], value[1])
-        )
+        latest_dt = max(source_receipts)
         due_at = latest_dt + timedelta(days=poll_days)
         age_days = int((as_of_dt - latest_dt).total_seconds() // 86400)
         status = "due" if as_of_dt >= due_at else "fresh"
         reason = (
-            f"Source retrieval has reached its {poll_days}-day polling deadline; "
-            "a new acquisition check is due. This does not imply factual staleness."
+            f"The last successful source retrieval has reached its {poll_days}-day polling "
+            "deadline; a new acquisition check is due. This does not imply factual staleness."
             if status == "due"
-            else f"Source retrieval remains within its {poll_days}-day polling window."
+            else f"The last successful source retrieval remains within its {poll_days}-day polling window."
         )
         items.append(
             {
                 "source_id": source_id,
                 "publisher": dict(publisher),
                 "source_class": source_class,
-                "document_count": len(source_documents),
-                "latest_document_id": latest_document_id,
-                "latest_retrieved_at": _format_utc(latest_dt),
+                "receipt_count": len(source_receipts),
+                "latest_observed_at": _format_utc(latest_dt),
                 "age_days": age_days,
                 "poll_after_days": poll_days,
-                "next_retrieval_due_at": _format_utc(due_at),
+                "next_check_due_at": _format_utc(due_at),
                 "status": status,
                 "reason": reason,
             }
