@@ -93,8 +93,9 @@ A successful technical test establishes only the property tested in the tested e
 | APR-004 | PostgreSQL claim/evidence knowledge core | DEFERRED | NOT-LINKED | future-plan-candidate |
 | APR-005 | Typed structured AI proposals | ACCEPTED | LINKED | current-plan-authorized |
 | APR-006 | Deterministic-before-generative processing | ACCEPTED | LINKED | current-plan-authorized |
+| APR-007 | Deterministic inline-SVG relationship visualization | TRIAL-AUTHORIZED | IN-TRIAL | current-plan-authorized |
 
-`VERIFIED` above is bounded to the M0 contracts and evidence. It is not a production-qualification label.
+`VERIFIED` above is bounded to the documented contracts and evidence. It is not a production-qualification label.
 
 ---
 
@@ -245,3 +246,38 @@ A successful technical test establishes only the property tested in the tested e
 **Implementation links:** deterministic JSON Schema validators, proposal hashing, workflow policy validator, Wikibase adapter gating.
 
 **Verification required:** M1 pipeline demonstrates deterministic hashing/deduplication and typed validation around actual model extraction.
+
+---
+
+## APR-007 — Deterministic inline-SVG relationship visualization
+
+**Problem:** M2 requires a first public relationship visualization, but current graphs are deliberately bounded and the project has not selected a frontend framework or general graph runtime.
+
+**Invariant:** Visualization remains a projection over `RelationshipGraphView`; it cannot create new factual edges, change SDA identity, or detach material relationships from supporting Evidence.
+
+**Mechanism:** server-rendered deterministic inline SVG plus semantic HTML fallback, with localized labels and graph-scoped accessibility IDs.
+
+**Alternatives characterized:** Cytoscape.js and D3. Both remain future candidates if interaction/scale forcing functions arise; neither is required for the bounded M2 slice.
+
+**Benefits:** zero new runtime dependency; deterministic tests; native browser SVG/DOM; straightforward bilingual labels; accessible title/description and cited text fallback.
+
+**Liabilities:** project-owned layout code; not intended for large/free-form interactive graph exploration.
+
+**Failure modes:** visual edge exceeds canonical graph; citation removed in presentation; Q/P IDs leak; input order changes layout; global SVG IDs collide; bounded layout used beyond its readable scale.
+
+**Forcing function:** `docs/ROADMAP.md` M2 requires a first relationship visualization.
+
+**Decision:**
+
+- pattern_status: TRIAL-AUTHORIZED
+- implementation_status: IN-TRIAL
+- planning_disposition: current-plan-authorized
+- authority: `docs/adr/ADR-0003-first-relationship-visualization.md`
+
+**Implementation links:** `services/presentation/relationship_visualization.py`, `services/presentation/relationship_web.py`, `scripts/validate_m2_relationship_visualization.py`.
+
+**Verification required:** deterministic reorder test, supporting-Evidence guard, bilingual route/API proof, SVG accessibility semantics, semantic cited fallback, and no backend-ID leakage on the exact trial head.
+
+**Replacement forcing functions:** sustained large visible graphs, pan/zoom/drag requirements, compound nodes, frequent client-side relayout/filtering, browser-side graph analysis, or demonstrated layout-quality failure.
+
+**Claim ceiling:** authorization is bounded to the first M2 relationship visualization and does not select the final frontend stack or large-graph engine.
