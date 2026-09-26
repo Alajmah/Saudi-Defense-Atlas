@@ -78,6 +78,10 @@ class FakeBackend:
     def inspect_effect(self, *, idempotency_key: str, mutation: dict) -> EffectInspection:
         mutation_id = mutation["id"]
         mode = self.behavior.get(mutation_id)
+        if mode == "inspection_error_preflight" and mutation_id not in self.apply_calls:
+            raise RuntimeError("synthetic inspection outage before write")
+        if mode == "inspection_error_after_write" and mutation_id in self.apply_calls:
+            raise RuntimeError("synthetic inspection outage after write")
         if mode == "preflight_unknown" and mutation_id not in self.apply_calls:
             return EffectInspection("unknown", detail="synthetic preflight uncertainty")
         if mode == "preflight_conflict" and mutation_id not in self.apply_calls:
@@ -150,6 +154,32 @@ def main() -> int:
         failures,
     )
 
+    inspection_error = FakeBackend({"SDA-MUT-TEST-002": "inspection_error_preflight"})
+    inspection_error_result = execute_authorized_proposal(
+        proposal=proposal, decision=decision, backend=inspection_error
+    )
+    expect(
+        inspection_error_result.status == "effect_unknown",
+        "preflight inspection exception must become effect_unknown",
+        failures,
+    )
+    expect(
+        not inspection_error.apply_calls,
+        "preflight inspection exception must prevent all writes",
+        failures,
+    )
+    expect(
+        [effect.status for effect in inspection_error_result.effects]
+        == ["not_attempted", "effect_unknown", "not_attempted"],
+        "inspection exception must preserve complete preflight accounting",
+        failures,
+    )
+    expect(
+        "inspection_error=RuntimeError" in (inspection_error_result.effects[1].detail or ""),
+        "inspection exception detail must remain auditable",
+        failures,
+    )
+
     ambiguous_applied = FakeBackend({"SDA-MUT-TEST-001": "ambiguous_applied"})
     reconciled = execute_authorized_proposal(
         proposal=proposal, decision=decision, backend=ambiguous_applied
@@ -192,6 +222,32 @@ def main() -> int:
         failures,
     )
 
+    reconciliation_error = FakeBackend({"SDA-MUT-TEST-001": "inspection_error_after_write"})
+    reconciliation_error_result = execute_authorized_proposal(
+        proposal=proposal, decision=decision, backend=reconciliation_error
+    )
+    expect(
+        reconciliation_error_result.status == "effect_unknown",
+        "post-write inspection exception must become effect_unknown",
+        failures,
+    )
+    expect(
+        [effect.status for effect in reconciliation_error_result.effects]
+        == ["effect_unknown", "not_attempted", "not_attempted"],
+        "post-write inspection failure must stop later mutations explicitly",
+        failures,
+    )
+    expect(
+        reconciliation_error.apply_calls == ["SDA-MUT-TEST-001"],
+        "post-write inspection failure must not retry or continue",
+        failures,
+    )
+    expect(
+        "inspection_error=RuntimeError" in (reconciliation_error_result.effects[0].detail or ""),
+        "post-write inspection failure detail must remain auditable",
+        failures,
+    )
+
     definitive = FakeBackend({"SDA-MUT-TEST-002": "definitive_failure"})
     failed_result = execute_authorized_proposal(
         proposal=proposal, decision=decision, backend=definitive
@@ -223,7 +279,8 @@ def main() -> int:
 
     print(
         "Validated proposal authorization, preflight blocking, idempotent replay, "
-        "single-attempt writes, ambiguous-effect reconciliation, and partial-state accounting."
+        "single-attempt writes, inspection-failure accounting, ambiguous-effect "
+        "reconciliation, and partial-state accounting."
     )
     return 0
 
