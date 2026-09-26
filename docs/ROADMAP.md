@@ -65,7 +65,7 @@ PostgreSQL remains a deferred fallback. M0 does not qualify production security,
 
 ---
 
-## M1 — First Vertical Slice — NEXT
+## M1 — First Vertical Slice — COMPLETE
 
 ### Goal
 
@@ -101,94 +101,100 @@ read API / projection
 Arabic + English public page
 ```
 
-### Deliverables
+### Delivered
 
-#### Ingestion
+#### Ingestion and provenance
 
-- source registry
-- fetcher for at least one authoritative source
-- parser for HTML and one PDF/document path
-- content hashing and duplicate detection
-- immutable retrieval metadata
+- allowlisted deterministic acquisition for the authoritative F-15SA source slice
+- raw retrieval receipts separated from canonical Document identity
+- canonical article-body hashing and unchanged-content idempotency
+- Source / Document / Evidence projection with bounded evidence locators
+- source/feed attribution on retrieval receipts for later monitoring-health reporting
 
-#### Intelligence
+#### Governance and canonical mutation
 
-- typed extraction schemas used by a real extraction path
-- entity resolver
-- candidate claim comparison
-- confidence and review routing
-- provenance capture
-- explicit unknown/ambiguous result handling
+- typed candidate Claim/Event proposals
+- explicit pre-resolved SDA identity boundary
+- AMBER human-review binding to exact proposal hash
+- backend-independent preflight/apply/reconcile contract
+- no blind retry after ambiguous external effects
+- explicit `already_applied`, `applied`, `failed`, `effect_unknown`, and `not_attempted` accounting
+- project Revision construction only after demonstrable convergence
+- pure replay cannot manufacture a second canonical Revision
+- single-writer scope remains explicit; concurrent-writer coordination is not implied
 
-#### Editorial
+#### Wikibase projection/readback
 
-- queue of proposed changes
-- approve / reject / return-for-revision workflow
-- visible evidence and current-vs-proposed diff
-- immutable decision binding to exact proposal payload
+- project-owned write/read adapters
+- Source, Document, Evidence, Claim, Event, and Entity read-projection markers
+- Action-API-based reconciliation rather than WDQS lag-sensitive recovery
+- projection completeness/version checks
+- SDA IDs remain public/canonical identity; Q/P IDs remain backend mappings
 
-#### Knowledge
+#### Public slice
 
-- project-owned Wikibase adapter
-- canonical entity retrieval by SDA ID
-- claim/evidence projection retrieval
-- revision history
-- bilingual labels and aliases
-- mutation idempotency/reconciliation contract
+- backend-neutral `EquipmentView`
+- JSON read API by SDA ID
+- Arabic and English F-15SA public pages from the same canonical records
+- visible citations and delivery timeline
+- explicit unknowns for unsupported operator/inventory/service-state fields
+- no legacy M0 trial statement leakage
 
-#### Public
+### M1 Acceptance Result
 
-- minimal web application shell
-- one equipment page
-- claim-level/section-level citations
-- related entities
-- timeline snippet
-- Arabic/English switching from the same canonical entity
+The demonstrated vertical slice passed the bounded acceptance contract for deterministic acquisition, evidence traceability, review-gated canonical mutation, reconciliation/replay, Wikibase readback, and bilingual public projection.
 
-### M1 Acceptance Criteria
-
-1. Re-ingesting the same unchanged document is idempotent.
-2. A changed source produces a reviewable delta rather than duplicate entities/claims.
-3. Every public material fact resolves to approved evidence.
-4. Arabic and English pages render from the same canonical entity/claim IDs.
-5. The public page does not require manually copying facts into an independent CMS truth store.
-6. Ambiguous entity resolution is routed to review rather than guessed.
-7. A conflicting claim is surfaced, not silently overwritten.
-8. No AI free-form output can directly mutate canonical data.
-9. A review decision cannot authorize a payload different from the exact proposal it reviewed.
-10. Mutation retries use an idempotency/reconciliation mechanism; an ambiguous external effect is not blindly repeated or collapsed into success/failure.
-11. Source, Document, Evidence, Claim, Decision, Revision, and backend receipt can be traced end-to-end for the demonstrated page.
-12. Restricted operational detail remains excluded even if discovered in source material.
-
-### M1 Architecture Work That Requires Separate Evidence
-
-The following may be researched or prototyped, but adoption must follow the APR process rather than this roadmap silently selecting them:
-
-- public frontend framework and deployment topology;
-- ingestion orchestration technology;
-- document/PDF parser;
-- model/provider/runtime;
-- search engine;
-- editorial UI/CMS.
-
-Wikibase is the only major implementation mechanism promoted by M0 for the knowledge-core role.
+M1 remains explicitly **single-writer**. Production distributed/concurrent mutation coordination, production Wikibase qualification, and generalized AI extraction at scale remain later work.
 
 ---
 
-## M2 — Procurement and Exercise Graph
+## M2 — Procurement and Exercise Graph — COMPLETE
 
-Planned outcomes:
+### Goal
 
-- procurement-program lifecycle views
-- contract/event timeline
-- exercise entities and participation
-- company/manufacturer graph
-- first relationship visualization
-- source staleness checks
+Extend the verified knowledge/read model from one equipment page into bounded procurement/exercise relationships, temporal views, staleness signals, and a first public relationship visualization without creating a second truth store.
+
+### Delivered
+
+- bounded backend-neutral `RelationshipGraphView` for procurement and exercise domains
+- explicit Claim/Event edges only; no inferred topology
+- root-bounded event admission preventing unrelated high-degree-entity leakage
+- direct Evidence -> Document -> Source citations on material graph edges/events/timeline entries
+- event intervals including `ended_at`
+- typed `ProcurementProgramView` and `ExerciseView`
+- procurement lifecycle represented as history rather than an inferred current state
+- typed procurement quantity/lifecycle facts with explicit disputes preserved
+- policy-driven Claim staleness with exact `review_due_at`, UTC normalization, and `fresh` / `due` / `unverified`
+- registered-feed acquisition freshness based on successful RetrievalReceipts rather than Document creation
+- independent freshness per `source_id + document_key`, including `never_retrieved`
+- deterministic first relationship visualization using inline SVG + semantic cited HTML fallback
+- bilingual node/relation labels while retaining canonical relationship codes for auditability
+- relationship JSON API plus Arabic/English relationship pages
+- APR-007 / ADR-0003 bounded visualization decision and verification
+
+### M2 Acceptance Boundaries
+
+- relationship/public views remain projections over canonical SDA records;
+- staleness/freshness signals are review/monitoring status, not truth/falsity judgments;
+- no Q/P/backend identity leakage is accepted in public contracts;
+- no frontend framework, graph runtime, search engine, scheduler, or production deployment topology is silently selected;
+- deterministic inline SVG is verified only for the bounded M2 role; larger interactive graphs require a new APR forcing function;
+- no live operational geography, movement, readiness, patrol, or stock semantics are introduced.
+
+### Verification
+
+The final visualization trial passed on implementation/review head `b78564fa83bf128803205bc2a22ea88a8284ecb2`:
+
+- schema-validation run `36260932930` (#395) — **PASS**;
+- Wikibase regression run `36260932947` (#124) — **PASS**;
+- exhaustive first-pass: `docs/reviews/M2_RELATIONSHIP_VISUALIZATION_FIRST_PASS.md`;
+- architecture decision: `docs/adr/ADR-0003-first-relationship-visualization.md`.
+
+Earlier M2 increments were independently reviewed and merged through PRs #4–#7 before the visualization closure.
 
 ---
 
-## M3 — Atlas and Search
+## M3 — Atlas and Search — NEXT
 
 Planned outcomes:
 
@@ -197,6 +203,8 @@ Planned outcomes:
 - public non-operational map
 - filters by service, equipment class, manufacturer, country, and status
 - timeline navigation
+
+Architecture choices that require separate APR evidence before adoption include the search engine/index, map/rendering mechanism, frontend framework if one is introduced, and deployment topology.
 
 ---
 
@@ -229,14 +237,12 @@ The assistant must answer from approved data/evidence rather than treat web sear
 
 ## Immediate Next Sequence
 
-After merging the M0/foundation PR:
+After M2 closure:
 
-1. create a dedicated M1 branch;
-2. select one authoritative source + one equipment entity for the vertical slice;
-3. define the M1 source registry/Document/Evidence ingestion contract;
-4. define idempotency and ambiguous-effect reconciliation before generalizing backend writes;
-5. implement deterministic fetch/hash/parse first;
-6. add typed extraction as a proposal-producing boundary;
-7. implement the minimal project-owned read/write adapter around Wikibase;
-8. implement one bilingual public page from canonical data;
-9. run the same exhaustive-first/adversarial review process against the vertical slice.
+1. start a dedicated M3 branch from verified `main`;
+2. define the search/query contract before selecting a search engine;
+3. characterize Arabic full-text/entity search requirements and evaluate candidate mechanisms through APR evidence;
+4. define the public non-operational map data contract and sensitivity boundary before selecting a map library/provider;
+5. expose timeline/filter navigation from existing canonical/public projections;
+6. keep all M3 indexes/maps downstream of SDA canonical IDs and Claim/Event/Evidence authority;
+7. run the same exhaustive first-pass review and exact-head CI gates for each promoted mechanism.
