@@ -73,6 +73,7 @@ def main() -> int:
         "same_canonical_view": api_view["id"] == TARGET_ID,
         "arabic_rtl": 'lang="ar"' in ar and 'dir="rtl"' in ar and "إف-15 إس إيه" in ar,
         "english_ltr": 'lang="en"' in en and 'dir="ltr"' in en and "F-15SA" in en,
+        "localized_manufacturer": "بوينغ" in ar and "Boeing" in en,
         "language_switch": "/en/equipment/f-15sa" in ar and "/ar/equipment/f-15sa" in en,
         "explicit_unknowns": "غير معروف" in ar and "Unknown" in en,
         "citation_visible": "https://www.af.mil/" in ar and "https://www.af.mil/" in en,
