@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/staleness-report.schema.json",
+  "title": "Saudi Defense Atlas Claim Staleness Report",
+  "description": "Deterministic review-due projection over current canonical Claims. Staleness means re-verification is due; it never means the Claim is false.",
+  "type": "object",
+  "required": ["as_of", "policy", "summary", "items"],
+  "properties": {
+    "as_of": { "type": "string", "format": "date-time" },
+    "policy": {
+      "type": "object",
+      "required": ["default_review_days", "predicate_review_days"],
+      "properties": {
+        "default_review_days": { "type": "integer", "minimum": 1 },
+        "predicate_review_days": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "required": ["total", "fresh", "due", "unverified"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "fresh": { "type": "integer", "minimum": 0 },
+        "due": { "type": "integer", "minimum": 0 },
+        "unverified": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "claim_id",
+          "subject_id",
+          "predicate_id",
+          "claim_state",
+          "confidence",
+          "verified_at",
+          "age_days",
+          "review_after_days",
+          "review_due_at",
+          "status",
+          "reason"
+        ],
+        "properties": {
+          "claim_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "subject_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "predicate_id": { "type": "string", "minLength": 1 },
+          "claim_state": { "type": "string", "enum": ["active", "disputed"] },
+          "confidence": { "$ref": "common.schema.json#/$defs/confidence" },
+          "verified_at": { "type": ["string", "null"], "format": "date-time" },
+          "age_days": { "type": ["integer", "null"], "minimum": 0 },
+          "review_after_days": { "type": "integer", "minimum": 1 },
+          "review_due_at": { "type": ["string", "null"], "format": "date-time" },
+          "status": { "type": "string", "enum": ["fresh", "due", "unverified"] },
+          "reason": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
