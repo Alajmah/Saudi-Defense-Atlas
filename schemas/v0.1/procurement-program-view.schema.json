@@ -64,10 +64,7 @@
       }
     },
     "graph": { "$ref": "relationship-graph-view.schema.json" },
-    "staleness": {
-      "type": "array",
-      "items": { "$ref": "staleness-report.schema.json#/properties/items/items" }
-    },
+    "staleness": { "$ref": "staleness-report.schema.json" },
     "provenance": {
       "type": "object",
       "required": ["projected_at", "record_ids", "revision_ids"],
