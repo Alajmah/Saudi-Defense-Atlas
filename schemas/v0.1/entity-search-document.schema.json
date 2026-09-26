@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/entity-search-document.schema.json",
+  "title": "Saudi Defense Atlas Entity Search Document",
+  "description": "Backend-neutral derived search document for one active canonical SDA Entity. Search terms may include names/aliases redirected from merged Entity records. This is an index projection, not a truth object.",
+  "type": "object",
+  "required": ["id", "entity_type", "subtype", "names", "terms", "source_record_ids"],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "entity_type": { "$ref": "entity.schema.json#/properties/entity_type" },
+    "subtype": { "type": ["string", "null"] },
+    "names": { "$ref": "common.schema.json#/$defs/localized_text" },
+    "terms": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["language", "field", "value", "folded", "compact", "source_record_id"],
+        "properties": {
+          "language": { "type": "string", "enum": ["ar", "en", "und"] },
+          "field": {
+            "type": "string",
+            "enum": ["canonical_name", "alias", "merged_name", "merged_alias"]
+          },
+          "value": { "type": "string", "minLength": 1 },
+          "folded": { "type": "string", "minLength": 1 },
+          "compact": { "type": "string", "minLength": 1 },
+          "source_record_id": { "$ref": "common.schema.json#/$defs/canonical_id" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "source_record_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
+      "uniqueItems": true
+    }
+  },
+  "additionalProperties": false
+}

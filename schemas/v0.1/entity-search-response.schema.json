@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/entity-search-response.schema.json",
+  "title": "Saudi Defense Atlas Entity Search Response",
+  "description": "Deterministic baseline entity-search result contract. Rank is ordinal; no numeric relevance probability is implied.",
+  "type": "object",
+  "required": ["query", "normalization", "results"],
+  "properties": {
+    "query": {
+      "type": "object",
+      "required": ["text", "locale", "entity_types"],
+      "properties": {
+        "text": { "type": "string", "minLength": 1 },
+        "locale": { "type": "string", "enum": ["ar", "en", "auto"] },
+        "entity_types": {
+          "type": "array",
+          "items": { "$ref": "entity.schema.json#/properties/entity_type" },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "normalization": {
+      "type": "object",
+      "required": ["folded", "compact"],
+      "properties": {
+        "folded": { "type": "string", "minLength": 1 },
+        "compact": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["rank", "id", "entity_type", "subtype", "names", "match"],
+        "properties": {
+          "rank": { "type": "integer", "minimum": 1 },
+          "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "entity_type": { "$ref": "entity.schema.json#/properties/entity_type" },
+          "subtype": { "type": ["string", "null"] },
+          "names": { "$ref": "common.schema.json#/$defs/localized_text" },
+          "match": {
+            "type": "object",
+            "required": ["type", "language", "field", "value", "source_record_id"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": ["exact", "normalized_exact", "token_prefix", "contains"]
+              },
+              "language": { "type": "string", "enum": ["ar", "en", "und"] },
+              "field": {
+                "type": "string",
+                "enum": ["canonical_name", "alias", "merged_name", "merged_alias"]
+              },
+              "value": { "type": "string", "minLength": 1 },
+              "source_record_id": { "$ref": "common.schema.json#/$defs/canonical_id" }
+            },
+            "additionalProperties": false
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
