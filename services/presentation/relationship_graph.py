@@ -1,9 +1,10 @@
 """Build a bounded backend-neutral public relationship graph from canonical SDA records.
 
-The graph is intentionally one-hop from explicit root Entity IDs. Every edge is
-backed by either one canonical Claim or one canonical Event; the projector never
-creates inferred entity-to-entity relationships. Material graph records reuse the
-same fail-closed Evidence -> Document -> Source resolution as the M1 public view.
+The graph uses a bounded single-pass expansion from explicit root Entity IDs.
+Every edge is backed by either one canonical Claim or one canonical Event; the
+projector never creates inferred entity-to-entity relationships. Material graph
+records reuse the same fail-closed Evidence -> Document -> Source resolution as
+the M1 public view.
 """
 
 from __future__ import annotations
@@ -125,12 +126,12 @@ def build_relationship_graph(
     domains: Sequence[str] = ("procurement", "exercise"),
     revision_ids: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """Return a deterministic one-hop procurement/exercise graph.
+    """Return a deterministic bounded procurement/exercise graph.
 
-    Expansion semantics are deliberately bounded: Claims are selected only when
-    one endpoint is an explicit root Entity. Matching Events may then attach to
-    those selected Entities/Claims, but newly discovered nodes do not trigger
-    another Claim expansion pass.
+    Expansion semantics are deliberately single-pass: Claims are selected only
+    when one endpoint is an explicit root Entity. Matching Events may then attach
+    to those selected Entities/Claims, but newly discovered nodes never trigger
+    another Claim or Event expansion pass.
     """
 
     roots = list(root_entity_ids)
@@ -140,7 +141,10 @@ def build_relationship_graph(
         raise ProjectionError("relationship graph root Entity IDs must be unique")
     root_set = set(roots)
 
-    selected_domains = set(domains)
+    domain_values = list(domains)
+    if len(set(domain_values)) != len(domain_values):
+        raise ProjectionError("relationship graph domains must be unique")
+    selected_domains = set(domain_values)
     if not selected_domains or not selected_domains.issubset(_DOMAIN_PREDICATES):
         raise ProjectionError("relationship graph domains must be procurement and/or exercise")
 
@@ -250,6 +254,7 @@ def build_relationship_graph(
             "names": dict(event["names"]) if isinstance(event.get("names"), Mapping) else None,
             "occurred_at": dict(occurred_at),
             "confidence": event.get("confidence"),
+            "citations": citations,
         }
         event_nodes.append(event_node)
         timeline.append(
@@ -259,6 +264,7 @@ def build_relationship_graph(
                 "names": event_node["names"],
                 "occurred_at": dict(occurred_at),
                 "confidence": event.get("confidence"),
+                "citations": citations,
             }
         )
         used_record_ids.add(event_id)
@@ -330,7 +336,7 @@ def build_relationship_graph(
         "scope": {
             "root_entity_ids": sorted(roots),
             "domains": sorted(selected_domains),
-            "expansion": "one_hop",
+            "expansion": "bounded_single_pass",
         },
         "nodes": nodes,
         "edges": edges,
