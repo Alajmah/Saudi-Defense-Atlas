@@ -3,7 +3,9 @@
 
 The property set is an adapter vocabulary, not the SDA ontology. Projection
 version is explicit so exact payload equivalence cannot hide an older/incomplete
-backend representation.
+backend representation. Public-read properties are separate markers used to
+qualify the bounded M1 read adapter without treating legacy M0 statements as
+public SDA facts.
 """
 
 from __future__ import annotations
@@ -22,8 +24,13 @@ def property_defs() -> dict[str, dict[str, str]]:
     return {
         "payload_sha256": {"en": "SDA payload SHA-256", "datatype": "external-id"},
         "projection_version": {"en": "SDA projection version", "datatype": "string"},
+        "read_projection_version": {"en": "SDA public read projection version", "datatype": "string"},
         "record_type": {"en": "SDA record type", "datatype": "string"},
+        "entity_type": {"en": "SDA entity type", "datatype": "string"},
+        "entity_subtype": {"en": "SDA entity subtype", "datatype": "string"},
+        "record_status": {"en": "SDA record status", "datatype": "string"},
         "created_at_iso": {"en": "created at ISO timestamp", "datatype": "string"},
+        "updated_at_iso": {"en": "updated at ISO timestamp", "datatype": "string"},
         "source_class": {"en": "SDA source class", "datatype": "string"},
         "source_homepage": {"en": "source homepage", "datatype": "url"},
         "publisher_type": {"en": "publisher type", "datatype": "string"},
