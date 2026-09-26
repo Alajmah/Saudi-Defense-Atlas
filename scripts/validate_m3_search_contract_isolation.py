@@ -90,11 +90,11 @@ def main() -> int:
     if air_result["total"] != 0:
         failures.append("token search matched substring 'air' inside unrelated words")
 
-    chair_result = execute_reference_lexical_search(
-        documents=[document], query=query("chair")
+    exact_result = execute_reference_lexical_search(
+        documents=[document], query=query("Chair System")
     )
-    if not chair_result["hits"] or chair_result["hits"][0]["match_quality"] != "exact_name":
-        failures.append("exact name boundary fixture did not resolve as exact_name")
+    if not exact_result["hits"] or exact_result["hits"][0]["match_quality"] != "exact_name":
+        failures.append("exact full-name boundary fixture did not resolve as exact_name")
 
     # Description normalization must not manufacture giant compact no-space variants.
     description_terms = document["normalized_terms"]["en"]
