@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/exercise-view.schema.json",
+  "title": "Saudi Defense Atlas Public Exercise View",
+  "type": "object",
+  "required": ["id", "entity_type", "names", "descriptions", "graph", "staleness", "provenance"],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "entity_type": { "const": "exercise" },
+    "names": { "$ref": "common.schema.json#/$defs/localized_text" },
+    "descriptions": {
+      "oneOf": [
+        { "$ref": "common.schema.json#/$defs/localized_text" },
+        { "type": "null" }
+      ]
+    },
+    "graph": { "$ref": "relationship-graph-view.schema.json" },
+    "staleness": {
+      "type": "array",
+      "items": { "$ref": "staleness-report.schema.json#/properties/items/items" }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["projected_at", "record_ids", "revision_ids"],
+      "properties": {
+        "projected_at": { "type": "string", "format": "date-time" },
+        "record_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "uniqueItems": true
+        },
+        "revision_ids": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
