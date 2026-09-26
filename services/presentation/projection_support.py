@@ -1,13 +1,15 @@
-"""Shared fail-closed helpers for backend-neutral public SDA projections."""
+"""Shared fail-closed helpers for backend-neutral public SDA projections.
+
+ProjectionError is re-exported from the established M1 equipment projection for
+compatibility while common helper ownership moves into this stable module.
+"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-
-class ProjectionError(ValueError):
-    """Raised when canonical records are insufficient for a safe public view."""
+from .equipment_view import ProjectionError
 
 
 def index_by_id(
