@@ -69,3 +69,6 @@ jobs:
 
       - name: Validate M2 procurement and exercise domain views
         run: python scripts/validate_m2_domain_views.py
+
+      - name: Validate M2 source acquisition freshness
+        run: python scripts/validate_m2_source_freshness.py
