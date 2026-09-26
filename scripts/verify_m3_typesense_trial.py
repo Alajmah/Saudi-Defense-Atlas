@@ -10,17 +10,21 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from services.presentation.search_contract import (  # noqa: E402
+    SearchContractError,
     build_search_document,
     execute_reference_lexical_search,
+    normalize_search_text,
 )
 from services.presentation.typesense_search import (  # noqa: E402
     TypesenseTrialClient,
+    TypesenseTrialError,
     to_typesense_document,
     trial_collection_schema,
 )
@@ -214,29 +218,63 @@ def main() -> int:
     if any("names" in item or "descriptions" in item or "aliases" in item for item in engine_documents):
         raise AssertionError("candidate index stores more public prose than the bounded trial requires")
 
-    schema = trial_collection_schema("unused-name")
-    search_fields = {field["name"]: field for field in schema["fields"]}
-    if search_fields["search_ar"].get("locale") != "ar":
+    local_schema = trial_collection_schema("unused-name")
+    local_fields = {field["name"]: field for field in local_schema["fields"]}
+    if local_fields["search_ar"].get("locale") != "ar":
         raise AssertionError("Arabic candidate field lost explicit ar locale")
-    if any(field.get("stem") for field in schema["fields"]):
-        raise AssertionError("Typesense trial unexpectedly enabled stemming")
+    if any(field.get("stem") for field in local_schema["fields"]):
+        raise AssertionError("Typesense trial unexpectedly enabled stemming locally")
 
     physical_v1 = "sda_search_m3_trial_v1"
     physical_v2 = "sda_search_m3_trial_v2"
+    physical_single = "sda_search_m3_trial_single"
     alias = "sda_search_m3_trial"
 
     # Best effort cleanup makes the script replayable locally.
-    for name in (physical_v1, physical_v2):
+    for name in (physical_v1, physical_v2, physical_single):
         try:
             client.delete_collection(name)
         except Exception:  # noqa: BLE001
             pass
 
     client.create_collection(physical_v1)
+
+    # Verify what the running engine accepted, not only the schema object we sent.
+    runtime_schema = client._request(  # noqa: SLF001 - deliberate trial introspection
+        "GET", f"/collections/{quote(physical_v1, safe='')}", expected=(200,)
+    )
+    if not isinstance(runtime_schema, dict) or not isinstance(runtime_schema.get("fields"), list):
+        raise AssertionError("live Typesense collection schema response is malformed")
+    runtime_fields = {
+        field.get("name"): field
+        for field in runtime_schema["fields"]
+        if isinstance(field, dict) and isinstance(field.get("name"), str)
+    }
+    if runtime_fields.get("search_ar", {}).get("locale") != "ar":
+        raise AssertionError("live Typesense schema did not retain Arabic locale")
+    if any(field.get("stem") is True for field in runtime_fields.values()):
+        raise AssertionError("live Typesense schema unexpectedly enabled stemming")
+    if runtime_schema.get("metadata", {}).get("role") != "derived-candidate-index":
+        raise AssertionError("live Typesense collection lost SDA derived-index metadata")
+
     client.import_documents(physical_v1, documents)
     client.point_alias(alias, physical_v1)
     if client.alias_target(alias) != physical_v1:
         raise AssertionError("Typesense alias did not point to v1 collection")
+
+    # The adapter must also handle a one-document import response shape.
+    client.create_collection(physical_single)
+    client.import_documents(physical_single, [documents[0]])
+    single_result = assert_same_as_reference(
+        client=client,
+        collection=physical_single,
+        documents=[documents[0]],
+        search_query=query("F15SA", locale="en"),
+        label="single-document import",
+    )
+    if single_result["total"] != 1:
+        raise AssertionError("single-document collection did not return its indexed entity")
+    client.delete_collection(physical_single)
 
     core_queries = [
         (query("F-15SA", locale="en"), "English designation"),
@@ -264,21 +302,94 @@ def main() -> int:
             label=label,
         )
 
-    typo = client.search(
+    # Inspect the engine candidate boundary directly so SDA post-filtering cannot mask
+    # an accidentally enabled fuzzy/token-expansion feature.
+    if client._candidate_ids_for_query(  # noqa: SLF001
         collection_name=alias,
-        documents=documents,
-        query=query("F15SB", locale="en"),
-    )
-    if typo["total"] != 0:
-        raise AssertionError("Typesense trial widened SDA semantics through typo tolerance")
+        normalized_query="f15sb",
+        locale="en",
+        filter_by=None,
+        candidate_limit=250,
+    ):
+        raise AssertionError("live Typesense candidate retrieval applied typo tolerance")
+    if client._candidate_ids_for_query(  # noqa: SLF001
+        collection_name=alias,
+        normalized_query="fighter impossible",
+        locale="en",
+        filter_by=None,
+        candidate_limit=250,
+    ):
+        raise AssertionError("live Typesense candidate retrieval dropped query tokens")
+    if client._candidate_ids_for_query(  # noqa: SLF001
+        collection_name=alias,
+        normalized_query="f15 sa",
+        locale="en",
+        filter_by=None,
+        candidate_limit=250,
+    ):
+        raise AssertionError("live Typesense candidate retrieval applied split/join fallback")
+    if client._candidate_ids_for_query(  # noqa: SLF001
+        collection_name=alias,
+        normalized_query="15sa",
+        locale="en",
+        filter_by=None,
+        candidate_limit=250,
+    ):
+        raise AssertionError("live Typesense candidate retrieval applied infix search")
 
-    dropped = client.search(
-        collection_name=alias,
-        documents=documents,
-        query=query("fighter impossible", locale="en"),
+    # Candidate caps may never silently change public total/ranking semantics.
+    try:
+        client._candidate_ids_for_query(  # noqa: SLF001
+            collection_name=alias,
+            normalized_query="fighter",
+            locale="en",
+            filter_by=None,
+            candidate_limit=1,
+        )
+        raise AssertionError("candidate truncation was silently accepted")
+    except TypesenseTrialError:
+        pass
+
+    # Invalid SDA query shape must fail before the derived engine is consulted.
+    malformed_query = query("F15SA", locale="en")
+    malformed_query["semantic"] = True
+    try:
+        client.search(
+            collection_name=alias,
+            documents=documents,
+            query=malformed_query,
+        )
+        raise AssertionError("undeclared semantic option reached the trial search path")
+    except SearchContractError:
+        pass
+
+    # A stale/rogue derived-index ID must fail closed rather than becoming a result.
+    client._request(  # noqa: SLF001 - deliberate corruption fixture
+        "POST",
+        f"/collections/{quote(physical_v1, safe='')}/documents",
+        payload={
+            "id": "SDA-ROGUE-DERIVED-INDEX-ID",
+            "entity_type": "equipment",
+            "search_en": ["rogue"],
+            "search_ar": [],
+            "search_neutral": [],
+            "service_ids": [],
+            "manufacturer_ids": [],
+            "country_ids": [],
+            "equipment_classes": [],
+            "status_values": [],
+        },
+        expected=(201,),
     )
-    if dropped["total"] != 0:
-        raise AssertionError("Typesense trial widened SDA semantics through token dropping")
+    try:
+        client.search(
+            collection_name=alias,
+            documents=documents,
+            query=query("rogue", locale="en"),
+        )
+        raise AssertionError("rogue derived-index ID was accepted as canonical")
+    except TypesenseTrialError:
+        pass
 
     # Rebuild from canonical projections in reversed order and atomically repoint alias.
     client.create_collection(physical_v2)
@@ -301,9 +412,10 @@ def main() -> int:
     client.delete_collection(physical_v1)
 
     print(
-        "PASS: Typesense 30.2 bounded M3 trial preserved SDA lexical search semantics, "
-        "Arabic/English entity retrieval, exact facets, disabled typo/token-drop expansion, "
-        "canonical identity isolation, deterministic project-owned ranking, and alias-based rebuild."
+        "PASS: Typesense 30.2 bounded M3 trial preserved live Arabic locale/no-stemming schema, "
+        "SDA lexical semantics, exact facets, one-document import, disabled typo/drop/split/infix "
+        "expansion, candidate truncation safety, stale-index identity rejection, deterministic "
+        "project-owned ranking, and alias-based rebuild."
     )
     return 0
 
