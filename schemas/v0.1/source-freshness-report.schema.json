@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/source-freshness-report.schema.json",
+  "title": "Saudi Defense Atlas Registered Feed Acquisition Freshness Report",
+  "description": "Deterministic monitoring-health projection over successful retrieval receipts for registered feeds. Due means a feed check is overdue under explicit polling policy; it does not assert that source content or SDA facts are stale or false.",
+  "type": "object",
+  "required": ["as_of", "policy", "summary", "items"],
+  "properties": {
+    "as_of": { "type": "string", "format": "date-time" },
+    "policy": {
+      "type": "object",
+      "required": ["default_poll_days", "feed_poll_days"],
+      "properties": {
+        "default_poll_days": { "type": "integer", "minimum": 1 },
+        "feed_poll_days": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "required": ["total", "fresh", "due", "never_retrieved"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "fresh": { "type": "integer", "minimum": 0 },
+        "due": { "type": "integer", "minimum": 0 },
+        "never_retrieved": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "feed_key",
+          "publisher",
+          "source_class",
+          "receipt_count",
+          "latest_observed_at",
+          "age_days",
+          "poll_after_days",
+          "next_check_due_at",
+          "status",
+          "reason"
+        ],
+        "properties": {
+          "source_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "feed_key": { "type": "string", "minLength": 1 },
+          "publisher": { "$ref": "common.schema.json#/$defs/localized_text" },
+          "source_class": { "type": "string", "enum": ["A", "B", "C", "D", "E"] },
+          "receipt_count": { "type": "integer", "minimum": 0 },
+          "latest_observed_at": { "type": ["string", "null"], "format": "date-time" },
+          "age_days": { "type": ["integer", "null"], "minimum": 0 },
+          "poll_after_days": { "type": "integer", "minimum": 1 },
+          "next_check_due_at": { "type": ["string", "null"], "format": "date-time" },
+          "status": { "type": "string", "enum": ["fresh", "due", "never_retrieved"] },
+          "reason": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
