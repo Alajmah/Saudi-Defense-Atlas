@@ -8,15 +8,13 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-SPIKE = ROOT / "spikes" / "wikibase"
-for path in (ROOT, SPIKE):
-    if str(path) not in sys.path:
-        sys.path.insert(0, str(path))
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from scripts.validate_m1_equipment_view import canonical_records  # noqa: E402
 from services.governance.proposal_auth import canonical_sha256  # noqa: E402
 from services.presentation.equipment_view import ProjectionError, build_equipment_view  # noqa: E402
-from m1_public_projection_integrity import (  # noqa: E402
+from services.presentation.read_projection_hash import (  # noqa: E402
     entity_read_projection,
     event_read_projection,
 )
