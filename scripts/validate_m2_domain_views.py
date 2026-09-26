@@ -39,8 +39,7 @@ def validate_instance(schema_name: str, instance: dict[str, Any], failures: list
     errors = list(validator.iter_errors(instance))
     if errors:
         failures.append(
-            f"{schema_name} failed: "
-            + "; ".join(error.message for error in errors)
+            f"{schema_name} failed: " + "; ".join(error.message for error in errors)
         )
 
 
@@ -128,13 +127,20 @@ def main() -> int:
     validate_instance("procurement-program-view.schema.json", procurement, failures)
 
     expect(
-        procurement["lifecycle_state"] == {
-            "state": "known",
+        procurement["lifecycle_history"] == {
+            "status": "documented",
             "claim_ids": ["SDA-CLAIM-M2-PROCUREMENT-LIFECYCLE-CONTRACTED"],
-            "values": ["contracted"],
+            "observations": [
+                {
+                    "claim_id": "SDA-CLAIM-M2-PROCUREMENT-LIFECYCLE-CONTRACTED",
+                    "value": "contracted",
+                    "claim_state": "active",
+                    "validity": {"point_in_time": {"value": "2026-01-08", "precision": "day"}},
+                }
+            ],
             "reason": None,
         },
-        "procurement lifecycle state changed",
+        "procurement lifecycle history changed",
         failures,
     )
     procurement_fact_predicates = {fact["predicate_id"] for fact in procurement["facts"]}
@@ -180,9 +186,7 @@ def main() -> int:
         failures,
     )
     exercise_events = [
-        item
-        for item in exercise["graph"]["timeline"]
-        if item["event_type"] == "exercise"
+        item for item in exercise["graph"]["timeline"] if item["event_type"] == "exercise"
     ]
     expect(len(exercise_events) == 1, "exercise view must retain one exercise Event", failures)
     if exercise_events:
@@ -191,6 +195,43 @@ def main() -> int:
             "exercise view lost Event end date",
             failures,
         )
+
+    # Different active lifecycle values at different points in time are history,
+    # not an automatic conflict or inferred current state.
+    historical_records = copy.deepcopy(records)
+    first_lifecycle = next(
+        claim
+        for claim in historical_records["claims"]
+        if claim["id"] == "SDA-CLAIM-M2-PROCUREMENT-LIFECYCLE-CONTRACTED"
+    )
+    earlier = copy.deepcopy(first_lifecycle)
+    earlier["id"] = "SDA-CLAIM-M2-PROCUREMENT-LIFECYCLE-APPROVED"
+    earlier["value"] = {"kind": "string", "value": "approved", "language": "en"}
+    earlier["validity"] = {"point_in_time": {"value": "2025-12-01", "precision": "day"}}
+    earlier["verified_at"] = "2025-12-01T00:00:00Z"
+    historical_records["claims"].append(earlier)
+    historical_staleness = build_staleness_report(
+        claims=historical_records["claims"],
+        as_of="2026-01-12T00:00:00Z",
+        default_review_days=365,
+    )
+    historical_view = build_procurement_program_view(
+        entity_id="SDA-PROC-M2-SYNTHETIC",
+        **historical_records,
+        staleness_report=historical_staleness,
+        projected_at="2026-01-12T00:01:00Z",
+    )
+    expect(
+        historical_view["lifecycle_history"]["status"] == "documented",
+        "different dated lifecycle values must remain history, not automatic dispute",
+        failures,
+    )
+    expect(
+        {item["value"] for item in historical_view["lifecycle_history"]["observations"]}
+        == {"approved", "contracted"},
+        "lifecycle history lost dated observations",
+        failures,
+    )
 
     disputed_records = copy.deepcopy(records)
     disputed_lifecycle = next(
@@ -215,13 +256,14 @@ def main() -> int:
         projected_at="2026-01-12T00:01:00Z",
     )
     expect(
-        disputed_view["lifecycle_state"]["state"] == "disputed",
-        "competing lifecycle Claims must not be flattened to one state",
+        disputed_view["lifecycle_history"]["status"] == "disputed",
+        "explicitly disputed lifecycle Claim must remain disputed",
         failures,
     )
     expect(
-        disputed_view["lifecycle_state"]["values"] == ["contracted", "delivery"],
-        "competing lifecycle values must remain visible",
+        {item["value"] for item in disputed_view["lifecycle_history"]["observations"]}
+        == {"contracted", "delivery"},
+        "disputed lifecycle observations must remain visible",
         failures,
     )
 
@@ -257,9 +299,9 @@ def main() -> int:
         return 1
 
     print(
-        "Validated M2 procurement/exercise views: explicit lifecycle uncertainty, scalar "
-        "procurement facts, bounded cited graphs, exercise intervals, joined staleness, "
-        "and no backend-ID leakage."
+        "Validated M2 procurement/exercise views: lifecycle history without current-state "
+        "inference, explicit disputes, scalar procurement facts, bounded cited graphs, "
+        "exercise intervals, joined staleness, and no backend-ID leakage."
     )
     return 0
 
