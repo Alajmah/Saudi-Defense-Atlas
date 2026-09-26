@@ -50,3 +50,6 @@ jobs:
 
       - name: Validate M1 public projection guards
         run: python scripts/validate_m1_public_projection_guards.py
+
+      - name: Validate M1 public API and bilingual pages
+        run: python scripts/validate_m1_public_web.py
