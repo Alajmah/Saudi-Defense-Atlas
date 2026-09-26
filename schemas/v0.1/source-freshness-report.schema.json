@@ -1,18 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.saudi-defense-atlas.org/v0.1/source-freshness-report.schema.json",
-  "title": "Saudi Defense Atlas Source Acquisition Freshness Report",
-  "description": "Deterministic monitoring-health projection over successful retrieval receipts. Due means a new acquisition check is overdue under explicit polling policy; it does not assert that source content or SDA facts are stale or false.",
+  "title": "Saudi Defense Atlas Registered Feed Acquisition Freshness Report",
+  "description": "Deterministic monitoring-health projection over successful retrieval receipts for registered feeds. Due means a feed check is overdue under explicit polling policy; it does not assert that source content or SDA facts are stale or false.",
   "type": "object",
   "required": ["as_of", "policy", "summary", "items"],
   "properties": {
     "as_of": { "type": "string", "format": "date-time" },
     "policy": {
       "type": "object",
-      "required": ["default_poll_days", "source_poll_days"],
+      "required": ["default_poll_days", "feed_poll_days"],
       "properties": {
         "default_poll_days": { "type": "integer", "minimum": 1 },
-        "source_poll_days": {
+        "feed_poll_days": {
           "type": "object",
           "additionalProperties": { "type": "integer", "minimum": 1 }
         }
@@ -36,6 +36,7 @@
         "type": "object",
         "required": [
           "source_id",
+          "feed_key",
           "publisher",
           "source_class",
           "receipt_count",
@@ -48,6 +49,7 @@
         ],
         "properties": {
           "source_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "feed_key": { "type": "string", "minLength": 1 },
           "publisher": { "$ref": "common.schema.json#/$defs/localized_text" },
           "source_class": { "type": "string", "enum": ["A", "B", "C", "D", "E"] },
           "receipt_count": { "type": "integer", "minimum": 0 },
