@@ -138,6 +138,7 @@ def build_relationship_graph(
         raise ProjectionError("relationship graph requires at least one canonical root Entity ID")
     if len(set(roots)) != len(roots):
         raise ProjectionError("relationship graph root Entity IDs must be unique")
+    root_set = set(roots)
 
     selected_domains = set(domains)
     if not selected_domains or not selected_domains.issubset(_DOMAIN_PREDICATES):
@@ -166,7 +167,7 @@ def build_relationship_graph(
         value_id = _entity_value_id(claim)
         if not isinstance(subject_id, str) or not isinstance(value_id, str):
             continue
-        if subject_id not in selected_entity_ids and value_id not in selected_entity_ids:
+        if subject_id not in root_set and value_id not in root_set:
             continue
         claim_id = claim.get("id")
         if not isinstance(claim_id, str) or not claim_id:
