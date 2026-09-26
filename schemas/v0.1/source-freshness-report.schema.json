@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.saudi-defense-atlas.org/v0.1/source-freshness-report.schema.json",
   "title": "Saudi Defense Atlas Source Acquisition Freshness Report",
-  "description": "Deterministic monitoring-health projection. Due means source retrieval is overdue under an explicit polling policy; it does not assert that the source or represented facts are stale or false.",
+  "description": "Deterministic monitoring-health projection over successful retrieval receipts. Due means a new acquisition check is overdue under explicit polling policy; it does not assert that source content or SDA facts are stale or false.",
   "type": "object",
   "required": ["as_of", "policy", "summary", "items"],
   "properties": {
@@ -38,12 +38,11 @@
           "source_id",
           "publisher",
           "source_class",
-          "document_count",
-          "latest_document_id",
-          "latest_retrieved_at",
+          "receipt_count",
+          "latest_observed_at",
           "age_days",
           "poll_after_days",
-          "next_retrieval_due_at",
+          "next_check_due_at",
           "status",
           "reason"
         ],
@@ -51,17 +50,11 @@
           "source_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
           "publisher": { "$ref": "common.schema.json#/$defs/localized_text" },
           "source_class": { "type": "string", "enum": ["A", "B", "C", "D", "E"] },
-          "document_count": { "type": "integer", "minimum": 0 },
-          "latest_document_id": {
-            "oneOf": [
-              { "$ref": "common.schema.json#/$defs/canonical_id" },
-              { "type": "null" }
-            ]
-          },
-          "latest_retrieved_at": { "type": ["string", "null"], "format": "date-time" },
+          "receipt_count": { "type": "integer", "minimum": 0 },
+          "latest_observed_at": { "type": ["string", "null"], "format": "date-time" },
           "age_days": { "type": ["integer", "null"], "minimum": 0 },
           "poll_after_days": { "type": "integer", "minimum": 1 },
-          "next_retrieval_due_at": { "type": ["string", "null"], "format": "date-time" },
+          "next_check_due_at": { "type": ["string", "null"], "format": "date-time" },
           "status": { "type": "string", "enum": ["fresh", "due", "never_retrieved"] },
           "reason": { "type": "string", "minLength": 1 }
         },
