@@ -56,19 +56,25 @@ def _sequence(value: Any) -> Sequence[Any]:
     return ()
 
 
-def _entity_node(entity_id: str, entities_by_id: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+def _entity_node(
+    entity_id: str,
+    entities_by_id: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
     entity = entities_by_id.get(entity_id)
     if entity is None:
         raise ProjectionError(f"unresolved graph Entity: {entity_id}")
     if entity.get("record_status") != "active":
         raise ProjectionError(f"graph Entity {entity_id} is not an active canonical Entity")
+    entity_type = entity.get("entity_type")
+    if not isinstance(entity_type, str) or not entity_type:
+        raise ProjectionError(f"graph Entity {entity_id} requires entity_type")
     names = entity.get("names")
     if not isinstance(names, Mapping) or not names:
         raise ProjectionError(f"graph Entity {entity_id} requires a public name")
     return {
         "id": entity_id,
         "node_kind": "entity",
-        "entity_type": str(entity.get("entity_type")),
+        "entity_type": entity_type,
         "subtype": entity.get("subtype") if isinstance(entity.get("subtype"), str) else None,
         "names": dict(names),
     }
@@ -91,6 +97,9 @@ def _participant_ids(event: Mapping[str, Any]) -> set[str]:
         entity_id = participant.get("entity_id")
         if not isinstance(entity_id, str) or not entity_id:
             raise ProjectionError("Event participant requires canonical Entity ID")
+        role = participant.get("role")
+        if not isinstance(role, str) or not role:
+            raise ProjectionError("Event participant requires a role")
         result.add(entity_id)
     return result
 
@@ -129,9 +138,10 @@ def build_relationship_graph(
     """Return a deterministic bounded procurement/exercise graph.
 
     Expansion semantics are deliberately single-pass: Claims are selected only
-    when one endpoint is an explicit root Entity. Matching Events may then attach
-    to those selected Entities/Claims, but newly discovered nodes never trigger
-    another Claim or Event expansion pass.
+    when one endpoint is an explicit root Entity. Events are then selected only
+    when they directly reference a root Entity or explicitly reference one of
+    those selected Claim IDs. Newly discovered nodes never trigger another Claim
+    or Event expansion pass.
     """
 
     roots = list(root_entity_ids)
@@ -156,7 +166,9 @@ def build_relationship_graph(
     for root_id in roots:
         _entity_node(root_id, entities_by_id)
 
-    allowed_predicates = set().union(*(_DOMAIN_PREDICATES[domain] for domain in selected_domains))
+    allowed_predicates = set().union(
+        *(_DOMAIN_PREDICATES[domain] for domain in selected_domains)
+    )
     selected_entity_ids: set[str] = set(roots)
     selected_claims: list[Mapping[str, Any]] = []
     selected_claim_ids: set[str] = set()
@@ -187,8 +199,9 @@ def build_relationship_graph(
         participant_ids = _participant_ids(event)
         related_entity_ids = _related_entity_ids(event)
         related_claim_ids = _related_claim_ids(event)
+        event_entity_ids = participant_ids | related_entity_ids
         if (
-            not selected_entity_ids.intersection(participant_ids | related_entity_ids)
+            not root_set.intersection(event_entity_ids)
             and not selected_claim_ids.intersection(related_claim_ids)
         ):
             continue
@@ -199,7 +212,10 @@ def build_relationship_graph(
         selected_entity_ids.update(participant_ids)
         selected_entity_ids.update(related_entity_ids)
 
-    nodes = [_entity_node(entity_id, entities_by_id) for entity_id in sorted(selected_entity_ids)]
+    nodes = [
+        _entity_node(entity_id, entities_by_id)
+        for entity_id in sorted(selected_entity_ids)
+    ]
     edges: list[dict[str, Any]] = []
     timeline: list[dict[str, Any]] = []
     used_record_ids: set[str] = set(selected_entity_ids)
@@ -209,7 +225,9 @@ def build_relationship_graph(
         subject_id = str(claim["subject_id"])
         value_id = _entity_value_id(claim)
         if value_id is None:
-            raise ProjectionError(f"selected graph Claim {claim_id} lost its Entity value")
+            raise ProjectionError(
+                f"selected graph Claim {claim_id} lost its Entity value"
+            )
         citations = _citations(
             claim.get("evidence_links"),
             evidence_by_id=evidence_by_id,
@@ -225,7 +243,11 @@ def build_relationship_graph(
             "relation": str(claim.get("predicate_id")),
             "confidence": claim.get("confidence"),
             "state": claim.get("claim_state"),
-            "validity": dict(claim["validity"]) if isinstance(claim.get("validity"), Mapping) else None,
+            "validity": (
+                dict(claim["validity"])
+                if isinstance(claim.get("validity"), Mapping)
+                else None
+            ),
             "citations": citations,
         }
         edges.append(edge)
@@ -238,9 +260,19 @@ def build_relationship_graph(
     event_nodes: list[dict[str, Any]] = []
     for event in selected_events:
         event_id = str(event["id"])
+        event_type = event.get("event_type")
+        if not isinstance(event_type, str) or not event_type:
+            raise ProjectionError(f"selected graph Event {event_id} requires event_type")
         occurred_at = event.get("occurred_at")
         if not isinstance(occurred_at, Mapping) or not occurred_at:
-            raise ProjectionError(f"selected graph Event {event_id} requires occurred_at")
+            raise ProjectionError(
+                f"selected graph Event {event_id} requires occurred_at"
+            )
+        ended_at = event.get("ended_at")
+        if ended_at is not None and not isinstance(ended_at, Mapping):
+            raise ProjectionError(
+                f"selected graph Event {event_id} has malformed ended_at"
+            )
         citations = _citations(
             event.get("evidence_links"),
             evidence_by_id=evidence_by_id,
@@ -250,9 +282,14 @@ def build_relationship_graph(
         event_node = {
             "id": event_id,
             "node_kind": "event",
-            "event_type": str(event.get("event_type")),
-            "names": dict(event["names"]) if isinstance(event.get("names"), Mapping) else None,
+            "event_type": event_type,
+            "names": (
+                dict(event["names"])
+                if isinstance(event.get("names"), Mapping)
+                else None
+            ),
             "occurred_at": dict(occurred_at),
+            "ended_at": dict(ended_at) if isinstance(ended_at, Mapping) else None,
             "confidence": event.get("confidence"),
             "citations": citations,
         }
@@ -260,9 +297,10 @@ def build_relationship_graph(
         timeline.append(
             {
                 "event_id": event_id,
-                "event_type": event_node["event_type"],
+                "event_type": event_type,
                 "names": event_node["names"],
                 "occurred_at": dict(occurred_at),
+                "ended_at": event_node["ended_at"],
                 "confidence": event.get("confidence"),
                 "citations": citations,
             }
@@ -275,9 +313,16 @@ def build_relationship_graph(
 
         seen_event_edges: set[str] = set()
         for participant in _sequence(event.get("participants")):
-            assert isinstance(participant, Mapping)
-            entity_id = str(participant["entity_id"])
-            role = str(participant.get("role"))
+            if not isinstance(participant, Mapping):
+                raise ProjectionError(f"Event {event_id} participant is malformed")
+            entity_id = participant.get("entity_id")
+            role = participant.get("role")
+            if not isinstance(entity_id, str) or not entity_id:
+                raise ProjectionError(
+                    f"Event {event_id} participant lacks canonical Entity ID"
+                )
+            if not isinstance(role, str) or not role:
+                raise ProjectionError(f"Event {event_id} participant lacks role")
             edge_id = f"event:{event_id}:participant:{role}:{entity_id}"
             if edge_id in seen_event_edges:
                 raise ProjectionError(f"duplicate Event participant edge: {edge_id}")
@@ -320,7 +365,12 @@ def build_relationship_graph(
     nodes.extend(sorted(event_nodes, key=lambda item: item["id"]))
     nodes.sort(key=lambda item: (item["node_kind"], item["id"]))
     edges.sort(key=lambda item: item["id"])
-    timeline.sort(key=lambda item: (str(item["occurred_at"].get("value", "")), item["event_id"]))
+    timeline.sort(
+        key=lambda item: (
+            str(item["occurred_at"].get("value", "")),
+            item["event_id"],
+        )
+    )
 
     node_ids = {node["id"] for node in nodes}
     if len(node_ids) != len(nodes):
@@ -330,7 +380,9 @@ def build_relationship_graph(
         raise ProjectionError("relationship graph contains duplicate edge IDs")
     for edge in edges:
         if edge["from_id"] not in node_ids or edge["to_id"] not in node_ids:
-            raise ProjectionError(f"relationship graph edge {edge['id']} references a missing node")
+            raise ProjectionError(
+                f"relationship graph edge {edge['id']} references a missing node"
+            )
 
     return {
         "scope": {
