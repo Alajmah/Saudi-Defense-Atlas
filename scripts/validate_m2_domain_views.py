@@ -156,7 +156,17 @@ def main() -> int:
         failures,
     )
     expect(
-        {item["claim_id"] for item in procurement["staleness"]}
+        procurement["staleness"]["as_of"] == "2026-01-12T00:00:00Z",
+        "procurement view lost staleness as_of context",
+        failures,
+    )
+    expect(
+        procurement["staleness"]["policy"] == staleness["policy"],
+        "procurement view lost staleness policy context",
+        failures,
+    )
+    expect(
+        {item["claim_id"] for item in procurement["staleness"]["items"]}
         >= {
             "SDA-CLAIM-M2-PROCUREMENT-LIFECYCLE-CONTRACTED",
             "SDA-CLAIM-M2-PROCUREMENT-QUANTITY",
@@ -174,6 +184,11 @@ def main() -> int:
         revision_ids=["SDA-REVISION-M2-DOMAIN-VIEW-TEST"],
     )
     validate_instance("exercise-view.schema.json", exercise, failures)
+    expect(
+        exercise["staleness"]["as_of"] == staleness["as_of"],
+        "exercise view lost staleness as_of context",
+        failures,
+    )
     exercise_relations = {edge["relation"] for edge in exercise["graph"]["edges"]}
     expect(
         "exercise.uses.equipment_variant" in exercise_relations,
@@ -196,8 +211,6 @@ def main() -> int:
             failures,
         )
 
-    # Different active lifecycle values at different points in time are history,
-    # not an automatic conflict or inferred current state.
     historical_records = copy.deepcopy(records)
     first_lifecycle = next(
         claim
@@ -284,6 +297,24 @@ def main() -> int:
     except ProjectionError:
         pass
 
+    stale_version_report = copy.deepcopy(staleness)
+    stale_item = next(
+        item
+        for item in stale_version_report["items"]
+        if item["claim_id"] == "SDA-CLAIM-M2-PROCUREMENT-QUANTITY"
+    )
+    stale_item["verified_at"] = "2025-12-01T00:00:00Z"
+    try:
+        build_procurement_program_view(
+            entity_id="SDA-PROC-M2-SYNTHETIC",
+            **records,
+            staleness_report=stale_version_report,
+            projected_at="2026-01-12T00:01:00Z",
+        )
+        failures.append("procurement view accepted staleness for an older Claim verification")
+    except ProjectionError:
+        pass
+
     serialized = str(procurement) + str(exercise)
     expect("Q999" not in serialized, "domain views must not leak backend Q IDs", failures)
     expect(
@@ -301,7 +332,7 @@ def main() -> int:
     print(
         "Validated M2 procurement/exercise views: lifecycle history without current-state "
         "inference, explicit disputes, scalar procurement facts, bounded cited graphs, "
-        "exercise intervals, joined staleness, and no backend-ID leakage."
+        "exercise intervals, version-bound staleness context, and no backend-ID leakage."
     )
     return 0
 
