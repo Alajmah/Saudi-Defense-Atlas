@@ -34,9 +34,31 @@ _FACET_KEYS = (
     "equipment_classes",
     "status_values",
 )
-_SEARCH_FIELDS = ("search_ar", "search_en", "search_neutral")
 _ASCII_COMPACT_RE = re.compile(r"[-_\s]+")
 _ASCII_ALNUM_RE = re.compile(r"[a-z0-9]")
+_VALIDATION_QUERY = {
+    "query": "SDA contract validation sentinel",
+    "locale": "en",
+    "limit": 1,
+    "filters": {
+        "entity_types": [],
+        "service_ids": [],
+        "manufacturer_ids": [],
+        "country_ids": [],
+        "equipment_classes": [],
+        "status_values": [],
+    },
+}
+
+
+def _validate_search_document_contract(document: Mapping[str, Any]) -> None:
+    """Reuse the frozen reference boundary before any derived-index side effect."""
+    execute_reference_lexical_search(documents=[document], query=_VALIDATION_QUERY)
+
+
+def _validate_search_query_contract(query: Mapping[str, Any]) -> None:
+    """Validate exact v0.1 query shape before contacting Typesense."""
+    execute_reference_lexical_search(documents=[], query=query)
 
 
 def trial_collection_schema(collection_name: str) -> dict[str, Any]:
@@ -66,18 +88,12 @@ def trial_collection_schema(collection_name: str) -> dict[str, Any]:
 
 def to_typesense_document(document: Mapping[str, Any]) -> dict[str, Any]:
     """Flatten only the minimum approved candidate-search projection."""
-    document_id = document.get("id")
-    entity_type = document.get("entity_type")
-    terms = document.get("normalized_terms")
-    facets = document.get("facets")
-    if not isinstance(document_id, str) or not document_id:
-        raise SearchContractError("SearchDocument requires canonical SDA id")
-    if not isinstance(entity_type, str) or not entity_type:
-        raise SearchContractError("SearchDocument requires entity_type")
-    if not isinstance(terms, Mapping) or set(terms) != {"ar", "en", "neutral"}:
-        raise SearchContractError("SearchDocument normalized_terms is malformed")
-    if not isinstance(facets, Mapping) or set(facets) != set(_FACET_KEYS):
-        raise SearchContractError("SearchDocument facets are malformed")
+    _validate_search_document_contract(document)
+
+    document_id = document["id"]
+    entity_type = document["entity_type"]
+    terms = document["normalized_terms"]
+    facets = document["facets"]
 
     result: dict[str, Any] = {
         "id": document_id,
@@ -87,10 +103,7 @@ def to_typesense_document(document: Mapping[str, Any]) -> dict[str, Any]:
         "search_neutral": list(terms["neutral"]),
     }
     for key in _FACET_KEYS:
-        value = facets[key]
-        if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-            raise SearchContractError(f"SearchDocument facet {key} must be an array")
-        result[key] = list(value)
+        result[key] = list(facets[key])
 
     serialized = json.dumps(result, ensure_ascii=False)
     if "backend_identifiers" in serialized or re.search(
@@ -119,25 +132,20 @@ def _escape_filter_value(value: str) -> str:
 
 def build_typesense_filter(query: Mapping[str, Any]) -> str | None:
     """Map SDA OR-within / AND-across filter semantics to exact Typesense facets."""
-    filters = query.get("filters")
-    if not isinstance(filters, Mapping):
-        raise SearchContractError("query filters must be an object")
+    _validate_search_query_contract(query)
+    filters = query["filters"]
 
     clauses: list[str] = []
-    entity_types = filters.get("entity_types")
-    if not isinstance(entity_types, Sequence) or isinstance(entity_types, (str, bytes)):
-        raise SearchContractError("entity_types must be an array")
+    entity_types = filters["entity_types"]
     if entity_types:
-        values = ",".join(_escape_filter_value(str(value)) for value in entity_types)
+        values = ",".join(_escape_filter_value(value) for value in entity_types)
         clauses.append(f"entity_type:=[{values}]")
 
     for key in _FACET_KEYS:
-        values_raw = filters.get(key)
-        if not isinstance(values_raw, Sequence) or isinstance(values_raw, (str, bytes)):
-            raise SearchContractError(f"{key} must be an array")
+        values_raw = filters[key]
         if not values_raw:
             continue
-        values = ",".join(_escape_filter_value(str(value)) for value in values_raw)
+        values = ",".join(_escape_filter_value(value) for value in values_raw)
         clauses.append(f"{key}:=[{values}]")
 
     return " && ".join(clauses) if clauses else None
@@ -224,9 +232,15 @@ class TypesenseTrialClient:
     def import_documents(
         self, collection_name: str, documents: Sequence[Mapping[str, Any]]
     ) -> None:
+        if not isinstance(documents, Sequence) or isinstance(documents, (str, bytes)):
+            raise SearchContractError("documents must be an array")
+        if not documents:
+            return
+
+        projected = [to_typesense_document(document) for document in documents]
         lines = "\n".join(
-            json.dumps(to_typesense_document(document), ensure_ascii=False, sort_keys=True)
-            for document in documents
+            json.dumps(document, ensure_ascii=False, sort_keys=True)
+            for document in projected
         )
         result = self._request(
             "POST",
@@ -235,13 +249,22 @@ class TypesenseTrialClient:
             content_type="text/plain",
             expected=(200,),
         )
-        if not isinstance(result, str):
+
+        rows: list[Mapping[str, Any]] = []
+        if isinstance(result, Mapping):
+            rows = [result]
+        elif isinstance(result, str):
+            for line in result.splitlines():
+                parsed = json.loads(line)
+                if not isinstance(parsed, Mapping):
+                    raise TypesenseTrialError("Typesense import row is malformed")
+                rows.append(parsed)
+        else:
             raise TypesenseTrialError("Typesense import returned unexpected payload")
-        failures: list[str] = []
-        for line in result.splitlines():
-            row = json.loads(line)
-            if row.get("success") is not True:
-                failures.append(line)
+
+        if len(rows) != len(projected):
+            raise TypesenseTrialError("Typesense import row count differs from submitted documents")
+        failures = [json.dumps(row, sort_keys=True) for row in rows if row.get("success") is not True]
         if failures:
             raise TypesenseTrialError("Typesense import failed: " + "; ".join(failures))
 
@@ -300,14 +323,28 @@ class TypesenseTrialClient:
         )
         if not isinstance(payload, Mapping) or not isinstance(payload.get("hits"), list):
             raise TypesenseTrialError("Typesense search response is malformed")
+        found = payload.get("found")
+        if not isinstance(found, int) or isinstance(found, bool) or found < 0:
+            raise TypesenseTrialError("Typesense search response has invalid found count")
+        if found > len(payload["hits"]):
+            raise TypesenseTrialError(
+                "bounded candidate retrieval would truncate engine matches; "
+                "refuse to understate public result totals"
+            )
+
         ids: list[str] = []
+        seen: set[str] = set()
         for hit in payload["hits"]:
             if not isinstance(hit, Mapping):
                 raise TypesenseTrialError("Typesense hit is malformed")
             doc = hit.get("document")
             if not isinstance(doc, Mapping) or not isinstance(doc.get("id"), str):
                 raise TypesenseTrialError("Typesense hit has no SDA id")
-            ids.append(str(doc["id"]))
+            document_id = str(doc["id"])
+            if document_id in seen:
+                raise TypesenseTrialError(f"Typesense returned duplicate SDA id {document_id}")
+            seen.add(document_id)
+            ids.append(document_id)
         return ids
 
     def search(
@@ -321,13 +358,26 @@ class TypesenseTrialClient:
         """Retrieve candidates from Typesense, then apply SDA public ranking semantics."""
         if candidate_limit < 1 or candidate_limit > 250:
             raise ValueError("candidate_limit must be from 1 to 250 in the bounded trial")
-        raw_query = query.get("query")
-        requested_locale = query.get("locale")
-        if not isinstance(raw_query, str) or not isinstance(requested_locale, str):
-            raise SearchContractError("query text/locale are required")
+        if not isinstance(query, Mapping):
+            raise SearchContractError("query must be an object")
+        if not isinstance(documents, Sequence) or isinstance(documents, (str, bytes)):
+            raise SearchContractError("documents must be an array")
+
+        # Validate all SDA-owned inputs before the derived engine sees the request.
+        _validate_search_query_contract(query)
+        documents_by_id: dict[str, Mapping[str, Any]] = {}
+        for document in documents:
+            if not isinstance(document, Mapping):
+                raise SearchContractError("SearchDocument must be an object")
+            _validate_search_document_contract(document)
+            document_id = str(document["id"])
+            if document_id in documents_by_id:
+                raise SearchContractError(f"duplicate SearchDocument id: {document_id}")
+            documents_by_id[document_id] = document
+
+        raw_query = query["query"]
+        requested_locale = query["locale"]
         normalized = normalize_search_text(raw_query)
-        if not normalized:
-            raise SearchContractError("query is empty after normalization")
         locale = resolve_query_locale(raw_query, requested_locale)
         filter_by = build_typesense_filter(query)
 
@@ -347,15 +397,6 @@ class TypesenseTrialClient:
                     candidate_limit=candidate_limit,
                 )
             )
-
-        documents_by_id: dict[str, Mapping[str, Any]] = {}
-        for document in documents:
-            document_id = document.get("id")
-            if not isinstance(document_id, str) or not document_id:
-                raise SearchContractError("SearchDocument requires canonical SDA id")
-            if document_id in documents_by_id:
-                raise SearchContractError(f"duplicate SearchDocument id: {document_id}")
-            documents_by_id[document_id] = document
 
         unknown = sorted(candidate_ids - set(documents_by_id))
         if unknown:
