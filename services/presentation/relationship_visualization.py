@@ -6,6 +6,7 @@ already-bounded public graph projection and never creates new graph semantics.
 
 from __future__ import annotations
 
+import hashlib
 import html
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -146,6 +147,10 @@ def render_relationship_figure(graph: Mapping[str, Any], *, locale: str) -> str:
 
     positions, height = _positions(graph)
     root_ids = set(graph["scope"]["root_entity_ids"])
+    graph_token = hashlib.sha256("|".join(sorted(root_ids)).encode("utf-8")).hexdigest()[:12]
+    title_id = f"sda-relationship-title-{graph_token}"
+    desc_id = f"sda-relationship-desc-{graph_token}"
+    arrow_id = f"sda-arrow-{graph_token}"
 
     rendered_edges: list[str] = []
     fallback_edges: list[str] = []
@@ -166,24 +171,31 @@ def render_relationship_figure(graph: Mapping[str, Any], *, locale: str) -> str:
         if from_id not in positions or to_id not in positions:
             raise ProjectionError(f"visualization edge {edge_id} references a missing node")
 
+        citations = edge.get("citations")
+        if not isinstance(citations, Sequence) or isinstance(citations, (str, bytes)) or not citations:
+            raise ProjectionError(f"visualization edge {edge_id} requires citations")
+        rendered_citations: list[str] = []
+        has_support = False
+        for citation in citations:
+            if not isinstance(citation, Mapping):
+                raise ProjectionError(f"visualization edge {edge_id} has malformed citation")
+            has_support = has_support or citation.get("evidence_role") == "supports"
+            rendered_citations.append(_citation_html(citation, locale))
+        if not has_support:
+            raise ProjectionError(
+                f"visualization edge {edge_id} requires at least one supporting Evidence citation"
+            )
+
         x1, y1 = positions[from_id]
         x2, y2 = positions[to_id]
         mx, my = (x1 + x2) // 2, (y1 + y2) // 2
         rendered_edges.append(
             f'<g class="relationship-edge" data-source-record-id="{html.escape(source_record_id, quote=True)}">'
-            f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" marker-end="url(#sda-arrow)" />'
+            f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" marker-end="url(#{arrow_id})" />'
             f'<text x="{mx}" y="{my - 8}" text-anchor="middle" direction="ltr">{html.escape(relation)}</text>'
             "</g>"
         )
 
-        citations = edge.get("citations")
-        if not isinstance(citations, Sequence) or isinstance(citations, (str, bytes)) or not citations:
-            raise ProjectionError(f"visualization edge {edge_id} requires citations")
-        rendered_citations: list[str] = []
-        for citation in citations:
-            if not isinstance(citation, Mapping):
-                raise ProjectionError(f"visualization edge {edge_id} has malformed citation")
-            rendered_citations.append(_citation_html(citation, locale))
         citation_text = "; ".join(rendered_citations)
         fallback_edges.append(
             "<li "
@@ -214,11 +226,10 @@ def render_relationship_figure(graph: Mapping[str, Any], *, locale: str) -> str:
     return (
         f'<figure class="relationship-figure" dir="{direction}">'
         f'<svg class="relationship-svg" viewBox="0 0 960 {height}" role="img" '
-        'aria-labelledby="sda-relationship-title sda-relationship-desc" '
-        'xmlns="http://www.w3.org/2000/svg">'
-        f'<title id="sda-relationship-title">{svg_title}</title>'
-        f'<desc id="sda-relationship-desc">{svg_desc}</desc>'
-        '<defs><marker id="sda-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">'
+        f'aria-labelledby="{title_id} {desc_id}" xmlns="http://www.w3.org/2000/svg">'
+        f'<title id="{title_id}">{svg_title}</title>'
+        f'<desc id="{desc_id}">{svg_desc}</desc>'
+        f'<defs><marker id="{arrow_id}" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto" markerUnits="strokeWidth">'
         '<path d="M0,0 L8,4 L0,8 z" /></marker></defs>'
         '<style>.relationship-svg{width:100%;height:auto}.relationship-edge line{stroke:currentColor;stroke-width:1.5}.relationship-edge text{font:11px system-ui,sans-serif}.relationship-node rect{fill:white;stroke:currentColor;stroke-width:1.5}.relationship-node.root rect{stroke-width:3}.relationship-node.event rect{stroke-dasharray:5 3}.relationship-node text{font:13px system-ui,sans-serif}</style>'
         f'{"".join(rendered_edges)}{"".join(rendered_nodes)}'
