@@ -112,7 +112,7 @@ M1 remains a local single-writer proof. Production mutation must not be authoriz
 
 **Resolution:** FIXED and VERIFIED.
 
-M1 now discovers the configured Item namespace from Action API `siteinfo`, enumerates that namespace directly from MediaWiki state, and extracts Q-IDs from either bare or namespaced page titles. The clean-stack runtime test explicitly proves that the seeded RSAF, Boeing, and F-15SA canonical IDs resolve to their expected Q-IDs before proposal execution begins. WDQS remains excluded from mutation reconciliation because its index is asynchronous. The clean-stack `wikibase-verification` run passed at commit `27585c70e719d7049a4933bbf6bc2e4e3bc90bc3`.
+M1 now discovers the configured Item namespace from Action API `siteinfo`, enumerates that namespace directly from MediaWiki state, and extracts Q-IDs from either bare or namespaced page titles. The clean-stack runtime test explicitly proves that the seeded RSAF, Boeing, and F-15SA canonical IDs resolve to their expected Q-IDs before proposal execution begins. WDQS remains excluded from mutation reconciliation because its index is asynchronous.
 
 ---
 
@@ -130,7 +130,7 @@ M1 now discovers the configured Item namespace from Action API `siteinfo`, enume
 
 **Resolution:** FIXED and VERIFIED.
 
-`build_revision()` now requires at least one execution effect with status `applied` in addition to full convergence. A pure `already_applied` replay remains a valid convergence result but is rejected for Revision creation. The static Revision validator proves this boundary explicitly. At commit `cabe6183bfad3b9ef92353c011c6717529735f95`, `schema-validation` run 192 and clean-stack `wikibase-verification` run 39 both passed.
+`build_revision()` now requires at least one execution effect with status `applied` in addition to full convergence. A pure `already_applied` replay remains a valid convergence result but is rejected for Revision creation. The static Revision validator proves this boundary explicitly.
 
 ---
 
@@ -148,10 +148,10 @@ M1 now discovers the configured Item namespace from Action API `siteinfo`, enume
 
 **Resolution:** FIXED and VERIFIED.
 
-The mutation guard now wraps backend inspection through a fail-closed helper. Inspection exceptions become `EffectInspection("unknown")` with auditable exception detail. Preflight inspection failures block all writes; post-write inspection failures mark the attempted effect `effect_unknown`, leave later mutations `not_attempted`, and never retry or continue. The static mutation-guard validator covers both failure positions. At implementation commit `3456290904ed50c26c9bec829d0affd2f0c09cd8`, `schema-validation` run 200 and clean-stack `wikibase-verification` run 43 both passed.
+The mutation guard now wraps backend inspection through a fail-closed helper. Inspection exceptions become `EffectInspection("unknown")` with auditable exception detail. Preflight inspection failures block all writes; post-write inspection failures mark the attempted effect `effect_unknown`, leave later mutations `not_attempted`, and never retry or continue. The static mutation-guard validator covers both failure positions.
 
 ## Final PR #2 verification boundary
 
-PR #2 final review state is backed by green `schema-validation` run 208 and clean-stack `wikibase-verification` run 47 on the documentation-closure head descended from the verified implementation. All implementation fixes through M1-F18 are verified for the bounded single-writer PR #2 contract.
+PR #2 has repeatedly passed the static schema/governance suite and the clean-stack Wikibase verification after all implementation fixes through M1-F18. The PR is verified for the bounded single-writer canonical-write contract; CI status on the merge head remains the authoritative merge gate rather than a hard-coded historical SHA in this record.
 
 Concurrent-writer uniqueness remains intentionally unqualified under M1-F15 and must be resolved before production mutation is authorized. PR #2 is an M1 ingestion/governance/canonical-write increment; the public projection/API and bilingual cited page are still required before full M1 acceptance.
