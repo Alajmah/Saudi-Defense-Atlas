@@ -79,3 +79,6 @@ jobs:
 
       - name: Validate M3 Arabic-aware search contract
         run: python scripts/validate_m3_search_contract.py
+
+      - name: Validate M3 search contract isolation
+        run: python scripts/validate_m3_search_contract_isolation.py
