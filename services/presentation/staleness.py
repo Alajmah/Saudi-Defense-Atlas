@@ -64,20 +64,21 @@ def build_staleness_report(
     items: list[dict[str, Any]] = []
 
     for claim in claims:
+        claim_id = claim.get("id")
+        if not isinstance(claim_id, str) or not claim_id:
+            raise StalenessError("Claim collection requires canonical IDs")
+        if claim_id in seen_ids:
+            raise StalenessError(f"duplicate Claim ID in staleness input: {claim_id}")
+        seen_ids.add(claim_id)
+
         if claim.get("claim_state") not in _VISIBLE_STATES:
             continue
 
-        claim_id = claim.get("id")
         subject_id = claim.get("subject_id")
         predicate_id = claim.get("predicate_id")
         claim_state = claim.get("claim_state")
         confidence = claim.get("confidence")
 
-        if not isinstance(claim_id, str) or not claim_id:
-            raise StalenessError("current Claim requires canonical ID")
-        if claim_id in seen_ids:
-            raise StalenessError(f"duplicate current Claim ID: {claim_id}")
-        seen_ids.add(claim_id)
         if not isinstance(subject_id, str) or not subject_id:
             raise StalenessError(f"Claim {claim_id} requires subject_id")
         if not isinstance(predicate_id, str) or not predicate_id:
