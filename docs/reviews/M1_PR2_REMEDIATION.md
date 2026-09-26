@@ -132,6 +132,24 @@ M1 now discovers the configured Item namespace from Action API `siteinfo`, enume
 
 `build_revision()` now requires at least one execution effect with status `applied` in addition to full convergence. A pure `already_applied` replay remains a valid convergence result but is rejected for Revision creation. The static Revision validator proves this boundary explicitly. At commit `cabe6183bfad3b9ef92353c011c6717529735f95`, `schema-validation` run 192 and clean-stack `wikibase-verification` run 39 both passed.
 
+---
+
+## M1-F18 — Backend inspection exceptions escaped structured reconciliation state
+
+**Area:** canonical mutation / failure accounting
+
+**Finding:** `execute_authorized_proposal()` trusted `backend.inspect_effect()` to return an `EffectInspection`. If a reconciliation read itself raised—for example because the Action API connection dropped after a write—the exception escaped the guard rather than becoming an explicit `effect_unknown` result.
+
+**Why it matters:** The M1 contract requires complete, auditable proposal state under ambiguous effects. A read outage after a potentially successful write must not crash out of the execution record or tempt a caller to retry without knowing whether the effect occurred.
+
+**Severity:** High
+
+**Confidence:** High
+
+**Resolution:** FIXED in implementation; verification pending on the final head.
+
+The mutation guard now wraps backend inspection through a fail-closed helper. Inspection exceptions become `EffectInspection("unknown")` with auditable exception detail. Preflight inspection failures block all writes; post-write inspection failures mark the attempted effect `effect_unknown`, leave later mutations `not_attempted`, and never retry or continue. The static mutation-guard validator now covers both failure positions.
+
 ## Verification boundary after remediation
 
-All implementation fixes through M1-F17 are green at commit `cabe6183bfad3b9ef92353c011c6717529735f95`. Concurrent-writer uniqueness remains intentionally unqualified under M1-F15 and must be resolved before production mutation is authorized.
+All implementation fixes through M1-F18 require green `schema-validation` and clean-stack `wikibase-verification` at the final PR head. Concurrent-writer uniqueness remains intentionally unqualified under M1-F15 and must be resolved before production mutation is authorized.
