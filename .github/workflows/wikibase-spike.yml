@@ -121,6 +121,16 @@ jobs:
           set +a
           python run_m1_vertical_slice.py
 
+      - name: Verify M1 canonical public read projection
+        working-directory: spikes/wikibase
+        shell: bash
+        run: |
+          set -euo pipefail
+          set -a
+          source ./.env
+          set +a
+          python run_m1_public_projection.py
+
       - name: Upload Wikibase verification evidence
         if: success()
         uses: actions/upload-artifact@v4
@@ -132,6 +142,7 @@ jobs:
             spikes/wikibase/approved-demo-applied.generated.json
             spikes/wikibase/m1_projection_state.generated.json
             spikes/wikibase/m1_vertical_slice.generated.json
+            spikes/wikibase/m1_public_projection.generated.json
           if-no-files-found: error
           retention-days: 14
 
