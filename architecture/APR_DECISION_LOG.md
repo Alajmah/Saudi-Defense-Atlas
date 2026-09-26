@@ -96,3 +96,22 @@ This log records explicit architectural promotion, deferment, rejection, superse
 - verification_evidence: workflow fixtures and validation; synthetic AMBER approval applied through `apply_approved_demo.py` in run `36178040438`.
 - claim_ceiling: the tested adapter does not write before authorization and records backend identifiers as receipts after the effect; broader mutation reliability remains future work.
 - authority_reference: `docs/AI_GOVERNANCE.md`, `docs/reviews/M0_ADVERSARIAL_REVIEW.md`, ADR-0002.
+
+## APRD-007 — Authorize bounded deterministic SVG relationship-visualization trial
+
+- date: 2026-09-26
+- pattern: APR-007
+- from_status: CANDIDATE
+- to_status: TRIAL-AUTHORIZED
+- implementation_status: IN-TRIAL
+- forcing_function: M2 requires a first relationship visualization while the accepted graph is deliberately bounded and no frontend/graph runtime has been selected.
+- adopted_invariant: visualization consumes `RelationshipGraphView` only and may not invent topology, replace SDA identity, or remove supporting Evidence from material relationships.
+- adaptation: use server-rendered deterministic inline SVG with semantic cited HTML fallback; localize labels without changing graph identity.
+- alternatives_characterized: Cytoscape.js; D3 selection/force; project-owned SVG.
+- scope: first bounded M2 relationship visualization and bilingual route/API proof.
+- non_scope: large graph exploration, force-directed layout, drag/pan/zoom, graph editing, browser-side graph analysis, final frontend stack selection.
+- failure_model: visual-only inferred edges, Q/P leakage, citation loss, nondeterministic layout, inaccessible SVG, global SVG ID collisions, bounded layout used past readable scale.
+- verification_plan: deterministic reorder test; supporting-Evidence rejection; accessible title/description; graph-scoped SVG IDs; cited HTML fallback; bilingual routes; exact graph JSON API; no backend identifiers.
+- claim_ceiling: successful trial may justify acceptance only for the bounded M2 visualization role.
+- authority_reference: `docs/adr/ADR-0003-first-relationship-visualization.md`, `docs/ROADMAP.md` M2.
+- rationale: the first graph is small enough that a browser-native deterministic renderer meets the forcing function with less dependency/interaction surface than a general graph engine.
