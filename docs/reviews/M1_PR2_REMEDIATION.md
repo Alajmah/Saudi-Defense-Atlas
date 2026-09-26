@@ -1,6 +1,6 @@
 # M1 PR #2 Remediation Record
 
-This record captures findings discovered during the independent first-pass review of PR #2 and the remediation applied before any later independent/Codex review. It supplements `M1_FIRST_PASS.md` and `M1_FIRST_PASS_CONTINUED.md`; it does not rewrite their discovery history.
+This record captures findings discovered during the independent first-pass review of PR #2 and the remediation applied before any later independent/Codex review. It supplements `M1_FIRST_PASS.md`, `M1_FIRST_PASS_CONTINUED.md`, and `M1_SECOND_PASS.md`; it does not rewrite their discovery history.
 
 ## M1-F10 — Runtime Wikibase proof fixture drifted from parser contract
 
@@ -146,10 +146,10 @@ M1 now discovers the configured Item namespace from Action API `siteinfo`, enume
 
 **Confidence:** High
 
-**Resolution:** FIXED in implementation; verification pending on the final head.
+**Resolution:** FIXED and VERIFIED.
 
-The mutation guard now wraps backend inspection through a fail-closed helper. Inspection exceptions become `EffectInspection("unknown")` with auditable exception detail. Preflight inspection failures block all writes; post-write inspection failures mark the attempted effect `effect_unknown`, leave later mutations `not_attempted`, and never retry or continue. The static mutation-guard validator now covers both failure positions.
+The mutation guard now wraps backend inspection through a fail-closed helper. Inspection exceptions become `EffectInspection("unknown")` with auditable exception detail. Preflight inspection failures block all writes; post-write inspection failures mark the attempted effect `effect_unknown`, leave later mutations `not_attempted`, and never retry or continue. The static mutation-guard validator covers both failure positions. At implementation commit `3456290904ed50c26c9bec829d0affd2f0c09cd8`, `schema-validation` run 200 and clean-stack `wikibase-verification` run 43 both passed.
 
 ## Verification boundary after remediation
 
-All implementation fixes through M1-F18 require green `schema-validation` and clean-stack `wikibase-verification` at the final PR head. Concurrent-writer uniqueness remains intentionally unqualified under M1-F15 and must be resolved before production mutation is authorized.
+All implementation fixes through M1-F18 are verified for the bounded single-writer PR #2 contract. Concurrent-writer uniqueness remains intentionally unqualified under M1-F15 and must be resolved before production mutation is authorized. PR #2 remains an M1 ingestion/governance/canonical-write increment; the public projection/API and bilingual cited page are still required before full M1 acceptance.
