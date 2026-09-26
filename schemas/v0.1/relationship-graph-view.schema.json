@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/relationship-graph-view.schema.json",
+  "title": "Saudi Defense Atlas Public Relationship Graph View",
+  "description": "Backend-neutral bounded public graph derived only from canonical SDA Entity/Claim/Event/Evidence records. Edges are explicit source records, never inferred graph relationships.",
+  "type": "object",
+  "required": ["scope", "nodes", "edges", "timeline", "provenance"],
+  "properties": {
+    "scope": {
+      "type": "object",
+      "required": ["root_entity_ids", "domains", "expansion"],
+      "properties": {
+        "root_entity_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "uniqueItems": true
+        },
+        "domains": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "enum": ["procurement", "exercise"] },
+          "uniqueItems": true
+        },
+        "expansion": { "const": "bounded_single_pass" }
+      },
+      "additionalProperties": false
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          { "$ref": "#/$defs/entity_node" },
+          { "$ref": "#/$defs/event_node" }
+        ]
+      }
+    },
+    "edges": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/edge" }
+    },
+    "timeline": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/timeline_event" }
+    },
+    "provenance": {
+      "type": "object",
+      "required": ["projected_at", "record_ids", "revision_ids"],
+      "properties": {
+        "projected_at": { "type": "string", "format": "date-time" },
+        "record_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "uniqueItems": true
+        },
+        "revision_ids": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "citation": {
+      "type": "object",
+      "required": [
+        "evidence_id",
+        "evidence_role",
+        "document_id",
+        "source_id",
+        "source_class",
+        "publisher",
+        "locator",
+        "retrieved_at"
+      ],
+      "properties": {
+        "evidence_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+        "evidence_role": { "type": "string", "enum": ["supports", "contradicts", "contextualizes"] },
+        "document_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+        "source_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+        "source_class": { "type": "string", "enum": ["A", "B", "C", "D", "E"] },
+        "publisher": { "$ref": "common.schema.json#/$defs/localized_text" },
+        "document_title": {
+          "oneOf": [
+            { "$ref": "common.schema.json#/$defs/localized_text" },
+            { "type": "null" }
+          ]
+        },
+        "url": { "type": ["string", "null"], "format": "uri" },
+        "published_at": {
+          "oneOf": [
+            { "$ref": "common.schema.json#/$defs/temporal_value" },
+            { "type": "null" }
+          ]
+        },
+        "retrieved_at": { "type": "string", "format": "date-time" },
+        "locator": { "$ref": "evidence.schema.json#/properties/locator" }
+      },
+      "additionalProperties": false
+    },
+    "entity_node": {
+      "type": "object",
+      "required": ["id", "node_kind", "entity_type", "names"],
+      "properties": {
+        "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+        "node_kind": { "const": "entity" },
+        "entity_type": { "type": "string", "minLength": 1 },
+        "subtype": { "type": ["string", "null"] },
+        "names": { "$ref": "common.schema.json#/$defs/localized_text" }
+      },
+      "additionalProperties": false
+    },
+    "event_node": {
+      "type": "object",
+      "required": ["id", "node_kind", "event_type", "names", "occurred_at", "ended_at", "confidence", "citations"],
+      "properties": {
+        "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+        "node_kind": { "const": "event" },
+        "event_type": { "type": "string", "minLength": 1 },
+        "names": {
+          "oneOf": [
+            { "$ref": "common.schema.json#/$defs/localized_text" },
+            { "type": "null" }
+          ]
+        },
+        "occurred_at": { "$ref": "common.schema.json#/$defs/temporal_value" },
+        "ended_at": {
+          "oneOf": [
+            { "$ref": "common.schema.json#/$defs/temporal_value" },
+            { "type": "null" }
+          ]
+        },
+        "confidence": { "$ref": "common.schema.json#/$defs/confidence" },
+        "citations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/citation" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "edge": {
+      "type": "object",
+      "required": [
+        "id",
+        "edge_kind",
+        "source_record_id",
+        "from_id",
+        "to_id",
+        "relation",
+        "confidence",
+        "state",
+        "citations"
+      ],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "edge_kind": {
+          "type": "string",
+          "enum": ["claim_relation", "event_participation", "event_related_entity"]
+        },
+        "source_record_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+        "from_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+        "to_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+        "relation": { "type": "string", "minLength": 1 },
+        "confidence": { "$ref": "common.schema.json#/$defs/confidence" },
+        "state": { "type": ["string", "null"], "enum": ["active", "disputed", null] },
+        "validity": {
+          "oneOf": [
+            { "$ref": "common.schema.json#/$defs/validity_interval" },
+            { "type": "null" }
+          ]
+        },
+        "citations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/citation" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "timeline_event": {
+      "type": "object",
+      "required": ["event_id", "event_type", "names", "occurred_at", "ended_at", "confidence", "citations"],
+      "properties": {
+        "event_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+        "event_type": { "type": "string", "minLength": 1 },
+        "names": {
+          "oneOf": [
+            { "$ref": "common.schema.json#/$defs/localized_text" },
+            { "type": "null" }
+          ]
+        },
+        "occurred_at": { "$ref": "common.schema.json#/$defs/temporal_value" },
+        "ended_at": {
+          "oneOf": [
+            { "$ref": "common.schema.json#/$defs/temporal_value" },
+            { "type": "null" }
+          ]
+        },
+        "confidence": { "$ref": "common.schema.json#/$defs/confidence" },
+        "citations": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/citation" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
