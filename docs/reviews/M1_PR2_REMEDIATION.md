@@ -150,6 +150,8 @@ M1 now discovers the configured Item namespace from Action API `siteinfo`, enume
 
 The mutation guard now wraps backend inspection through a fail-closed helper. Inspection exceptions become `EffectInspection("unknown")` with auditable exception detail. Preflight inspection failures block all writes; post-write inspection failures mark the attempted effect `effect_unknown`, leave later mutations `not_attempted`, and never retry or continue. The static mutation-guard validator covers both failure positions. At implementation commit `3456290904ed50c26c9bec829d0affd2f0c09cd8`, `schema-validation` run 200 and clean-stack `wikibase-verification` run 43 both passed.
 
-## Verification boundary after remediation
+## Final PR #2 verification boundary
 
-All implementation fixes through M1-F18 are verified for the bounded single-writer PR #2 contract. Concurrent-writer uniqueness remains intentionally unqualified under M1-F15 and must be resolved before production mutation is authorized. PR #2 remains an M1 ingestion/governance/canonical-write increment; the public projection/API and bilingual cited page are still required before full M1 acceptance.
+Final PR #2 head `56b97489fef79eeb1330121a752c8f114716a14f` passed `schema-validation` run 206 and clean-stack `wikibase-verification` run 46. All implementation fixes through M1-F18 are verified for the bounded single-writer PR #2 contract.
+
+Concurrent-writer uniqueness remains intentionally unqualified under M1-F15 and must be resolved before production mutation is authorized. PR #2 is an M1 ingestion/governance/canonical-write increment; the public projection/API and bilingual cited page are still required before full M1 acceptance.
