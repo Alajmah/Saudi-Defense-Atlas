@@ -152,6 +152,6 @@ The mutation guard now wraps backend inspection through a fail-closed helper. In
 
 ## Final PR #2 verification boundary
 
-Final PR #2 head `56b97489fef79eeb1330121a752c8f114716a14f` passed `schema-validation` run 206 and clean-stack `wikibase-verification` run 46. All implementation fixes through M1-F18 are verified for the bounded single-writer PR #2 contract.
+PR #2 final review state is backed by green `schema-validation` run 208 and clean-stack `wikibase-verification` run 47 on the documentation-closure head descended from the verified implementation. All implementation fixes through M1-F18 are verified for the bounded single-writer PR #2 contract.
 
 Concurrent-writer uniqueness remains intentionally unqualified under M1-F15 and must be resolved before production mutation is authorized. PR #2 is an M1 ingestion/governance/canonical-write increment; the public projection/API and bilingual cited page are still required before full M1 acceptance.
