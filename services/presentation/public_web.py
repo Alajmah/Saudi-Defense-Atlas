@@ -63,6 +63,17 @@ def _labels(locale: str) -> dict[str, str]:
     }
 
 
+def _related_name(view: Mapping[str, Any], entity_id: Any, locale: str) -> str | None:
+    if not isinstance(entity_id, str) or not entity_id:
+        return None
+    if entity_id == view.get("id"):
+        return _text(view.get("names"), locale) or entity_id
+    for related in view.get("related_entities", []):
+        if isinstance(related, Mapping) and related.get("id") == entity_id:
+            return _text(related.get("names"), locale) or entity_id
+    return None
+
+
 def _field_value(view: Mapping[str, Any], field: str, locale: str) -> str:
     labels = _labels(locale)
     state = view.get("field_states", {}).get(field, {})
@@ -76,12 +87,19 @@ def _field_value(view: Mapping[str, Any], field: str, locale: str) -> str:
     for fact in view.get("facts", []):
         if fact.get("claim_id") not in claim_ids:
             continue
+
+        # For inbound relational facts such as Boeing -> manufactures -> F-15SA,
+        # the related value presented on the equipment page is the Claim subject.
+        if fact.get("direction") == "inbound":
+            subject_name = _related_name(view, fact.get("subject_id"), locale)
+            if subject_name:
+                return subject_name
+
         value = fact.get("value")
         if isinstance(value, Mapping) and value.get("kind") == "entity":
-            entity_id = value.get("entity_id")
-            for related in view.get("related_entities", []):
-                if related.get("id") == entity_id:
-                    return _text(related.get("names"), locale) or str(entity_id)
+            entity_name = _related_name(view, value.get("entity_id"), locale)
+            if entity_name:
+                return entity_name
         if isinstance(value, Mapping) and "value" in value:
             return str(value["value"])
     return labels["unknown"]
