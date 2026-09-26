@@ -57,3 +57,6 @@ jobs:
 
       - name: Validate M2 bounded relationship graph
         run: python scripts/validate_m2_relationship_graph.py
+
+      - name: Validate M2 graph isolation and event intervals
+        run: python scripts/validate_m2_relationship_graph_isolation.py
