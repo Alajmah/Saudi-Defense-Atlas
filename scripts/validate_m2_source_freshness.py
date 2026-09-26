@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate M2 source acquisition-freshness semantics and failure boundaries."""
+"""Validate M2 registered-feed acquisition freshness and failure boundaries."""
 
 from __future__ import annotations
 
@@ -53,9 +53,27 @@ def source(source_id: str, *, source_class: str = "A", active: bool = True) -> d
     }
 
 
-def receipt(source_id: str, observed_at: str, *, status_code: int = 200) -> dict[str, Any]:
+def feed(source_id: str, feed_key: str) -> SourceAcquisitionPolicy:
+    return SourceAcquisitionPolicy(
+        source_id=source_id,
+        document_key=feed_key,
+        canonical_url=f"https://official.example.test/{feed_key.lower()}",
+        allowed_hosts=("official.example.test",),
+        language="en",
+        document_type="press_release",
+    )
+
+
+def receipt(
+    source_id: str,
+    feed_key: str,
+    observed_at: str,
+    *,
+    status_code: int = 200,
+) -> dict[str, Any]:
     return {
         "source_id": source_id,
+        "document_key": feed_key,
         "observed_at": observed_at,
         "status_code": status_code,
     }
@@ -64,16 +82,21 @@ def receipt(source_id: str, observed_at: str, *, status_code: int = 200) -> dict
 def main() -> int:
     failures: list[str] = []
     sources = [
-        source("SDA-SOURCE-M2-FRESH"),
-        source("SDA-SOURCE-M2-DUE", source_class="B"),
-        source("SDA-SOURCE-M2-NEVER", source_class="C"),
+        source("SDA-SOURCE-M2-A"),
+        source("SDA-SOURCE-M2-B", source_class="B"),
         source("SDA-SOURCE-M2-INACTIVE", active=False),
     ]
+    feeds = [
+        feed("SDA-SOURCE-M2-A", "FEED-FRESH"),
+        feed("SDA-SOURCE-M2-A", "FEED-NEVER"),
+        feed("SDA-SOURCE-M2-B", "FEED-DUE"),
+        feed("SDA-SOURCE-M2-INACTIVE", "FEED-INACTIVE"),
+    ]
     receipts = [
-        receipt("SDA-SOURCE-M2-FRESH", "2026-01-09T00:00:00Z"),
-        receipt("SDA-SOURCE-M2-FRESH", "2026-01-10T00:00:00+00:00"),
-        receipt("SDA-SOURCE-M2-DUE", "2026-01-01T00:00:00Z"),
-        receipt("SDA-SOURCE-M2-INACTIVE", "2026-01-10T00:00:00Z"),
+        receipt("SDA-SOURCE-M2-A", "FEED-FRESH", "2026-01-09T00:00:00Z"),
+        receipt("SDA-SOURCE-M2-A", "FEED-FRESH", "2026-01-10T00:00:00+00:00"),
+        receipt("SDA-SOURCE-M2-B", "FEED-DUE", "2026-01-01T00:00:00Z"),
+        receipt("SDA-SOURCE-M2-INACTIVE", "FEED-INACTIVE", "2026-01-10T00:00:00Z"),
     ]
 
     for item in sources:
@@ -81,22 +104,23 @@ def main() -> int:
 
     report = build_source_freshness_report(
         sources=sources,
+        feeds=feeds,
         retrieval_receipts=receipts,
         as_of="2026-01-11T00:00:00Z",
         default_poll_days=7,
-        source_poll_days={"SDA-SOURCE-M2-DUE": 10},
+        feed_poll_days={"FEED-DUE": 10},
     )
     validate_instance("source-freshness-report.schema.json", report, failures)
 
     expect(
         report["summary"] == {"total": 3, "fresh": 1, "due": 1, "never_retrieved": 1},
-        "source freshness summary changed",
+        "feed freshness summary changed",
         failures,
     )
-    by_id = {item["source_id"]: item for item in report["items"]}
-    expect("SDA-SOURCE-M2-INACTIVE" not in by_id, "inactive Source entered workload", failures)
-    fresh = by_id["SDA-SOURCE-M2-FRESH"]
-    expect(fresh["status"] == "fresh", "recent retrieval must remain fresh", failures)
+    by_key = {item["feed_key"]: item for item in report["items"]}
+    expect("FEED-INACTIVE" not in by_key, "inactive Source feed entered workload", failures)
+    fresh = by_key["FEED-FRESH"]
+    expect(fresh["status"] == "fresh", "recent feed retrieval must remain fresh", failures)
     expect(fresh["receipt_count"] == 2, "successful receipt count changed", failures)
     expect(
         fresh["latest_observed_at"] == "2026-01-10T00:00:00Z",
@@ -104,8 +128,8 @@ def main() -> int:
         failures,
     )
 
-    due = by_id["SDA-SOURCE-M2-DUE"]
-    expect(due["status"] == "due", "receipt at polling deadline must be due", failures)
+    due = by_key["FEED-DUE"]
+    expect(due["status"] == "due", "feed at polling deadline must be due", failures)
     expect(due["next_check_due_at"] == "2026-01-11T00:00:00Z", "poll deadline changed", failures)
     expect(
         "does not imply factual staleness" in due["reason"],
@@ -113,49 +137,50 @@ def main() -> int:
         failures,
     )
 
-    never = by_id["SDA-SOURCE-M2-NEVER"]
+    never = by_key["FEED-NEVER"]
     expect(
         never["status"] == "never_retrieved" and never["latest_observed_at"] is None,
-        "unretrieved Source must remain explicit",
+        "unretrieved registered feed must remain explicit",
         failures,
     )
 
     reversed_report = build_source_freshness_report(
         sources=list(reversed(sources)),
+        feeds=list(reversed(feeds)),
         retrieval_receipts=list(reversed(receipts)),
         as_of="2026-01-11T00:00:00+00:00",
         default_poll_days=7,
-        source_poll_days={"SDA-SOURCE-M2-DUE": 10},
+        feed_poll_days={"FEED-DUE": 10},
     )
-    expect(report == reversed_report, "source freshness output must be order-independent", failures)
+    expect(report == reversed_report, "feed freshness output must be order-independent", failures)
+
+    # A second feed under the same Source must not become fresh because another feed was checked.
+    expect(
+        by_key["FEED-NEVER"]["status"] == "never_retrieved",
+        "one checked feed must not refresh another feed owned by the same Source",
+        failures,
+    )
 
     # Prove unchanged canonical content still refreshes acquisition health via receipt.
-    policy = SourceAcquisitionPolicy(
-        source_id="SDA-SOURCE-M2-FRESH",
-        document_key="m2-source-freshness-fixture",
-        canonical_url="https://official.example.test/source-freshness",
-        allowed_hosts=("official.example.test",),
-        language="en",
-        document_type="press_release",
-    )
+    integration_feed = feed("SDA-SOURCE-M2-A", "FEED-FRESH")
     content = b"<article>same canonical content</article>"
     response = FetchResponse(
         content=content,
-        retrieved_url=policy.canonical_url,
+        retrieved_url=integration_feed.canonical_url,
         status_code=200,
         media_type="text/html",
         etag=None,
         last_modified=None,
     )
     first = classify_fetch(
-        policy=policy,
+        policy=integration_feed,
         response=response,
         observed_at="2026-01-01T00:00:00Z",
         canonical_content_sha256=content_sha256(content),
         canonical_content_length_bytes=len(content),
     )
     unchanged = classify_fetch(
-        policy=policy,
+        policy=integration_feed,
         response=response,
         observed_at="2026-01-10T00:00:00Z",
         canonical_content_sha256=content_sha256(content),
@@ -169,13 +194,15 @@ def main() -> int:
         failures,
     )
     expect(
-        unchanged.receipt.source_id == policy.source_id
+        unchanged.receipt.source_id == integration_feed.source_id
+        and unchanged.receipt.document_key == integration_feed.document_key
         and unchanged.receipt.observed_at == "2026-01-10T00:00:00Z",
-        "retrieval receipt must preserve source identity and latest observation time",
+        "retrieval receipt must preserve feed identity and latest observation time",
         failures,
     )
     integration_report = build_source_freshness_report(
         sources=[sources[0]],
+        feeds=[integration_feed],
         retrieval_receipts=[first.receipt, unchanged.receipt],
         as_of="2026-01-11T00:00:00Z",
         default_poll_days=7,
@@ -183,7 +210,7 @@ def main() -> int:
     expect(
         integration_report["items"][0]["status"] == "fresh"
         and integration_report["items"][0]["latest_observed_at"] == "2026-01-10T00:00:00Z",
-        "unchanged re-fetch must refresh source monitoring health without new Document",
+        "unchanged re-fetch must refresh feed monitoring health without new Document",
         failures,
     )
 
@@ -192,6 +219,7 @@ def main() -> int:
     try:
         build_source_freshness_report(
             sources=sources,
+            feeds=feeds,
             retrieval_receipts=future_receipts,
             as_of="2026-01-11T00:00:00Z",
             default_poll_days=7,
@@ -203,34 +231,62 @@ def main() -> int:
     try:
         build_source_freshness_report(
             sources=sources,
+            feeds=feeds,
             retrieval_receipts=receipts,
             as_of="2026-01-11T00:00:00Z",
             default_poll_days=7,
-            source_poll_days={"SDA-SOURCE-M2-UNKNOWN": 1},
+            feed_poll_days={"UNKNOWN-FEED": 1},
         )
-        failures.append("poll policy for unknown Source was accepted")
+        failures.append("poll policy for unknown feed was accepted")
     except SourceFreshnessError:
         pass
 
     try:
         build_source_freshness_report(
             sources=sources,
-            retrieval_receipts=[receipt("SDA-SOURCE-M2-UNKNOWN", "2026-01-10T00:00:00Z")],
+            feeds=feeds,
+            retrieval_receipts=[receipt("SDA-SOURCE-M2-A", "UNKNOWN-FEED", "2026-01-10T00:00:00Z")],
             as_of="2026-01-11T00:00:00Z",
             default_poll_days=7,
         )
-        failures.append("receipt with unknown Source was accepted")
+        failures.append("receipt with unknown feed was accepted")
     except SourceFreshnessError:
         pass
 
     try:
         build_source_freshness_report(
             sources=sources,
-            retrieval_receipts=[receipt("SDA-SOURCE-M2-FRESH", "2026-01-10T00:00:00Z", status_code=500)],
+            feeds=feeds,
+            retrieval_receipts=[receipt("SDA-SOURCE-M2-B", "FEED-FRESH", "2026-01-10T00:00:00Z")],
+            as_of="2026-01-11T00:00:00Z",
+            default_poll_days=7,
+        )
+        failures.append("receipt with mismatched source/feed identity was accepted")
+    except SourceFreshnessError:
+        pass
+
+    try:
+        build_source_freshness_report(
+            sources=sources,
+            feeds=feeds,
+            retrieval_receipts=[receipt("SDA-SOURCE-M2-A", "FEED-FRESH", "2026-01-10T00:00:00Z", status_code=500)],
             as_of="2026-01-11T00:00:00Z",
             default_poll_days=7,
         )
         failures.append("failed HTTP receipt was accepted as successful freshness evidence")
+    except SourceFreshnessError:
+        pass
+
+    duplicate_feeds = [feeds[0], copy.deepcopy(feeds[0])]
+    try:
+        build_source_freshness_report(
+            sources=sources,
+            feeds=duplicate_feeds,
+            retrieval_receipts=[],
+            as_of="2026-01-11T00:00:00Z",
+            default_poll_days=7,
+        )
+        failures.append("duplicate registered feed key was accepted")
     except SourceFreshnessError:
         pass
 
@@ -241,9 +297,9 @@ def main() -> int:
         return 1
 
     print(
-        "Validated M2 source acquisition freshness from retrieval receipts: unchanged re-fetches "
-        "refresh monitoring health without new Documents, polling deadlines are explicit, and "
-        "monitoring health never becomes a factual-truth judgment."
+        "Validated M2 registered-feed acquisition freshness: unchanged re-fetches refresh "
+        "monitoring health without new Documents, sibling feeds remain independent, polling "
+        "deadlines are explicit, and monitoring health never becomes a factual-truth judgment."
     )
     return 0
 
