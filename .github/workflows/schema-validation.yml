@@ -8,6 +8,7 @@ on:
       - "bootstrap/**"
       - "m1/**"
       - "m2/**"
+      - "m3/**"
 
 permissions:
   contents: read
@@ -75,3 +76,9 @@ jobs:
 
       - name: Validate M2 first relationship visualization
         run: python scripts/validate_m2_relationship_visualization.py
+
+      - name: Validate M3 Arabic-aware search contract
+        run: python scripts/validate_m3_search_contract.py
+
+      - name: Validate M3 search contract isolation
+        run: python scripts/validate_m3_search_contract_isolation.py

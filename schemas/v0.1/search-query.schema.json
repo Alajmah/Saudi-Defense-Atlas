@@ -1,0 +1,72 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/search-query.schema.json",
+  "title": "Saudi Defense Atlas Search Query",
+  "description": "M3 v0.1 public lexical/entity query contract. Semantic/fuzzy behavior is intentionally outside this version.",
+  "type": "object",
+  "required": ["query", "locale", "limit", "filters"],
+  "properties": {
+    "query": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "locale": { "type": "string", "enum": ["ar", "en", "auto"] },
+    "limit": { "type": "integer", "minimum": 1, "maximum": 50 },
+    "filters": {
+      "type": "object",
+      "required": [
+        "entity_types",
+        "service_ids",
+        "manufacturer_ids",
+        "country_ids",
+        "equipment_classes",
+        "status_values"
+      ],
+      "properties": {
+        "entity_types": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "organization",
+              "military_unit",
+              "equipment",
+              "equipment_variant",
+              "facility",
+              "exercise",
+              "procurement_program",
+              "contract",
+              "localization_program",
+              "country"
+            ]
+          },
+          "uniqueItems": true
+        },
+        "service_ids": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "uniqueItems": true
+        },
+        "manufacturer_ids": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "uniqueItems": true
+        },
+        "country_ids": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "uniqueItems": true
+        },
+        "equipment_classes": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        },
+        "status_values": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
