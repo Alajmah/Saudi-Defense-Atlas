@@ -43,12 +43,15 @@ class FetchResponse:
 
 @dataclass(frozen=True)
 class RetrievalReceipt:
-    """Observation metadata for one fetch attempt.
+    """Observation metadata for one successful fetch attempt.
 
     This is intentionally distinct from Document identity: raw page chrome may
-    change while the canonical article content remains unchanged.
+    change while the canonical article content remains unchanged. `source_id`
+    keeps monitoring health attributable even when no new Document version is
+    created by the fetch.
     """
 
+    source_id: str
     observed_at: str
     requested_url: str
     retrieved_url: str
@@ -139,6 +142,7 @@ def _receipt(
     *, policy: SourceAcquisitionPolicy, response: FetchResponse, observed_at: str
 ) -> RetrievalReceipt:
     return RetrievalReceipt(
+        source_id=policy.source_id,
         observed_at=observed_at,
         requested_url=policy.canonical_url,
         retrieved_url=response.retrieved_url,
