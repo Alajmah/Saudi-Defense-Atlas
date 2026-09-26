@@ -115,3 +115,22 @@ This log records explicit architectural promotion, deferment, rejection, superse
 - claim_ceiling: successful trial may justify acceptance only for the bounded M2 visualization role.
 - authority_reference: `docs/adr/ADR-0003-first-relationship-visualization.md`, `docs/ROADMAP.md` M2.
 - rationale: the first graph is small enough that a browser-native deterministic renderer meets the forcing function with less dependency/interaction surface than a general graph engine.
+
+## APRD-008 — Promote deterministic SVG relationship visualization after bounded verification
+
+- date: 2026-09-26
+- pattern: APR-007
+- from_status: TRIAL-AUTHORIZED
+- to_status: ACCEPTED
+- implementation_status_from: IN-TRIAL
+- implementation_status_to: VERIFIED
+- forcing_function: the M2 trial has implemented the authorized renderer and passed the bounded publication/accessibility/provenance contract.
+- adopted_invariant: the visual layer remains a deterministic projection over `RelationshipGraphView`, and every rendered material edge retains supporting Evidence plus canonical source-record identity.
+- scope: bounded M2 procurement/exercise relationship visualization, JSON graph API, and Arabic/English public relationship pages.
+- non_scope: large graph exploration, interactive pan/zoom/drag, force-directed layout, compound nodes, final frontend-stack selection, browser-side graph analysis.
+- failure_model_verified: reordered input changing output; unsupported/context-only edge publication; backend Q/P leakage; inaccessible/global SVG identifiers; untranslated human edge labels; graph API mutation.
+- verification_evidence: implementation/review head `b78564fa83bf128803205bc2a22ea88a8284ecb2`; schema-validation run `36260932930` (#395) PASS; Wikibase regression run `36260932947` (#124) PASS; `docs/reviews/M2_RELATIONSHIP_VISUALIZATION_FIRST_PASS.md`.
+- replacement_forcing_functions: sustained large graphs, required pan/zoom/drag, compound nodes, frequent client-side relayout/filtering, graph analytics, or demonstrated deterministic-layout quality failure.
+- claim_ceiling: verification establishes only the bounded M2 visualization role; it does not qualify a general graph engine or final frontend architecture.
+- authority_reference: `docs/adr/ADR-0003-first-relationship-visualization.md`.
+- rationale: the project-owned renderer satisfies the current forcing function with less dependency and nondeterminism than a general graph runtime, while preserving an explicit future migration gate.
