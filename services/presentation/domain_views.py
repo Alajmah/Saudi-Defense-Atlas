@@ -58,6 +58,8 @@ def _claim_ids_from_graph(graph: Mapping[str, Any]) -> set[str]:
 def _staleness_for_claims(
     staleness_report: Mapping[str, Any],
     claim_ids: set[str],
+    *,
+    claims_by_id: Mapping[str, Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     items = staleness_report.get("items")
     if not isinstance(items, Sequence) or isinstance(items, (str, bytes)):
@@ -81,7 +83,19 @@ def _staleness_for_claims(
             + ", ".join(missing)
         )
 
-    return [dict(by_id[claim_id]) for claim_id in sorted(claim_ids)]
+    rendered: list[dict[str, Any]] = []
+    for claim_id in sorted(claim_ids):
+        claim = claims_by_id.get(claim_id)
+        if claim is None:
+            raise ProjectionError(f"domain view references unknown Claim {claim_id}")
+        item = by_id[claim_id]
+        for field in ("subject_id", "predicate_id", "claim_state", "confidence"):
+            if item.get(field) != claim.get(field):
+                raise ProjectionError(
+                    f"staleness item for Claim {claim_id} disagrees on {field}"
+                )
+        rendered.append(dict(item))
+    return rendered
 
 
 def _procurement_facts(
@@ -134,7 +148,7 @@ def _procurement_facts(
     return facts
 
 
-def _lifecycle_state(facts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
+def _lifecycle_history(facts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     matches = [
         fact
         for fact in facts
@@ -142,14 +156,13 @@ def _lifecycle_state(facts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
     ]
     if not matches:
         return {
-            "state": "unknown",
+            "status": "unknown",
             "claim_ids": [],
-            "values": [],
-            "reason": "No admitted canonical Claim establishes a lifecycle state.",
+            "observations": [],
+            "reason": "No admitted canonical Claim documents lifecycle state history.",
         }
 
-    values: list[str] = []
-    claim_ids: list[str] = []
+    observations: list[dict[str, Any]] = []
     has_disputed = False
     for fact in matches:
         claim_id = fact.get("claim_id")
@@ -163,22 +176,33 @@ def _lifecycle_state(facts: Sequence[Mapping[str, Any]]) -> dict[str, Any]:
         rendered_value = value.get("value")
         if not isinstance(rendered_value, str) or not rendered_value:
             raise ProjectionError(f"lifecycle Claim {claim_id} has empty value")
-        claim_ids.append(claim_id)
-        values.append(rendered_value)
-        has_disputed = has_disputed or fact.get("claim_state") == "disputed"
+        claim_state = fact.get("claim_state")
+        if claim_state not in _VISIBLE_CLAIM_STATES:
+            raise ProjectionError(f"lifecycle Claim {claim_id} has invalid public state")
+        observations.append(
+            {
+                "claim_id": claim_id,
+                "value": rendered_value,
+                "claim_state": claim_state,
+                "validity": (
+                    dict(fact["validity"])
+                    if isinstance(fact.get("validity"), Mapping)
+                    else {}
+                ),
+            }
+        )
+        has_disputed = has_disputed or claim_state == "disputed"
 
-    unique_values = sorted(set(values))
-    state = "disputed" if has_disputed or len(unique_values) > 1 else "known"
-    reason = (
-        "Multiple or disputed admitted Claims establish lifecycle state."
-        if state == "disputed"
-        else None
-    )
+    observations.sort(key=lambda item: item["claim_id"])
     return {
-        "state": state,
-        "claim_ids": sorted(claim_ids),
-        "values": unique_values,
-        "reason": reason,
+        "status": "disputed" if has_disputed else "documented",
+        "claim_ids": [item["claim_id"] for item in observations],
+        "observations": observations,
+        "reason": (
+            "At least one lifecycle-history Claim is explicitly disputed."
+            if has_disputed
+            else None
+        ),
     }
 
 
@@ -195,9 +219,10 @@ def build_procurement_program_view(
     projected_at: str,
     revision_ids: Sequence[str] = (),
 ) -> dict[str, Any]:
-    """Build a cited procurement-program view without inferring lifecycle state."""
+    """Build a cited procurement view without inventing a current lifecycle state."""
 
     entities_by_id = index_by_id(entities, "Entity")
+    claims_by_id = index_by_id(claims, "Claim")
     evidence_by_id = index_by_id(evidence, "Evidence")
     documents_by_id = index_by_id(documents, "Document")
     sources_by_id = index_by_id(sources, "Source")
@@ -229,7 +254,11 @@ def build_procurement_program_view(
 
     relevant_claim_ids = _claim_ids_from_graph(graph)
     relevant_claim_ids.update(str(fact["claim_id"]) for fact in facts)
-    staleness = _staleness_for_claims(staleness_report, relevant_claim_ids)
+    staleness = _staleness_for_claims(
+        staleness_report,
+        relevant_claim_ids,
+        claims_by_id=claims_by_id,
+    )
 
     record_ids = set(graph["provenance"]["record_ids"])
     for fact in facts:
@@ -248,7 +277,7 @@ def build_procurement_program_view(
             if isinstance(entity.get("descriptions"), Mapping)
             else None
         ),
-        "lifecycle_state": _lifecycle_state(facts),
+        "lifecycle_history": _lifecycle_history(facts),
         "facts": facts,
         "graph": graph,
         "staleness": staleness,
@@ -276,6 +305,7 @@ def build_exercise_view(
     """Build a cited exercise view from explicit exercise Claims and Events."""
 
     entities_by_id = index_by_id(entities, "Entity")
+    claims_by_id = index_by_id(claims, "Claim")
     entity = _active_entity(
         entity_id,
         expected_type="exercise",
@@ -294,7 +324,11 @@ def build_exercise_view(
         revision_ids=revision_ids,
     )
     relevant_claim_ids = _claim_ids_from_graph(graph)
-    staleness = _staleness_for_claims(staleness_report, relevant_claim_ids)
+    staleness = _staleness_for_claims(
+        staleness_report,
+        relevant_claim_ids,
+        claims_by_id=claims_by_id,
+    )
 
     return {
         "id": entity_id,
