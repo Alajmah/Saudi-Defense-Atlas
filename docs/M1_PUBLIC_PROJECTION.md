@@ -2,13 +2,13 @@
 
 ## Status
 
-**Phase:** read-model contract implementation started
+**Phase:** implementation complete; merge gated by exact-head CI and PR review.
 
 **Branch:** `m1/public-projection-f15sa`
 
 **Goal:** project-owned canonical read adapter → backend-neutral EquipmentView → read API → Arabic/English public F-15SA page.
 
-This increment completes the public/read half of M1. It must not create a second factual truth store.
+This increment completes the public/read half of M1 without creating a second factual truth store.
 
 ## Architectural boundary
 
@@ -21,74 +21,80 @@ Entity / Claim / Event / Evidence / Document / Source records
         ↓
 EquipmentView projector
         ↓
-read API
+framework-neutral read API / web shell
         ↓
 Arabic + English public page
 ```
 
-The public layer must not depend on Wikibase Q/P identifiers or raw snaks. SDA IDs and SDA domain records are the application contract.
+The public layer does not depend on Wikibase Q/P identifiers or raw snaks. SDA IDs and SDA domain records are the application contract. A production frontend framework and deployment topology remain subject to the Architecture Pattern Register rather than being silently adopted in M1.
 
 ## Public projection invariants
 
 1. A material public fact is rendered only from an admitted SDA Claim in `active` or `disputed` state.
 2. Every rendered material Claim/Event must resolve a complete Evidence → Document → Source chain.
-3. Missing provenance is a projection error, not permission to publish an uncited value.
-4. `withdrawn` and `superseded` Claims are not presented as current public facts.
-5. `disputed` Claims remain visibly disputed; the projector must not flatten them to known truth.
-6. Absence of an admitted Claim is rendered as explicit `unknown`, not inferred from unrelated events or backend statements.
-7. A delivery Event is not an inventory quantity, service-state, readiness, current-location, or timeless operator assertion.
-8. Arabic and English labels are projections of the same SDA Entity ID.
-9. Backend identifiers are adapter metadata and must not leak into the public read model.
-10. Arbitrary legacy/test Wikibase statements are not public facts. The reader supplies SDA canonical Claim/Event records to the projector rather than enumerating raw backend statements indiscriminately.
-11. The public view remains non-operational: no live locations, readiness, stock levels, patrol patterns, or other restricted operational detail is introduced by projection.
+3. Every rendered material Claim/Event requires at least one Evidence link with role `supports`; contextualizing or contradictory evidence alone cannot establish a publishable fact.
+4. Missing provenance is a projection error, not permission to publish an uncited value.
+5. `withdrawn` and `superseded` Claims are not presented as current public facts.
+6. `disputed` Claims remain visibly disputed; the projector does not flatten them to known truth.
+7. Absence of an admitted Claim is rendered as explicit `unknown`, not inferred from unrelated events or backend statements.
+8. A delivery Event is not an inventory quantity, service-state, readiness, current-location, or timeless operator assertion.
+9. Arabic and English labels are projections of the same SDA Entity ID.
+10. Backend identifiers are adapter metadata and do not leak into the public read model or HTML.
+11. Arbitrary legacy/test Wikibase statements are not public facts. The reader consumes only current SDA-projected Claim/Event records.
+12. Canonical payload integrity and public read-projection integrity are distinct contracts. `read_projection_sha256` validates the exact subset reconstructed by the public reader; it is not an alias for canonical `payload_sha256`.
+13. The public view remains non-operational: no live locations, readiness, stock levels, patrol patterns, or other restricted operational detail is introduced by projection.
 
-## First contract: `EquipmentView`
+## EquipmentView contract
 
-The initial schema is `schemas/v0.1/equipment-view.schema.json`.
-
-It contains:
+`schemas/v0.1/equipment-view.schema.json` defines the backend-neutral public equipment view. It contains:
 
 - SDA equipment Entity identity and bilingual labels;
 - language-grouped aliases;
 - explicit field states for manufacturer, operator, inventory quantity, and service state;
-- generic presented Claims with direction and confidence;
+- presented Claims with direction and confidence;
 - dated Events with participant roles;
 - citation objects carrying Evidence, Document, Source, source class, URL, and locator;
 - related SDA Entities;
 - provenance record IDs and project Revision IDs.
 
-The field-state model deliberately distinguishes:
+The field-state model distinguishes:
 
 - `known` — at least one admitted supporting Claim exists;
 - `disputed` — a relevant admitted Claim is explicitly disputed;
 - `unknown` — no admitted canonical Claim establishes the field.
 
-For the bounded F-15SA slice, manufacturer is established by the admitted Boeing manufacturer Claim. Operator, inventory quantity, and service state remain `unknown` unless separate admitted Claims establish them. The dated final-delivery Event does not fill those fields.
+For the bounded F-15SA slice, manufacturer is established by the admitted Boeing manufacturer Claim. Operator, inventory quantity, and service state remain `unknown`. The dated final-delivery Event does not fill those fields.
 
-## Validation target
+## Implemented read path
 
-`scripts/validate_m1_equipment_view.py` proves the first pure projection before any frontend framework is introduced. It verifies:
+The project-owned Wikibase adapter reconstructs current SDA Entity/Claim/Event/Evidence/Document/Source records. Legacy M0 trial statements lacking current SDA projection markers are excluded. Entity and Event public-read metadata use an explicit read-projection version and `read_projection_sha256` integrity marker.
 
-- bilingual identity from one SDA Entity;
-- inbound manufacturer Claim rendering;
-- full Claim citation traceability;
-- delivery Event separation and participant roles;
-- explicit unknown operator/inventory/service-state fields;
-- related Entity projection;
-- no backend-identifier leakage;
-- fail-closed behavior for unresolved Evidence;
-- withdrawal exclusion;
-- disputed-Claim presentation.
+The framework-neutral web shell exposes:
 
-## Next increments
+- `GET /api/equipment/SDA-EQUIP-F15SA` — the exact typed `EquipmentView` JSON;
+- `GET /ar/equipment/f-15sa` — Arabic RTL rendering;
+- `GET /en/equipment/f-15sa` — English LTR rendering.
 
-After this pure contract is green:
+Both localized pages derive from the same canonical EquipmentView and show localized manufacturer, explicit unknown fields, visible citations, the delivery timeline, related entities, and language switching.
 
-1. implement a project-owned Wikibase read adapter that reconstructs canonical SDA records rather than exposing raw Q/P/snaks;
-2. run the EquipmentView projector against the clean-stack records written by the M1 canonical-write workflow;
-3. expose the typed view through a minimal read API by SDA ID;
-4. create Arabic and English F-15SA routes from the same API result;
-5. add visible citation/source UI and a delivery timeline snippet;
-6. run the M1 acceptance checklist and exhaustive review before declaring M1 complete.
+## Verification
 
-Open M1-F15 (concurrent-writer uniqueness) does not block this read-only increment, but production automated canonical writers remain unauthorized until it is resolved.
+Static CI validates:
+
+- schema validity;
+- pure EquipmentView behavior;
+- strict Evidence → Document → Source citation resolution;
+- mandatory supporting Evidence for material facts/events;
+- canonical-vs-read hash separation;
+- withdrawn/disputed Claim behavior;
+- SDA-ID API behavior;
+- Arabic/English rendering and localized manufacturer;
+- explicit unknowns;
+- citation/timeline visibility;
+- backend Q/P identifier exclusion.
+
+Clean-stack Wikibase verification additionally reconstructs the EquipmentView from canonical backend state, renders the API/Arabic/English outputs, and uploads those generated artifacts as verification evidence.
+
+## Qualification boundary
+
+M1-F15 concurrent-writer canonical-ID uniqueness remains open. It does not block this read-only public increment, but production automated canonical mutation workers remain unauthorized until a project-owned coordination/uniqueness mechanism is selected and independently verified.
