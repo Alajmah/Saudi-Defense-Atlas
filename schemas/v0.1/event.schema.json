@@ -45,7 +45,19 @@
           "entity_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
           "role": {
             "type": "string",
-            "enum": ["buyer", "seller", "contractor", "operator", "host", "participant", "observer", "supplier", "other"]
+            "enum": [
+              "buyer",
+              "seller",
+              "contractor",
+              "operator",
+              "recipient",
+              "manufacturer",
+              "host",
+              "participant",
+              "observer",
+              "supplier",
+              "other"
+            ]
           }
         },
         "additionalProperties": false
