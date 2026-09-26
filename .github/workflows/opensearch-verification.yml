@@ -1,0 +1,78 @@
+name: opensearch-verification
+
+on:
+  pull_request:
+    paths:
+      - "spikes/opensearch/**"
+      - "services/presentation/search_contract.py"
+      - "schemas/v0.1/search-*.schema.json"
+      - "docs/adr/ADR-0004-search-engine-trial.md"
+      - "architecture/**"
+      - ".github/workflows/opensearch-verification.yml"
+  push:
+    branches:
+      - main
+      - "m3/**"
+    paths:
+      - "spikes/opensearch/**"
+      - "services/presentation/search_contract.py"
+      - "schemas/v0.1/search-*.schema.json"
+      - "docs/adr/ADR-0004-search-engine-trial.md"
+      - "architecture/**"
+      - ".github/workflows/opensearch-verification.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-opensearch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Start pinned OpenSearch 3.8.0 trial node
+        run: |
+          docker run -d \
+            --name sda-opensearch-trial \
+            -p 127.0.0.1:9200:9200 \
+            -e discovery.type=single-node \
+            -e DISABLE_SECURITY_PLUGIN=true \
+            -e DISABLE_INSTALL_DEMO_CONFIG=true \
+            -e 'OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m' \
+            opensearchproject/opensearch:3.8.0
+
+      - name: Wait for OpenSearch health
+        run: |
+          for i in $(seq 1 90); do
+            if curl --fail --silent http://127.0.0.1:9200 >/dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs sda-opensearch-trial || true
+          exit 1
+
+      - name: Run M3 OpenSearch contract trial
+        run: python spikes/opensearch/run_trial.py | tee opensearch-trial-evidence.json
+
+      - name: Upload trial evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: m3-opensearch-trial-evidence
+          path: opensearch-trial-evidence.json
+          if-no-files-found: error
+
+      - name: Dump diagnostics on failure
+        if: failure()
+        run: docker logs sda-opensearch-trial || true
+
+      - name: Clean up trial node
+        if: always()
+        run: docker rm -f sda-opensearch-trial || true
