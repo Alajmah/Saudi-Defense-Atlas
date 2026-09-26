@@ -16,6 +16,24 @@ class SearchContractError(ValueError):
     """Raised when canonical entities or search input violate the M3 contract."""
 
 
+_ENTITY_TYPES = {
+    "organization",
+    "military_unit",
+    "equipment",
+    "equipment_variant",
+    "facility",
+    "exercise",
+    "procurement_program",
+    "contract",
+    "localization_program",
+    "country",
+}
+_FIELD_PRIORITY = {
+    "canonical_name": 0,
+    "alias": 1,
+    "merged_name": 2,
+    "merged_alias": 3,
+}
 _ARABIC_TRANSLATION = str.maketrans(
     {
         "أ": "ا",
@@ -87,85 +105,185 @@ def _language(value: Any) -> str:
     return value if value in {"ar", "en"} else "und"
 
 
-def _term(*, language: str, field: str, value: str) -> dict[str, str]:
+def _term(
+    *, language: str, field: str, value: str, source_record_id: str
+) -> dict[str, str]:
     return {
         "language": language,
         "field": field,
         "value": value,
         "folded": fold_search_text(value),
         "compact": compact_search_text(value),
+        "source_record_id": source_record_id,
     }
+
+
+def _add_entity_terms(
+    target: dict[str, Any],
+    source_entity: Mapping[str, Any],
+    *,
+    name_field: str,
+    alias_field: str,
+) -> None:
+    source_id = source_entity.get("id")
+    if not isinstance(source_id, str) or not source_id:
+        raise SearchContractError("search term source requires canonical Entity ID")
+    names = source_entity.get("names")
+    if not isinstance(names, Mapping) or not names:
+        raise SearchContractError(f"Entity {source_id} requires canonical names")
+
+    existing = {
+        (
+            item["language"],
+            item["field"],
+            item["value"],
+            item["source_record_id"],
+        )
+        for item in target["terms"]
+    }
+    for language in ("ar", "en"):
+        value = names.get(language)
+        if isinstance(value, str) and value:
+            key = (language, name_field, value, source_id)
+            if key not in existing:
+                target["terms"].append(
+                    _term(
+                        language=language,
+                        field=name_field,
+                        value=value,
+                        source_record_id=source_id,
+                    )
+                )
+                existing.add(key)
+
+    aliases = source_entity.get("aliases", [])
+    if not isinstance(aliases, Sequence) or isinstance(aliases, (str, bytes)):
+        raise SearchContractError(f"Entity {source_id} aliases must be an array")
+    for alias in aliases:
+        if not isinstance(alias, Mapping):
+            raise SearchContractError(f"Entity {source_id} alias must be an object")
+        value = alias.get("value")
+        if not isinstance(value, str) or not value:
+            raise SearchContractError(f"Entity {source_id} alias requires value")
+        language = _language(alias.get("language"))
+        key = (language, alias_field, value, source_id)
+        if key not in existing:
+            target["terms"].append(
+                _term(
+                    language=language,
+                    field=alias_field,
+                    value=value,
+                    source_record_id=source_id,
+                )
+            )
+            existing.add(key)
+
+
+def _resolve_merged_target(
+    entity_id: str,
+    entities_by_id: Mapping[str, Mapping[str, Any]],
+) -> str:
+    visited: set[str] = set()
+    current_id = entity_id
+    while True:
+        if current_id in visited:
+            raise SearchContractError(
+                "merged Entity cycle detected: " + " -> ".join(sorted(visited | {current_id}))
+            )
+        visited.add(current_id)
+        entity = entities_by_id.get(current_id)
+        if entity is None:
+            raise SearchContractError(f"merged Entity target is unknown: {current_id}")
+        status = entity.get("record_status")
+        if status == "active":
+            return current_id
+        if status != "merged":
+            raise SearchContractError(
+                f"merged Entity chain resolves to non-active record {current_id} ({status!r})"
+            )
+        target_id = entity.get("merged_into")
+        if not isinstance(target_id, str) or not target_id:
+            raise SearchContractError(f"merged Entity {current_id} requires merged_into")
+        current_id = target_id
 
 
 def build_entity_search_documents(
     entities: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Project active canonical Entities into deterministic search documents."""
+    """Project canonical Entity identity into deterministic search documents.
 
-    documents: list[dict[str, Any]] = []
-    seen_ids: set[str] = set()
+    Active records own result identity. Names/aliases from `merged` records are
+    retained as lower-priority search terms on their resolved active target so a
+    historical/duplicate identity remains discoverable without returning an
+    obsolete SDA ID.
+    """
+
+    entities_by_id: dict[str, Mapping[str, Any]] = {}
     for entity in entities:
         entity_id = entity.get("id")
         if not isinstance(entity_id, str) or not entity_id:
             raise SearchContractError("Entity requires canonical SDA ID")
-        if entity_id in seen_ids:
+        if entity_id in entities_by_id:
             raise SearchContractError(f"duplicate Entity ID: {entity_id}")
-        seen_ids.add(entity_id)
+        entities_by_id[entity_id] = entity
 
+    documents_by_id: dict[str, dict[str, Any]] = {}
+    for entity_id, entity in entities_by_id.items():
         if entity.get("record_status") != "active":
             continue
         entity_type = entity.get("entity_type")
-        if not isinstance(entity_type, str) or not entity_type:
-            raise SearchContractError(f"Entity {entity_id} requires entity_type")
+        if entity_type not in _ENTITY_TYPES:
+            raise SearchContractError(f"Entity {entity_id} requires recognized entity_type")
         names = entity.get("names")
         if not isinstance(names, Mapping) or not names:
             raise SearchContractError(f"Entity {entity_id} requires canonical names")
+        document: dict[str, Any] = {
+            "id": entity_id,
+            "entity_type": entity_type,
+            "subtype": entity.get("subtype") if isinstance(entity.get("subtype"), str) else None,
+            "names": dict(names),
+            "terms": [],
+            "source_record_ids": [entity_id],
+        }
+        _add_entity_terms(
+            document,
+            entity,
+            name_field="canonical_name",
+            alias_field="alias",
+        )
+        documents_by_id[entity_id] = document
 
-        terms: list[dict[str, str]] = []
-        seen_terms: set[tuple[str, str, str]] = set()
-        for language in ("ar", "en"):
-            value = names.get(language)
-            if isinstance(value, str) and value:
-                key = (language, "canonical_name", value)
-                if key not in seen_terms:
-                    terms.append(_term(language=language, field="canonical_name", value=value))
-                    seen_terms.add(key)
+    for entity_id, entity in entities_by_id.items():
+        if entity.get("record_status") != "merged":
+            continue
+        target_id = _resolve_merged_target(entity_id, entities_by_id)
+        target = documents_by_id.get(target_id)
+        if target is None:
+            raise SearchContractError(
+                f"merged Entity {entity_id} did not resolve to an indexed active Entity"
+            )
+        _add_entity_terms(
+            target,
+            entity,
+            name_field="merged_name",
+            alias_field="merged_alias",
+        )
+        target["source_record_ids"].append(entity_id)
 
-        aliases = entity.get("aliases", [])
-        if not isinstance(aliases, Sequence) or isinstance(aliases, (str, bytes)):
-            raise SearchContractError(f"Entity {entity_id} aliases must be an array")
-        for alias in aliases:
-            if not isinstance(alias, Mapping):
-                raise SearchContractError(f"Entity {entity_id} alias must be an object")
-            value = alias.get("value")
-            if not isinstance(value, str) or not value:
-                raise SearchContractError(f"Entity {entity_id} alias requires value")
-            language = _language(alias.get("language"))
-            key = (language, "alias", value)
-            if key not in seen_terms:
-                terms.append(_term(language=language, field="alias", value=value))
-                seen_terms.add(key)
-
-        if not terms:
-            raise SearchContractError(f"Entity {entity_id} produced no search terms")
-        terms.sort(
+    documents = list(documents_by_id.values())
+    for document in documents:
+        if not document["terms"]:
+            raise SearchContractError(f"Entity {document['id']} produced no search terms")
+        document["terms"].sort(
             key=lambda item: (
-                0 if item["field"] == "canonical_name" else 1,
+                _FIELD_PRIORITY[item["field"]],
                 item["language"],
                 item["folded"],
                 item["value"],
+                item["source_record_id"],
             )
         )
-        documents.append(
-            {
-                "id": entity_id,
-                "entity_type": entity_type,
-                "subtype": entity.get("subtype") if isinstance(entity.get("subtype"), str) else None,
-                "names": dict(names),
-                "terms": terms,
-                "source_record_ids": [entity_id],
-            }
-        )
+        document["source_record_ids"] = sorted(set(document["source_record_ids"]))
 
     documents.sort(key=lambda item: item["id"])
     return documents
@@ -181,7 +299,12 @@ def _raw_exact(query: str, value: str) -> bool:
     )
 
 
-def _match_type(query: str, query_folded: str, query_compact: str, term: Mapping[str, str]) -> str | None:
+def _match_type(
+    query: str,
+    query_folded: str,
+    query_compact: str,
+    term: Mapping[str, str],
+) -> str | None:
     if _raw_exact(query, term["value"]):
         return "exact"
     if query_folded == term["folded"] or query_compact == term["compact"]:
@@ -219,9 +342,13 @@ def search_entity_documents(
         raise SearchContractError("limit must be an integer >= 1")
     if not isinstance(entity_types, Sequence) or isinstance(entity_types, (str, bytes)):
         raise SearchContractError("entity_types must be an array")
-    filters = list(entity_types)
-    if len(set(filters)) != len(filters) or any(not isinstance(value, str) or not value for value in filters):
-        raise SearchContractError("entity_types must contain unique non-empty strings")
+    raw_filters = list(entity_types)
+    if (
+        len(set(raw_filters)) != len(raw_filters)
+        or any(not isinstance(value, str) or value not in _ENTITY_TYPES for value in raw_filters)
+    ):
+        raise SearchContractError("entity_types must contain unique recognized Entity types")
+    filters = sorted(raw_filters)
 
     query_folded = fold_search_text(text)
     query_compact = query_folded.replace(" ", "")
@@ -238,34 +365,48 @@ def search_entity_documents(
             raise SearchContractError(f"duplicate search document ID: {document_id}")
         seen_document_ids.add(document_id)
         entity_type = document.get("entity_type")
-        if not isinstance(entity_type, str) or not entity_type:
-            raise SearchContractError(f"search document {document_id} requires entity_type")
+        if entity_type not in _ENTITY_TYPES:
+            raise SearchContractError(f"search document {document_id} requires recognized entity_type")
         if filters and entity_type not in filters:
             continue
         names = document.get("names")
         terms = document.get("terms")
+        source_record_ids = document.get("source_record_ids")
         if not isinstance(names, Mapping) or not names:
             raise SearchContractError(f"search document {document_id} requires names")
         if not isinstance(terms, Sequence) or isinstance(terms, (str, bytes)) or not terms:
             raise SearchContractError(f"search document {document_id} requires terms")
+        if not isinstance(source_record_ids, Sequence) or isinstance(source_record_ids, (str, bytes)):
+            raise SearchContractError(f"search document {document_id} requires source_record_ids")
+        source_ids = {value for value in source_record_ids if isinstance(value, str) and value}
+        if len(source_ids) != len(source_record_ids):
+            raise SearchContractError(f"search document {document_id} has invalid source_record_ids")
 
         best: tuple[tuple[Any, ...], Mapping[str, Any], str] | None = None
         for term in terms:
             if not isinstance(term, Mapping):
                 raise SearchContractError(f"search document {document_id} has malformed term")
-            if not all(isinstance(term.get(field), str) and term.get(field) for field in ("language", "field", "value", "folded", "compact")):
+            required = ("language", "field", "value", "folded", "compact", "source_record_id")
+            if not all(isinstance(term.get(field), str) and term.get(field) for field in required):
                 raise SearchContractError(f"search document {document_id} has incomplete term")
+            field = term["field"]
+            if field not in _FIELD_PRIORITY:
+                raise SearchContractError(f"search document {document_id} has unknown term field")
+            if term["source_record_id"] not in source_ids:
+                raise SearchContractError(
+                    f"search document {document_id} term references unlisted source record"
+                )
             match_type = _match_type(text, query_folded, query_compact, term)
             if match_type is None:
                 continue
             language = term["language"]
-            field = term["field"]
             priority = (
                 match_priority[match_type],
-                0 if field == "canonical_name" else 1,
+                _FIELD_PRIORITY[field],
                 0 if language == preferred_locale else (1 if language == "und" else 2),
                 term["folded"],
                 term["value"],
+                term["source_record_id"],
             )
             if best is None or priority < best[0]:
                 best = (priority, term, match_type)
@@ -287,6 +428,7 @@ def search_entity_documents(
                         "language": term["language"],
                         "field": term["field"],
                         "value": term["value"],
+                        "source_record_id": term["source_record_id"],
                     },
                 },
             )
