@@ -307,7 +307,7 @@ def main() -> int:
         graph["scope"] == {
             "root_entity_ids": ["SDA-EQUIP-F15SA"],
             "domains": ["exercise", "procurement"],
-            "expansion": "one_hop",
+            "expansion": "bounded_single_pass",
         },
         "graph scope changed",
         failures,
@@ -326,6 +326,16 @@ def main() -> int:
     ):
         expect(required_id in node_ids, f"graph lost expected node {required_id}", failures)
 
+    event_nodes = [node for node in graph["nodes"] if node["node_kind"] == "event"]
+    expect(event_nodes, "graph must project selected Events as nodes", failures)
+    for event_node in event_nodes:
+        expect(bool(event_node["citations"]), f"Event node {event_node['id']} lost citations", failures)
+        expect(
+            any(citation["evidence_role"] == "supports" for citation in event_node["citations"]),
+            f"Event node {event_node['id']} lacks supporting Evidence",
+            failures,
+        )
+
     edge_ids = {edge["id"] for edge in graph["edges"]}
     expect(
         "claim:SDA-CLAIM-M2-PROCUREMENT-ACQUIRES-F15SA" in edge_ids,
@@ -339,17 +349,17 @@ def main() -> int:
     )
     expect(
         "claim:SDA-CLAIM-M2-CONTRACT-PART-OF-PROGRAM" not in edge_ids,
-        "one-hop graph must not cascade from procurement program to contract Claim",
+        "bounded graph must not cascade from procurement program to contract Claim",
         failures,
     )
     expect(
         "claim:SDA-CLAIM-M2-CONTRACT-AWARDED-BOEING" not in edge_ids,
-        "one-hop graph must not cascade from discovered contract to company Claim",
+        "bounded graph must not cascade from discovered contract to company Claim",
         failures,
     )
     expect(
         "claim:SDA-CLAIM-M2-EXERCISE-PARTICIPANT-RSAF" not in edge_ids,
-        "one-hop graph must not cascade from discovered exercise Entity to participant Claim",
+        "bounded graph must not cascade from discovered exercise Entity to participant Claim",
         failures,
     )
 
@@ -364,6 +374,13 @@ def main() -> int:
         "exercise Event must appear in timeline",
         failures,
     )
+    for item in graph["timeline"]:
+        expect(bool(item["citations"]), f"timeline Event {item['event_id']} lost citations", failures)
+        expect(
+            any(citation["evidence_role"] == "supports" for citation in item["citations"]),
+            f"timeline Event {item['event_id']} lacks supporting Evidence",
+            failures,
+        )
 
     serialized = json.dumps(graph, ensure_ascii=False, sort_keys=True)
     expect("Q999" not in serialized, "public graph must not leak backend identifiers", failures)
@@ -371,13 +388,18 @@ def main() -> int:
 
     reversed_records = copy.deepcopy(records)
     reversed_records["claims"].reverse()
+    reversed_records["events"].reverse()
     reversed_graph = build_relationship_graph(
         root_entity_ids=["SDA-EQUIP-F15SA"],
         **reversed_records,
         projected_at="2026-01-08T00:05:00Z",
         revision_ids=["SDA-REVISION-M2-GRAPH-TEST"],
     )
-    expect(reversed_graph == graph, "graph output must be independent of Claim input order", failures)
+    expect(
+        reversed_graph == graph,
+        "graph output must be independent of Claim/Event input order",
+        failures,
+    )
 
     exercise_only = build_relationship_graph(
         root_entity_ids=["SDA-EQUIP-F15SA"],
@@ -414,6 +436,23 @@ def main() -> int:
     except ProjectionError:
         pass
 
+    event_without_support = copy.deepcopy(records)
+    target_event = next(
+        event
+        for event in event_without_support["events"]
+        if event["id"] == "SDA-EVENT-M2-SYNTHETIC-EXERCISE"
+    )
+    target_event["evidence_links"][0]["role"] = "contextualizes"
+    try:
+        build_relationship_graph(
+            root_entity_ids=["SDA-EQUIP-F15SA"],
+            **event_without_support,
+            projected_at="2026-01-08T00:05:00Z",
+        )
+        failures.append("graph published a material Event without supporting Evidence")
+    except ProjectionError:
+        pass
+
     disputed = copy.deepcopy(records)
     target = next(
         claim
@@ -433,6 +472,17 @@ def main() -> int:
     )
     expect(disputed_edge["state"] == "disputed", "disputed Claim state must remain visible", failures)
 
+    try:
+        build_relationship_graph(
+            root_entity_ids=["SDA-EQUIP-F15SA"],
+            **records,
+            domains=["exercise", "exercise"],
+            projected_at="2026-01-08T00:05:00Z",
+        )
+        failures.append("graph accepted duplicate domain selectors")
+    except ProjectionError:
+        pass
+
     if failures:
         print("M2 relationship graph validation failed:", file=sys.stderr)
         for failure in failures:
@@ -440,9 +490,9 @@ def main() -> int:
         return 1
 
     print(
-        "Validated bounded M2 relationship graph: explicit Claim/Event edges only, fixed one-hop "
-        "expansion, procurement/exercise domain filtering, evidence-backed citations, timeline "
-        "projection, disputed-state preservation, order independence, and no backend-ID leakage."
+        "Validated bounded M2 relationship graph: explicit Claim/Event edges only, fixed "
+        "single-pass expansion, procurement/exercise domain filtering, direct event/timeline "
+        "citations, disputed-state preservation, order independence, and no backend-ID leakage."
     )
     return 0
 
