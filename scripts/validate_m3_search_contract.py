@@ -53,13 +53,12 @@ def entity(
     subtype: str | None = None,
     record_status: str = "active",
 ) -> dict[str, Any]:
-    return {
+    result: dict[str, Any] = {
         "id": entity_id,
         "entity_type": entity_type,
         "subtype": subtype,
         "names": names,
         "aliases": aliases or [],
-        "descriptions": descriptions or {},
         "external_identifiers": [],
         "backend_identifiers": [{"backend": "wikibase", "value": "Q999"}],
         "record_status": record_status,
@@ -67,6 +66,9 @@ def entity(
         "created_at": "2026-01-01T00:00:00Z",
         "updated_at": "2026-01-10T00:00:00Z",
     }
+    if descriptions is not None:
+        result["descriptions"] = descriptions
+    return result
 
 
 def query(
@@ -297,18 +299,25 @@ def main() -> int:
         failures,
     )
 
-    # Explicit aliases are authoritative search vocabulary; no cross-script invention occurs.
+    # Missing descriptions are valid; cross-script vocabulary is never invented.
     arabic_only = entity(
         "SDA-EQUIP-ARABIC-ONLY",
         "equipment",
         names={"ar": "منظومة تجريبية"},
         aliases=[],
     )
+    validate_instance("entity.schema.json", arabic_only, failures)
     arabic_only_doc = build_search_document(
         entity=arabic_only,
         facets={},
         projected_at="2026-01-12T00:00:00Z",
         revision_ids=["SDA-REV-M3-ARABIC-ONLY"],
+    )
+    validate_instance("search-document.schema.json", arabic_only_doc, failures)
+    expect(
+        arabic_only_doc["descriptions"] is None,
+        "optional Entity description was not preserved as unknown/null in search projection",
+        failures,
     )
     no_transliteration = execute_reference_lexical_search(
         documents=[arabic_only_doc], query=query("experimental system", locale="en")
@@ -355,7 +364,8 @@ def main() -> int:
     print(
         "Validated M3 search contract: SDA identity, conservative Arabic orthographic folding, "
         "explicit aliases, UTC projection metadata, deterministic lexical ranking, explicit "
-        "facet semantics, active-record boundary, and no backend-ID or invented transliteration leakage."
+        "facet semantics, active-record boundary, optional descriptions, and no backend-ID or "
+        "invented transliteration leakage."
     )
     return 0
 
