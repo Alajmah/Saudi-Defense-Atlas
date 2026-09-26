@@ -98,11 +98,18 @@ def main() -> int:
 
     # Description normalization must not manufacture giant compact no-space variants.
     description_terms = document["normalized_terms"]["en"]
-    if any(
-        "fighterdescriptionwithseveralwords" in term
-        for term in description_terms
-    ):
+    if any("fighterdescriptionwithseveralwords" in term for term in description_terms):
         failures.append("description text was compacted into an invented designation-like term")
+
+    # Schema-optional SearchDocument fields must also be optional at runtime.
+    optional_omitted = copy.deepcopy(document)
+    optional_omitted.pop("subtype", None)
+    optional_omitted.pop("descriptions", None)
+    optional_result = execute_reference_lexical_search(
+        documents=[optional_omitted], query=query("Chair System")
+    )
+    if not optional_result["hits"] or optional_result["hits"][0]["id"] != document["id"]:
+        failures.append("schema-valid document without optional fields was not searchable")
 
     bad_filter_key = query()
     bad_filter_key["filters"]["unknown"] = []
@@ -169,9 +176,7 @@ def main() -> int:
     malformed_document["backend_identifiers"] = [{"backend": "wikibase", "value": "Q42"}]
     expect_raises(
         "search document with backend identifier extension",
-        lambda: execute_reference_lexical_search(
-            documents=[malformed_document], query=query()
-        ),
+        lambda: execute_reference_lexical_search(documents=[malformed_document], query=query()),
         failures,
     )
 
@@ -183,6 +188,40 @@ def main() -> int:
         failures,
     )
 
+    # Stored SearchDocuments must preserve the complete facet shape from schema.
+    missing_facets = copy.deepcopy(document)
+    missing_facets["facets"] = {}
+    expect_raises(
+        "search document missing required facet keys",
+        lambda: execute_reference_lexical_search(documents=[missing_facets], query=query()),
+        failures,
+    )
+
+    null_facets = copy.deepcopy(document)
+    null_facets["facets"] = None
+    expect_raises(
+        "search document null facets",
+        lambda: execute_reference_lexical_search(documents=[null_facets], query=query()),
+        failures,
+    )
+
+    # Declared normalized terms must exactly equal the deterministic projection.
+    stale_terms = copy.deepcopy(document)
+    stale_terms["normalized_terms"]["en"] = []
+    expect_raises(
+        "stale normalized terms",
+        lambda: execute_reference_lexical_search(documents=[stale_terms], query=query("Chair System")),
+        failures,
+    )
+
+    invented_term = copy.deepcopy(document)
+    invented_term["normalized_terms"]["neutral"].append("invented-term")
+    expect_raises(
+        "invented normalized term",
+        lambda: execute_reference_lexical_search(documents=[invented_term], query=query("invented-term")),
+        failures,
+    )
+
     if failures:
         print("M3 search isolation validation failed:", file=sys.stderr)
         for failure in failures:
@@ -190,9 +229,9 @@ def main() -> int:
         return 1
 
     print(
-        "Validated M3 search fail-closed boundaries: exact token semantics, strict query/filter "
-        "shape, bounded normalization, Entity/alias vocabulary checks, and malformed/index "
-        "identity leakage rejection."
+        "Validated M3 search fail-closed boundaries: optional document fields, exact token "
+        "semantics, strict query/filter/facet shape, normalized-term integrity, bounded "
+        "normalization, Entity/alias vocabulary checks, and identity leakage rejection."
     )
     return 0
 
