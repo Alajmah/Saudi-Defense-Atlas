@@ -93,8 +93,9 @@ A successful technical test establishes only the property tested in the tested e
 | APR-004 | PostgreSQL claim/evidence knowledge core | DEFERRED | NOT-LINKED | future-plan-candidate |
 | APR-005 | Typed structured AI proposals | ACCEPTED | LINKED | current-plan-authorized |
 | APR-006 | Deterministic-before-generative processing | ACCEPTED | LINKED | current-plan-authorized |
+| APR-007 | Deterministic inline-SVG relationship visualization | ACCEPTED | VERIFIED | current-plan-authorized |
 
-`VERIFIED` above is bounded to the M0 contracts and evidence. It is not a production-qualification label.
+`VERIFIED` above is bounded to the documented contracts and evidence. It is not a production-qualification label.
 
 ---
 
@@ -127,7 +128,7 @@ A successful technical test establishes only the property tested in the tested e
 
 **Verification evidence:** schema-validation run `36178033709`; Wikibase M0 run `36178040438`; artifact `10883261546`.
 
-**Remaining verification:** M1 source-to-page vertical slice and production operational properties.
+**Remaining verification:** production operational properties remain separately scoped.
 
 ---
 
@@ -146,15 +147,15 @@ A successful technical test establishes only the property tested in the tested e
 **Decision:**
 
 - pattern_status: ACCEPTED
-- implementation_status: VERIFIED for the bounded M0 authorization/receipt contract
+- implementation_status: VERIFIED for the bounded mutation-governance/reconciliation contract tested through M1
 - planning_disposition: current-plan-authorized
-- authority: M0 acceptance criterion 7 and AI governance policy
+- authority: M0/M1 acceptance criteria and AI governance policy
 
-**Implementation links:** `schemas/v0.1/change-proposal.schema.json`, `schemas/v0.1/review-decision.schema.json`, `schemas/v0.1/revision.schema.json`, `scripts/validate_workflow.py`, `spikes/wikibase/apply_approved_demo.py`.
+**Implementation links:** `schemas/v0.1/change-proposal.schema.json`, `schemas/v0.1/review-decision.schema.json`, `schemas/v0.1/revision.schema.json`, `scripts/validate_workflow.py`, M1 mutation guard/reconciliation implementation.
 
-**Verification evidence:** workflow fixtures including proposal-hash and temporal-order checks; current-head schema validation; approved synthetic adapter execution in Wikibase run `36178040438`.
+**Verification evidence:** M0 workflow fixtures plus M1 guarded clean-stack convergence/replay and Revision construction tests.
 
-**Claim ceiling:** verified ordering and authority binding for the tested local adapter only. Production exactly-once/idempotency/reconciliation remains unverified and required in M1.
+**Claim ceiling:** verification remains bounded to the tested single-writer contract; production distributed concurrency and infrastructure qualification remain separate work.
 
 ---
 
@@ -177,15 +178,15 @@ A successful technical test establishes only the property tested in the tested e
 **Decision:**
 
 - pattern_status: ACCEPTED
-- implementation_status: VERIFIED for the bounded M0 knowledge-core contract
+- implementation_status: VERIFIED for the bounded M0/M1 knowledge-core contract
 - planning_disposition: current-plan-authorized
 - authority: `docs/adr/ADR-0002-knowledge-core.md`
 
-**Implementation links:** `spikes/wikibase/`, `.github/workflows/wikibase-spike.yml`, `docs/adr/ADR-0002-knowledge-core.md`.
+**Implementation links:** `spikes/wikibase/`, M1 Wikibase adapters/read projection, `.github/workflows/wikibase-spike.yml`, `docs/adr/ADR-0002-knowledge-core.md`.
 
-**Verification evidence:** clean current-head run `36178040438` / job `108213344752`; artifact `10883261546`.
+**Verification evidence:** M0 run `36178040438` plus continuing clean-stack M1/M2 regression runs.
 
-**Claim ceiling:** suitable to proceed as the M1 canonical knowledge core. This does not establish production scaling, security, HA, backup/recovery, mutation reconciliation, or long-term operational qualification.
+**Claim ceiling:** suitable as the current canonical knowledge core. This does not establish production scaling, security, HA, backup/recovery, long-term upgrades, or distributed writer coordination.
 
 ---
 
@@ -204,7 +205,7 @@ A successful technical test establishes only the property tested in the tested e
 - planning_disposition: future-plan-candidate
 - authority: ADR-0002 fallback clause
 
-**Forcing function for promotion:** material Wikibase failure against a critical project invariant or unacceptable complexity demonstrated by M1/later evidence.
+**Forcing function for promotion:** material Wikibase failure against a critical project invariant or unacceptable complexity demonstrated by later evidence.
 
 ---
 
@@ -221,11 +222,11 @@ A successful technical test establishes only the property tested in the tested e
 - pattern_status: ACCEPTED
 - implementation_status: LINKED
 - planning_disposition: current-plan-authorized
-- authority: AI governance policy + M0/M1 roadmap
+- authority: AI governance policy + roadmap
 
 **Implementation links:** `schemas/v0.1/`, `scripts/validate_schemas.py`, `tests/fixtures/schema-fixtures.json`.
 
-**Verification status:** schemas/negative fixtures are verified, but this pattern remains LINKED until M1 proves actual model extraction crosses the same boundary.
+**Verification status:** typed proposal boundaries are mechanically verified; actual generative-model extraction at scale remains later AI-operations work.
 
 ---
 
@@ -242,6 +243,43 @@ A successful technical test establishes only the property tested in the tested e
 - planning_disposition: current-plan-authorized
 - authority: ADR-0001 design rules
 
-**Implementation links:** deterministic JSON Schema validators, proposal hashing, workflow policy validator, Wikibase adapter gating.
+**Implementation links:** deterministic ingestion/canonicalization, JSON Schema validators, proposal hashing, workflow policy validator, Wikibase adapter gating, public projections.
 
-**Verification required:** M1 pipeline demonstrates deterministic hashing/deduplication and typed validation around actual model extraction.
+**Verification required:** later AI extraction must demonstrate that model output remains subordinate to these deterministic boundaries.
+
+---
+
+## APR-007 — Deterministic inline-SVG relationship visualization
+
+**Problem:** M2 requires a first public relationship visualization, but current graphs are deliberately bounded and the project has not selected a frontend framework or general graph runtime.
+
+**Invariant:** Visualization remains a projection over `RelationshipGraphView`; it cannot create new factual edges, change SDA identity, or detach material relationships from supporting Evidence.
+
+**Mechanism:** server-rendered deterministic inline SVG plus semantic HTML fallback, with localized labels and graph-scoped accessibility IDs.
+
+**Alternatives characterized:** Cytoscape.js and D3. Both remain future candidates if interaction/scale forcing functions arise; neither is required for the bounded M2 slice.
+
+**Benefits:** zero new runtime dependency; deterministic tests; native browser SVG/DOM; bilingual labels; accessible title/description and cited text fallback.
+
+**Liabilities:** project-owned layout code; not intended for large/free-form interactive graph exploration.
+
+**Failure modes:** visual edge exceeds canonical graph; citation removed in presentation; Q/P IDs leak; input order changes layout; global SVG IDs collide; bounded layout used beyond its readable scale.
+
+**Forcing function:** `docs/ROADMAP.md` M2 requires a first relationship visualization.
+
+**Decision:**
+
+- pattern_status: ACCEPTED
+- implementation_status: VERIFIED for the bounded M2 visualization contract
+- planning_disposition: current-plan-authorized
+- authority: `docs/adr/ADR-0003-first-relationship-visualization.md`
+
+**Implementation links:** `services/presentation/relationship_visualization.py`, `services/presentation/relationship_web.py`, `scripts/validate_m2_relationship_visualization.py`.
+
+**Verification evidence:** trial implementation/review head `b78564fa83bf128803205bc2a22ea88a8284ecb2`; schema-validation run `36260932930` (#395) PASS; Wikibase regression run `36260932947` (#124) PASS; `docs/reviews/M2_RELATIONSHIP_VISUALIZATION_FIRST_PASS.md`.
+
+**Verified properties:** deterministic reorder behavior, supporting-Evidence guard, bilingual node/relation labels, canonical relation-code fallback, graph-scoped SVG accessibility IDs, cited semantic fallback, exact graph JSON API, bilingual routes, and backend-ID leakage rejection.
+
+**Replacement forcing functions:** sustained large visible graphs, pan/zoom/drag requirements, compound nodes, frequent client-side relayout/filtering, browser-side graph analysis, or demonstrated layout-quality failure.
+
+**Claim ceiling:** verification is bounded to the first M2 relationship visualization and does not select the final frontend stack or large-graph engine.

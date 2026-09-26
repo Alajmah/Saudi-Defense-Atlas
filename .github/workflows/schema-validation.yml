@@ -72,3 +72,6 @@ jobs:
 
       - name: Validate M2 source acquisition freshness
         run: python scripts/validate_m2_source_freshness.py
+
+      - name: Validate M2 first relationship visualization
+        run: python scripts/validate_m2_relationship_visualization.py

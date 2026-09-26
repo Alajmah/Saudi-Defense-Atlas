@@ -96,3 +96,41 @@ This log records explicit architectural promotion, deferment, rejection, superse
 - verification_evidence: workflow fixtures and validation; synthetic AMBER approval applied through `apply_approved_demo.py` in run `36178040438`.
 - claim_ceiling: the tested adapter does not write before authorization and records backend identifiers as receipts after the effect; broader mutation reliability remains future work.
 - authority_reference: `docs/AI_GOVERNANCE.md`, `docs/reviews/M0_ADVERSARIAL_REVIEW.md`, ADR-0002.
+
+## APRD-007 — Authorize bounded deterministic SVG relationship-visualization trial
+
+- date: 2026-09-26
+- pattern: APR-007
+- from_status: CANDIDATE
+- to_status: TRIAL-AUTHORIZED
+- implementation_status: IN-TRIAL
+- forcing_function: M2 requires a first relationship visualization while the accepted graph is deliberately bounded and no frontend/graph runtime has been selected.
+- adopted_invariant: visualization consumes `RelationshipGraphView` only and may not invent topology, replace SDA identity, or remove supporting Evidence from material relationships.
+- adaptation: use server-rendered deterministic inline SVG with semantic cited HTML fallback; localize labels without changing graph identity.
+- alternatives_characterized: Cytoscape.js; D3 selection/force; project-owned SVG.
+- scope: first bounded M2 relationship visualization and bilingual route/API proof.
+- non_scope: large graph exploration, force-directed layout, drag/pan/zoom, graph editing, browser-side graph analysis, final frontend stack selection.
+- failure_model: visual-only inferred edges, Q/P leakage, citation loss, nondeterministic layout, inaccessible SVG, global SVG ID collisions, bounded layout used past readable scale.
+- verification_plan: deterministic reorder test; supporting-Evidence rejection; accessible title/description; graph-scoped SVG IDs; cited HTML fallback; bilingual routes; exact graph JSON API; no backend identifiers.
+- claim_ceiling: successful trial may justify acceptance only for the bounded M2 visualization role.
+- authority_reference: `docs/adr/ADR-0003-first-relationship-visualization.md`, `docs/ROADMAP.md` M2.
+- rationale: the first graph is small enough that a browser-native deterministic renderer meets the forcing function with less dependency/interaction surface than a general graph engine.
+
+## APRD-008 — Promote deterministic SVG relationship visualization after bounded verification
+
+- date: 2026-09-26
+- pattern: APR-007
+- from_status: TRIAL-AUTHORIZED
+- to_status: ACCEPTED
+- implementation_status_from: IN-TRIAL
+- implementation_status_to: VERIFIED
+- forcing_function: the M2 trial has implemented the authorized renderer and passed the bounded publication/accessibility/provenance contract.
+- adopted_invariant: the visual layer remains a deterministic projection over `RelationshipGraphView`, and every rendered material edge retains supporting Evidence plus canonical source-record identity.
+- scope: bounded M2 procurement/exercise relationship visualization, JSON graph API, and Arabic/English public relationship pages.
+- non_scope: large graph exploration, interactive pan/zoom/drag, force-directed layout, compound nodes, final frontend-stack selection, browser-side graph analysis.
+- failure_model_verified: reordered input changing output; unsupported/context-only edge publication; backend Q/P leakage; inaccessible/global SVG identifiers; untranslated human edge labels; graph API mutation.
+- verification_evidence: implementation/review head `b78564fa83bf128803205bc2a22ea88a8284ecb2`; schema-validation run `36260932930` (#395) PASS; Wikibase regression run `36260932947` (#124) PASS; `docs/reviews/M2_RELATIONSHIP_VISUALIZATION_FIRST_PASS.md`.
+- replacement_forcing_functions: sustained large graphs, required pan/zoom/drag, compound nodes, frequent client-side relayout/filtering, graph analytics, or demonstrated deterministic-layout quality failure.
+- claim_ceiling: verification establishes only the bounded M2 visualization role; it does not qualify a general graph engine or final frontend architecture.
+- authority_reference: `docs/adr/ADR-0003-first-relationship-visualization.md`.
+- rationale: the project-owned renderer satisfies the current forcing function with less dependency and nondeterminism than a general graph runtime, while preserving an explicit future migration gate.
