@@ -66,3 +66,6 @@ jobs:
 
       - name: Validate M2 staleness input integrity
         run: python scripts/validate_m2_staleness_isolation.py
+
+      - name: Validate M2 procurement and exercise domain views
+        run: python scripts/validate_m2_domain_views.py
