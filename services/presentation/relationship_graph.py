@@ -3,8 +3,7 @@
 The graph uses a bounded single-pass expansion from explicit root Entity IDs.
 Every edge is backed by either one canonical Claim or one canonical Event; the
 projector never creates inferred entity-to-entity relationships. Material graph
-records reuse the same fail-closed Evidence -> Document -> Source resolution as
-the M1 public view.
+records reuse the shared fail-closed Evidence -> Document -> Source resolver.
 """
 
 from __future__ import annotations
@@ -12,11 +11,11 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from .equipment_view import (
+from .projection_support import (
     ProjectionError,
-    _citations,
-    _entity_value_id,
-    _index,
+    entity_value_id,
+    index_by_id,
+    render_citations,
 )
 
 _VISIBLE_CLAIM_STATES = {"active", "disputed"}
@@ -158,10 +157,10 @@ def build_relationship_graph(
     if not selected_domains or not selected_domains.issubset(_DOMAIN_PREDICATES):
         raise ProjectionError("relationship graph domains must be procurement and/or exercise")
 
-    entities_by_id = _index(entities, "Entity")
-    evidence_by_id = _index(evidence, "Evidence")
-    documents_by_id = _index(documents, "Document")
-    sources_by_id = _index(sources, "Source")
+    entities_by_id = index_by_id(entities, "Entity")
+    evidence_by_id = index_by_id(evidence, "Evidence")
+    documents_by_id = index_by_id(documents, "Document")
+    sources_by_id = index_by_id(sources, "Source")
 
     for root_id in roots:
         _entity_node(root_id, entities_by_id)
@@ -180,7 +179,7 @@ def build_relationship_graph(
         if predicate_id not in allowed_predicates:
             continue
         subject_id = claim.get("subject_id")
-        value_id = _entity_value_id(claim)
+        value_id = entity_value_id(claim)
         if not isinstance(subject_id, str) or not isinstance(value_id, str):
             continue
         if subject_id not in root_set and value_id not in root_set:
@@ -223,12 +222,12 @@ def build_relationship_graph(
     for claim in selected_claims:
         claim_id = str(claim["id"])
         subject_id = str(claim["subject_id"])
-        value_id = _entity_value_id(claim)
+        value_id = entity_value_id(claim)
         if value_id is None:
             raise ProjectionError(
                 f"selected graph Claim {claim_id} lost its Entity value"
             )
-        citations = _citations(
+        citations = render_citations(
             claim.get("evidence_links"),
             evidence_by_id=evidence_by_id,
             documents_by_id=documents_by_id,
@@ -273,7 +272,7 @@ def build_relationship_graph(
             raise ProjectionError(
                 f"selected graph Event {event_id} has malformed ended_at"
             )
-        citations = _citations(
+        citations = render_citations(
             event.get("evidence_links"),
             evidence_by_id=evidence_by_id,
             documents_by_id=documents_by_id,
