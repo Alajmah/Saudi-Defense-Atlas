@@ -1,0 +1,45 @@
+name: typesense-verification
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "m3/**"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-typesense:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Start pinned Typesense trial server
+        run: |
+          docker run -d --name typesense-m3 \
+            -p 8108:8108 \
+            typesense/typesense:30.2 \
+            --data-dir /data \
+            --api-key m3-typesense-trial-key
+
+      - name: Verify bounded M3 search-engine trial
+        env:
+          TYPESENSE_URL: http://127.0.0.1:8108
+          TYPESENSE_API_KEY: m3-typesense-trial-key
+        run: python scripts/verify_m3_typesense_trial.py
+
+      - name: Dump Typesense diagnostics on failure
+        if: failure()
+        run: docker logs typesense-m3 || true
+
+      - name: Clean up Typesense trial server
+        if: always()
+        run: docker rm -f typesense-m3 || true
