@@ -1,100 +1,71 @@
 # Saudi Defense Atlas
 
-Saudi Defense Atlas is an open-source, bilingual knowledge platform for publicly available information about Saudi defense forces, equipment, procurement, training, defense industry, and historically documented deployments.
+Saudi Defense Atlas is a bilingual, source-backed knowledge platform for publicly documented information about Saudi military forces, equipment, procurement, exercises, defense industry, training, and historical development.
 
-The project is **knowledge-first**: facts are modeled as structured entities, claims, evidence, events, and relationships. Articles and visualizations are views over that knowledge base rather than the primary source of truth.
+The project is designed as a structured knowledge system rather than a conventional news site. Articles, public pages, search results, timelines, and future AI-assisted research experiences are projections of sourced canonical knowledge rather than independent stores of factual truth.
 
-## Principles
+## Current architecture
 
-- **Source-first:** every material factual claim must be traceable to evidence.
-- **Temporal:** facts may change; the system preserves point-in-time context and revision history.
-- **Bilingual:** Arabic and English are first-class, with canonical names and aliases.
-- **AI-assisted, human-governed:** AI may discover, extract, reconcile, summarize, translate, and propose updates; publication authority is policy-bound.
-- **Open-source intelligence only:** the platform focuses on lawful, publicly available information.
-- **No operational tracking:** the project does not aim to expose real-time or sensitive operational movements, readiness, patrol patterns, ammunition stocks, or non-public precise locations.
-- **Knowledge over news:** news is an input to the knowledge system, not the database itself.
-
-## Initial Scope
-
-- Military organizations and branches
-- Equipment and variants
-- Manufacturers and defense companies
-- Procurement and contracts
-- Deliveries and upgrade programs
-- Exercises and training
-- Defense-industry localization
-- Publicly documented bases and facilities at an appropriate non-operational level
-- Timelines, relationships, and source-backed analysis
-
-## Architecture
+The durable domain model is built around:
 
 ```text
-Public sources
-    ↓
-Discovery / fetch / document parsing
-    ↓
+Entity + Claim + Evidence + Event + Revision
+```
+
+Key invariants include:
+
+- SDA canonical IDs define domain identity; backend Q/P IDs are adapter mappings only.
+- Source, Document, and Evidence are separate provenance layers.
+- Procurement approval, contract, delivery, and operational service are distinct states/events.
+- Unknown information remains unknown rather than being inferred for presentation convenience.
+- AI may propose changes but cannot directly mutate canonical knowledge.
+- Public output excludes live operational tracking, readiness, stock levels, patrol patterns, and other sensitive operational aggregation.
+
+Wikibase is the accepted canonical knowledge-core implementation for the bounded M1 role, behind project-owned governance, read, and write contracts.
+
+## M1 vertical slice
+
+The first vertical slice demonstrates an authoritative public-source path for the F-15SA:
+
+```text
+Official source
+  ↓
 Document + Evidence
-    ↓
-Structured candidate extraction
-    ↓
-Entity resolution
-    ↓
-ChangeProposal
-    ↓
-Policy + evidence validation
-    ↓
-Human review when required
-    ↓
-Backend mutation
-    ↓
-Canonical Revision + backend receipt
-    ↓
-Wikibase knowledge core
-    ↓
-Read API / public website / search / research tools
+  ↓
+typed Claim / Event proposal
+  ↓
+human-bound review authorization
+  ↓
+canonical Wikibase mutation
+  ↓
+project Revision + backend receipt
+  ↓
+SDA canonical read adapter
+  ↓
+EquipmentView
+  ↓
+SDA-ID JSON API + Arabic/English public page
 ```
 
-The **domain model remains implementation-neutral** even though M0 has selected Wikibase as the M1 canonical knowledge-core implementation. SDA domain IDs, claim/evidence semantics, and mutation authority remain project-owned; Wikibase Q/P identifiers and MediaWiki revisions are implementation mappings/receipts rather than public authority.
+The public projection requires at least one supporting Evidence link for every material Claim/Event, keeps operator/inventory/service-state unknown when not established by admitted Claims, separates canonical payload hashes from public read-projection hashes, and excludes backend Q/P identifiers from the application contract.
 
-See [`docs/adr/ADR-0002-knowledge-core.md`](docs/adr/ADR-0002-knowledge-core.md).
+The M1 web shell is intentionally framework-neutral. Selection of a production frontend framework and deployment topology remains an Architecture Pattern Register decision rather than an implicit M1 dependency.
 
-## Repository Structure
+## Repository map
 
-```text
-architecture/            Architecture Pattern Register and decision/evidence logs
-docs/                    Vision, architecture, ontology, policies, roadmap, ADRs, reviews
-schemas/v0.1/            Implementation-neutral domain/governance JSON Schemas
-scripts/                 Schema and cross-record governance validators
-spikes/wikibase/         Reproducible M0 Wikibase knowledge-core verification
-tests/fixtures/          Positive/negative schema and workflow fixtures
-.github/workflows/       Validation and M0 knowledge-core CI
-```
+- `architecture/` — pattern register, decisions, validation and source ledger
+- `docs/` — vision, architecture, ontology, source/AI policy, ADRs, roadmap, and reviews
+- `schemas/v0.1/` — implementation-neutral domain, governance, and public read schemas
+- `services/` — ingestion, intelligence, governance, and presentation contracts
+- `spikes/wikibase/` — reproducible canonical-core and clean-stack verification environment
+- `scripts/` — schema, workflow, M1, and public projection validation
+- `data/` — bounded source registry/seed material
 
-## Status
+## Project status
 
-**M0 — Foundation and Knowledge-Core Spike: COMPLETE**
+- **M0:** complete — foundation and verified Wikibase knowledge core.
+- **M1 write/provenance increment:** merged.
+- **M1 public/read increment:** implemented in PR #3 and gated by exact-head static plus clean-stack verification.
+- **M1-F15:** concurrent-writer canonical-ID uniqueness remains unresolved; production automated canonical mutation workers stay disabled until that mechanism is designed and verified.
 
-M0 verified the bounded Wikibase representation/query/governance contract and adopted Wikibase for the M1 knowledge-core role. The project does **not** treat that verification as production qualification.
-
-**M1 — First Vertical Slice: NEXT**
-
-The next objective is one end-to-end path from an authoritative public source to a cited Arabic/English equipment page, including deterministic retrieval/deduplication, typed AI proposals, review-gated mutation, canonical Wikibase storage, evidence traceability, and mutation idempotency/reconciliation semantics.
-
-See [`docs/ROADMAP.md`](docs/ROADMAP.md).
-
-## Verification Discipline
-
-Architecture promotion is evidence-based:
-
-```text
-observation != adoption
-adoption != implementation
-implementation != verification
-verification != production qualification
-```
-
-The canonical status vocabulary and evidence are maintained in [`architecture/ARCHITECTURE_PATTERN_REGISTER.md`](architecture/ARCHITECTURE_PATTERN_REGISTER.md).
-
-## License
-
-License selection is intentionally deferred until the repository's code/data/content licensing boundaries are defined. Source code, structured data, and third-party sourced material may require different terms.
+See `docs/ROADMAP.md` and `docs/M1_PUBLIC_PROJECTION.md` for milestone scope and qualification boundaries.
