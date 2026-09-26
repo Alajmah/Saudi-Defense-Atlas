@@ -131,6 +131,10 @@ jobs:
           set +a
           python run_m1_public_projection.py
 
+      - name: Verify M1 public API and bilingual pages
+        working-directory: spikes/wikibase
+        run: python verify_m1_public_web.py
+
       - name: Upload Wikibase verification evidence
         if: success()
         uses: actions/upload-artifact@v4
@@ -143,6 +147,10 @@ jobs:
             spikes/wikibase/m1_projection_state.generated.json
             spikes/wikibase/m1_vertical_slice.generated.json
             spikes/wikibase/m1_public_projection.generated.json
+            spikes/wikibase/m1_public_web.generated.json
+            spikes/wikibase/m1_f15sa_api.generated.json
+            spikes/wikibase/m1_f15sa_ar.generated.html
+            spikes/wikibase/m1_f15sa_en.generated.html
           if-no-files-found: error
           retention-days: 14
 
