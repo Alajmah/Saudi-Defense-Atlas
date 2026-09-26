@@ -30,12 +30,12 @@ from services.intelligence.f15sa_proposal import (  # noqa: E402
     build_f15sa_proposal,
 )
 from services.presentation.equipment_view import build_equipment_view  # noqa: E402
-from m1_public_projection_backend import (  # noqa: E402
-    READ_PROJECTION_VERSION,
-    WikibaseM1PublicProjectionBackend,
+from m1_public_projection_backend import READ_PROJECTION_VERSION  # noqa: E402
+from m1_public_projection_integrity import (  # noqa: E402
+    WikibaseM1IntegrityBackend,
+    WikibaseM1IntegrityReadAdapter,
 )
 from m1_public_projection_proposal import build_public_projection_proposal  # noqa: E402
-from m1_read_adapter import WikibaseM1ReadAdapter  # noqa: E402
 from m1_wikibase_api import M1WikibaseAPI  # noqa: E402
 from run_m1_vertical_slice import fixture_html  # noqa: E402
 
@@ -175,7 +175,7 @@ def main() -> int:
 
     api = M1WikibaseAPI(base_url, username, password)
     api.login()
-    backend = WikibaseM1PublicProjectionBackend(
+    backend = WikibaseM1IntegrityBackend(
         api=api,
         base_state=base_state,
         projection_state=projection_state,
@@ -215,7 +215,7 @@ def main() -> int:
             "public-read post-write workflow invalid: " + "; ".join(workflow_errors)
         )
 
-    reader = WikibaseM1ReadAdapter(
+    reader = WikibaseM1IntegrityReadAdapter(
         api=api,
         base_state=base_state,
         projection_state=projection_state,
@@ -280,6 +280,7 @@ def main() -> int:
             "unknown_inventory_preserved": True,
             "unknown_service_state_preserved": True,
             "citation_chain_preserved": True,
+            "read_projection_hashes_verified": True,
             "backend_ids_excluded": True,
         },
         "claim_ceiling": (
