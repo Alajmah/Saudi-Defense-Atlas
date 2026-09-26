@@ -105,6 +105,10 @@ def _citation(
     if not isinstance(locator, Mapping) or not locator:
         raise ProjectionError(f"Evidence {evidence_id} requires a locator")
 
+    role = link.get("role")
+    if role not in {"supports", "contradicts", "contextualizes"}:
+        raise ProjectionError(f"Evidence {evidence_id} has invalid public role {role!r}")
+
     url = (
         document.get("canonical_url")
         or document.get("retrieved_url")
@@ -112,7 +116,7 @@ def _citation(
     )
     return {
         "evidence_id": evidence_id,
-        "evidence_role": str(link.get("role")),
+        "evidence_role": role,
         "document_id": document_id,
         "source_id": source_id,
         "source_class": source.get("source_class"),
@@ -151,6 +155,10 @@ def _citations(
                 documents_by_id=documents_by_id,
                 sources_by_id=sources_by_id,
             )
+        )
+    if not any(item["evidence_role"] == "supports" for item in rendered):
+        raise ProjectionError(
+            "public material record requires at least one supporting Evidence link"
         )
     rendered.sort(key=lambda item: (item["evidence_id"], item["evidence_role"]))
     return rendered
