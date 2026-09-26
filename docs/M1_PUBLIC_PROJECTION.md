@@ -2,7 +2,7 @@
 
 ## Status
 
-**Phase:** implementation complete; merge gated by exact-head CI and PR review.
+**Phase:** implementation complete; merge gated by PR review and verification.
 
 **Branch:** `m1/public-projection-f15sa`
 
