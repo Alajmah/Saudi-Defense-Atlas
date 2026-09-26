@@ -67,6 +67,10 @@ def main() -> int:
         raise AssertionError("relationship visualization lost bilingual heading")
     if "F-15SA" not in en or "إف-15 إس إيه" not in ar:
         raise AssertionError("relationship visualization lost localized root label")
+    if "manufactures" not in en or "يصنّع" not in ar:
+        raise AssertionError("relationship visualization lost localized relationship label")
+    if "manufacturer.manufactures.equipment" not in ar:
+        raise AssertionError("Arabic fallback lost canonical relationship code for auditability")
     if 'id="sda-relationship-title"' in en or 'id="sda-arrow"' in en:
         raise AssertionError("SVG accessibility/marker IDs must be graph-scoped, not global constants")
 
@@ -120,9 +124,10 @@ def main() -> int:
         raise AssertionError("unknown relationship root must return 404")
 
     print(
-        "Validated M2 first relationship visualization: deterministic inline SVG, graph-scoped "
-        "accessibility IDs, supporting-Evidence enforcement, semantic cited fallback, bilingual "
-        "routes, SDA identity, and no backend-ID leakage or graph mutation."
+        "Validated M2 first relationship visualization: deterministic inline SVG, localized "
+        "relation labels with canonical audit codes, graph-scoped accessibility IDs, "
+        "supporting-Evidence enforcement, semantic cited fallback, bilingual routes, SDA "
+        "identity, and no backend-ID leakage or graph mutation."
     )
     return 0
 
