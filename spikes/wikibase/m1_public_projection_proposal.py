@@ -15,12 +15,13 @@ def _stable_suffix(value: Mapping[str, Any], length: int = 20) -> str:
     return hashlib.sha256(encoded).hexdigest()[:length].upper()
 
 
-def entity_payloads(*, created_at: str, updated_at: str) -> list[dict[str, Any]]:
+def entity_payloads() -> list[dict[str, Any]]:
     """Return the three domain Entity records needed by the bounded public slice.
 
     These are migration payloads for the preexisting M0 domain items; once
     approved/applied, canonical readback comes from Wikibase rather than this
-    helper or the frontend.
+    helper or the frontend. Lifecycle timestamps are intentionally omitted:
+    the migration time is not the Entity's original creation/update time.
     """
     return [
         {
@@ -32,8 +33,6 @@ def entity_payloads(*, created_at: str, updated_at: str) -> list[dict[str, Any]]
                 {"value": "Saudi Advanced Eagle", "language": "en"}
             ],
             "record_status": "active",
-            "created_at": created_at,
-            "updated_at": updated_at,
         },
         {
             "id": "SDA-ORG-BOEING",
@@ -41,8 +40,6 @@ def entity_payloads(*, created_at: str, updated_at: str) -> list[dict[str, Any]]
             "subtype": "manufacturer",
             "names": {"en": "Boeing", "ar": "بوينغ"},
             "record_status": "active",
-            "created_at": created_at,
-            "updated_at": updated_at,
         },
         {
             "id": "SDA-ORG-RSAF",
@@ -61,8 +58,6 @@ def entity_payloads(*, created_at: str, updated_at: str) -> list[dict[str, Any]]
                 "ar": "القوة الجوية العسكرية السعودية",
             },
             "record_status": "active",
-            "created_at": created_at,
-            "updated_at": updated_at,
         },
     ]
 
@@ -70,7 +65,7 @@ def entity_payloads(*, created_at: str, updated_at: str) -> list[dict[str, Any]]
 def build_public_projection_proposal(
     *, event_payload: Mapping[str, Any], created_at: str
 ) -> dict[str, Any]:
-    entities = entity_payloads(created_at=created_at, updated_at=created_at)
+    entities = entity_payloads()
     mutations: list[dict[str, Any]] = []
     for entity in entities:
         mutations.append(
