@@ -125,6 +125,7 @@ def main() -> int:
         "staleness summary changed",
         failures,
     )
+    expect(report["as_of"] == "2026-01-10T00:00:00Z", "as_of must normalize to UTC", failures)
     by_id = {item["claim_id"]: item for item in report["items"]}
 
     fresh = by_id["SDA-CLAIM-M2-STALE-FRESH"]
@@ -135,12 +136,22 @@ def main() -> int:
         "default review policy was not applied",
         failures,
     )
+    expect(
+        fresh["review_due_at"] == "2027-01-05T00:00:00Z",
+        "fresh Claim review deadline changed",
+        failures,
+    )
 
     due = by_id["SDA-CLAIM-M2-STALE-DUE"]
     expect(due["status"] == "due", "old volatile Claim must be due", failures)
     expect(
         due["review_after_days"] == 30,
         "predicate-specific review policy was not applied",
+        failures,
+    )
+    expect(
+        due["review_due_at"] == "2025-01-31T00:00:00Z",
+        "due Claim review deadline changed",
         failures,
     )
     expect(
@@ -157,6 +168,11 @@ def main() -> int:
     )
     expect(unverified["age_days"] is None, "unverified Claim must not invent age", failures)
     expect(
+        unverified["review_due_at"] is None,
+        "unverified Claim must not invent a review deadline",
+        failures,
+    )
+    expect(
         unverified["claim_state"] == "disputed",
         "disputed state must remain independent of staleness status",
         failures,
@@ -169,14 +185,49 @@ def main() -> int:
 
     reversed_report = build_staleness_report(
         claims=list(reversed(claims)),
-        as_of="2026-01-10T00:00:00Z",
+        as_of="2026-01-10T03:00:00+03:00",
         default_review_days=365,
         predicate_review_days={
             "equipment.service_state": 7,
             "inventory.quantity": 30,
         },
     )
-    expect(report == reversed_report, "staleness output must be input-order independent", failures)
+    expect(
+        report == reversed_report,
+        "staleness output must be order-independent and normalize equivalent timezones",
+        failures,
+    )
+
+    boundary_claim = claim(
+        claim_id="SDA-CLAIM-M2-STALE-BOUNDARY",
+        predicate_id="inventory.quantity",
+        value={
+            "kind": "number",
+            "value": 1,
+            "unit": "aircraft",
+            "precision": "synthetic",
+            "lower_bound": None,
+            "upper_bound": None,
+        },
+        verified_at="2025-12-11T00:00:00Z",
+    )
+    boundary_report = build_staleness_report(
+        claims=[boundary_claim],
+        as_of="2026-01-10T00:00:00Z",
+        default_review_days=365,
+        predicate_review_days={"inventory.quantity": 30},
+    )
+    boundary = boundary_report["items"][0]
+    expect(
+        boundary["review_due_at"] == "2026-01-10T00:00:00Z",
+        "boundary review_due_at changed",
+        failures,
+    )
+    expect(
+        boundary["status"] == "due",
+        "Claim must become due exactly at its review deadline",
+        failures,
+    )
 
     future = copy.deepcopy(claims)
     future[0]["verified_at"] = "2026-01-11T00:00:00Z"
@@ -211,6 +262,16 @@ def main() -> int:
     except StalenessError:
         pass
 
+    try:
+        build_staleness_report(
+            claims=claims,
+            as_of="2026-01-10T00:00:00",
+            default_review_days=365,
+        )
+        failures.append("timezone-naive as_of was accepted")
+    except StalenessError:
+        pass
+
     if failures:
         print("M2 staleness validation failed:", file=sys.stderr)
         for failure in failures:
@@ -218,9 +279,9 @@ def main() -> int:
         return 1
 
     print(
-        "Validated policy-driven M2 staleness: fresh/due/unverified states, "
-        "predicate review windows, disputed-state independence, withdrawn exclusion, "
-        "order independence, and no automatic truth/falsity mutation."
+        "Validated policy-driven M2 staleness: explicit review deadlines, exact-boundary due "
+        "semantics, fresh/due/unverified states, predicate review windows, disputed-state "
+        "independence, withdrawn exclusion, UTC normalization, and no automatic truth/falsity mutation."
     )
     return 0
 
