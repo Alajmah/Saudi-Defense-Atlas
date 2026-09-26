@@ -44,3 +44,6 @@ jobs:
 
       - name: Validate M1 project Revision construction
         run: python scripts/validate_m1_revision.py
+
+      - name: Validate M1 public equipment read model
+        run: python scripts/validate_m1_equipment_view.py
