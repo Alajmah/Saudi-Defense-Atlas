@@ -128,10 +128,10 @@ M1 now discovers the configured Item namespace from Action API `siteinfo`, enume
 
 **Confidence:** High
 
-**Resolution:** FIXED in implementation; final CI rerun pending.
+**Resolution:** FIXED and VERIFIED.
 
-`build_revision()` now requires at least one execution effect with status `applied` in addition to full convergence. A pure `already_applied` replay remains a valid convergence result but is rejected for Revision creation. The static Revision validator now proves this boundary explicitly.
+`build_revision()` now requires at least one execution effect with status `applied` in addition to full convergence. A pure `already_applied` replay remains a valid convergence result but is rejected for Revision creation. The static Revision validator proves this boundary explicitly. At commit `cabe6183bfad3b9ef92353c011c6717529735f95`, `schema-validation` run 192 and clean-stack `wikibase-verification` run 39 both passed.
 
 ## Verification boundary after remediation
 
-All implementation fixes through M1-F17 require green `schema-validation` and clean-stack `wikibase-verification` at the final PR head. Concurrent-writer uniqueness remains intentionally unqualified under M1-F15.
+All implementation fixes through M1-F17 are green at commit `cabe6183bfad3b9ef92353c011c6717529735f95`. Concurrent-writer uniqueness remains intentionally unqualified under M1-F15 and must be resolved before production mutation is authorized.
