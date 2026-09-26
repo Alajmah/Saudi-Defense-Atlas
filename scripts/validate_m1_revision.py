@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate that project Revision creation requires full backend convergence."""
+"""Validate that project Revision creation requires a newly applied execution."""
 
 from __future__ import annotations
 
@@ -146,19 +146,24 @@ def main() -> int:
     replay = execute_authorized_proposal(
         proposal=proposal, decision=decision, backend=backend
     )
-    replay_revision = build_revision(
-        proposal=proposal,
-        decision=decision,
-        execution=replay,
-        backend_name=backend.name,
-        applied_at="2026-01-01T00:03:00Z",
-        adapter_id="test-revision-adapter",
-    )
+    expect(replay.status == "converged", "pure replay must still converge", failures)
     expect(
-        replay_revision["id"] != revision["id"],
-        "different Revision content must not reuse the same project Revision identity",
+        all(effect.status == "already_applied" for effect in replay.effects),
+        "pure replay must not issue a new backend effect",
         failures,
     )
+    try:
+        build_revision(
+            proposal=proposal,
+            decision=decision,
+            execution=replay,
+            backend_name=backend.name,
+            applied_at="2026-01-01T00:03:00Z",
+            adapter_id="test-revision-adapter",
+        )
+        failures.append("Revision builder accepted a pure already_applied replay")
+    except RevisionBuildError:
+        pass
 
     unknown_execution = execute_authorized_proposal(
         proposal=proposal, decision=decision, backend=EquivalentBackend(unknown=True),
@@ -183,8 +188,9 @@ def main() -> int:
         return 1
 
     print(
-        "Validated schema-valid project Revision construction after full convergence, "
-        "content-addressed Revision identity, and rejection of effect_unknown execution."
+        "Validated schema-valid project Revision construction after newly applied effects, "
+        "content-addressed Revision identity, pure-replay rejection, and rejection of "
+        "effect_unknown execution."
     )
     return 0
 

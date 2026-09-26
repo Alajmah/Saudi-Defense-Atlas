@@ -44,13 +44,17 @@ def build_revision(
     applied_at: str,
     adapter_id: str,
 ) -> dict[str, Any]:
-    """Build a Revision only when all intended effects are proven equivalent."""
+    """Build a Revision only for a converged execution that applied new effects."""
     proposal_digest = validate_approval(proposal, decision)
     if execution.proposal_sha256 != proposal_digest:
         raise RevisionBuildError("execution evidence belongs to a different proposal payload")
     if not execution.may_create_revision:
         raise RevisionBuildError(
             f"proposal execution is {execution.status}; project Revision is forbidden"
+        )
+    if not any(effect.status == "applied" for effect in execution.effects):
+        raise RevisionBuildError(
+            "execution is a pure replay; reuse or recover the existing project Revision"
         )
 
     mutations = proposal.get("mutations")
@@ -108,8 +112,9 @@ def build_revision(
         "affected_records": affected_records,
         "backend_receipts": receipts,
         "rationale": (
-            "Project Revision created only after all proposal effects were observed "
-            "as equivalent in the canonical backend."
+            "Project Revision created only after at least one proposal effect was newly "
+            "applied and every intended effect was observed as equivalent in the "
+            "canonical backend."
         ),
     }
     return {"id": _revision_id(body), **body}

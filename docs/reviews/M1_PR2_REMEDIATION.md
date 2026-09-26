@@ -110,10 +110,28 @@ M1 remains a local single-writer proof. Production mutation must not be authoriz
 
 **Confidence:** High
 
-**Resolution:** FIXED in implementation; clean-stack rerun pending.
+**Resolution:** FIXED and VERIFIED.
 
-M1 now discovers the configured Item namespace from Action API `siteinfo`, enumerates that namespace directly from MediaWiki state, and extracts Q-IDs from either bare or namespaced page titles. The clean-stack runtime test explicitly proves that the seeded RSAF, Boeing, and F-15SA canonical IDs resolve to their expected Q-IDs before proposal execution begins. WDQS remains excluded from mutation reconciliation because its index is asynchronous.
+M1 now discovers the configured Item namespace from Action API `siteinfo`, enumerates that namespace directly from MediaWiki state, and extracts Q-IDs from either bare or namespaced page titles. The clean-stack runtime test explicitly proves that the seeded RSAF, Boeing, and F-15SA canonical IDs resolve to their expected Q-IDs before proposal execution begins. WDQS remains excluded from mutation reconciliation because its index is asynchronous. The clean-stack `wikibase-verification` run passed at commit `27585c70e719d7049a4933bbf6bc2e4e3bc90bc3`.
+
+---
+
+## M1-F17 — Pure replay could manufacture a second project Revision
+
+**Area:** canonical revision / replay semantics
+
+**Finding:** A fully equivalent replay returns `converged` with every effect marked `already_applied`. The Revision builder previously accepted that execution and could construct another project Revision with a new `applied_at`, even though the replay performed no new canonical mutation.
+
+**Why it matters:** Backend idempotency and project revision history are different concerns. A read-only replay should prove convergence and recover/reuse the existing Revision, not create a second canonical application record.
+
+**Severity:** High
+
+**Confidence:** High
+
+**Resolution:** FIXED in implementation; final CI rerun pending.
+
+`build_revision()` now requires at least one execution effect with status `applied` in addition to full convergence. A pure `already_applied` replay remains a valid convergence result but is rejected for Revision creation. The static Revision validator now proves this boundary explicitly.
 
 ## Verification boundary after remediation
 
-The branch must re-establish both green schema/governance validation and a green clean-stack `wikibase-verification` run at the remediation commit. Until those checks pass, fixes above are implementation changes rather than verified results.
+All implementation fixes through M1-F17 require green `schema-validation` and clean-stack `wikibase-verification` at the final PR head. Concurrent-writer uniqueness remains intentionally unqualified under M1-F15.
