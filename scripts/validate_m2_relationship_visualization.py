@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.validate_m2_relationship_graph import graph_records  # noqa: E402
+from services.presentation.equipment_view import ProjectionError  # noqa: E402
 from services.presentation.relationship_graph import build_relationship_graph  # noqa: E402
 from services.presentation.relationship_visualization import render_relationship_figure  # noqa: E402
 from services.presentation.relationship_web import create_relationship_wsgi_app  # noqa: E402
@@ -66,6 +67,8 @@ def main() -> int:
         raise AssertionError("relationship visualization lost bilingual heading")
     if "F-15SA" not in en or "إف-15 إس إيه" not in ar:
         raise AssertionError("relationship visualization lost localized root label")
+    if 'id="sda-relationship-title"' in en or 'id="sda-arrow"' in en:
+        raise AssertionError("SVG accessibility/marker IDs must be graph-scoped, not global constants")
 
     # Rendering must be deterministic even if graph record arrays arrive reordered.
     reordered = copy.deepcopy(graph)
@@ -73,6 +76,20 @@ def main() -> int:
     reordered["edges"].reverse()
     if render_relationship_figure(reordered, locale="en") != en:
         raise AssertionError("relationship SVG/HTML output depends on graph input order")
+
+    # A material edge may not be visualized from contextual/contradicting evidence alone.
+    unsupported = copy.deepcopy(graph)
+    if not unsupported["edges"]:
+        raise AssertionError("visualization fixture unexpectedly has no edges")
+    unsupported["edges"][0]["citations"] = [
+        {**citation, "evidence_role": "contextualizes"}
+        for citation in unsupported["edges"][0]["citations"]
+    ]
+    try:
+        render_relationship_figure(unsupported, locale="en")
+        raise AssertionError("relationship visualization admitted an edge without supporting Evidence")
+    except ProjectionError:
+        pass
 
     app = create_relationship_wsgi_app(
         lambda entity_id: graph if entity_id == TARGET_ID else None,
@@ -103,9 +120,9 @@ def main() -> int:
         raise AssertionError("unknown relationship root must return 404")
 
     print(
-        "Validated M2 first relationship visualization: deterministic inline SVG, accessible "
-        "title/description, semantic cited fallback, bilingual routes, SDA identity, and no "
-        "backend-ID leakage or graph mutation."
+        "Validated M2 first relationship visualization: deterministic inline SVG, graph-scoped "
+        "accessibility IDs, supporting-Evidence enforcement, semantic cited fallback, bilingual "
+        "routes, SDA identity, and no backend-ID leakage or graph mutation."
     )
     return 0
 
