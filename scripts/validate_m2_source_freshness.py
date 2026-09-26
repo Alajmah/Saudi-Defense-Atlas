@@ -15,6 +15,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.validate_schemas import build_registry  # noqa: E402
+from services.ingestion.acquisition import FetchResponse, classify_fetch  # noqa: E402
+from services.ingestion.document_identity import SourceAcquisitionPolicy, content_sha256  # noqa: E402
 from services.presentation.source_freshness import (  # noqa: E402
     SourceFreshnessError,
     build_source_freshness_report,
@@ -35,9 +37,7 @@ def validate_instance(schema_name: str, instance: dict[str, Any], failures: list
     )
     errors = list(validator.iter_errors(instance))
     if errors:
-        failures.append(
-            f"{schema_name} failed: " + "; ".join(error.message for error in errors)
-        )
+        failures.append(f"{schema_name} failed: " + "; ".join(error.message for error in errors))
 
 
 def source(source_id: str, *, source_class: str = "A", active: bool = True) -> dict[str, Any]:
@@ -53,24 +53,11 @@ def source(source_id: str, *, source_class: str = "A", active: bool = True) -> d
     }
 
 
-def document(document_id: str, source_id: str, retrieved_at: str) -> dict[str, Any]:
+def receipt(source_id: str, observed_at: str, *, status_code: int = 200) -> dict[str, Any]:
     return {
-        "id": document_id,
         "source_id": source_id,
-        "title": {"en": f"Synthetic document {document_id}"},
-        "canonical_url": f"https://example.invalid/{document_id.lower()}",
-        "retrieved_url": f"https://example.invalid/{document_id.lower()}",
-        "published_at": None,
-        "retrieved_at": retrieved_at,
-        "language": "en",
-        "document_type": "other",
-        "media_type": "text/plain",
-        "content_sha256": (document_id[-1].lower() if document_id[-1].lower() in "abcdef" else "a") * 64,
-        "content_length_bytes": 100,
-        "version_of": None,
-        "publisher_document_id": None,
-        "access_notes": "Synthetic fixture.",
-        "licensing_notes": None,
+        "observed_at": observed_at,
+        "status_code": status_code,
     }
 
 
@@ -82,21 +69,19 @@ def main() -> int:
         source("SDA-SOURCE-M2-NEVER", source_class="C"),
         source("SDA-SOURCE-M2-INACTIVE", active=False),
     ]
-    documents = [
-        document("SDA-DOC-M2-FRESH-A", "SDA-SOURCE-M2-FRESH", "2026-01-09T00:00:00Z"),
-        document("SDA-DOC-M2-FRESH-B", "SDA-SOURCE-M2-FRESH", "2026-01-10T00:00:00+00:00"),
-        document("SDA-DOC-M2-DUE-A", "SDA-SOURCE-M2-DUE", "2026-01-01T00:00:00Z"),
-        document("SDA-DOC-M2-INACTIVE-A", "SDA-SOURCE-M2-INACTIVE", "2026-01-10T00:00:00Z"),
+    receipts = [
+        receipt("SDA-SOURCE-M2-FRESH", "2026-01-09T00:00:00Z"),
+        receipt("SDA-SOURCE-M2-FRESH", "2026-01-10T00:00:00+00:00"),
+        receipt("SDA-SOURCE-M2-DUE", "2026-01-01T00:00:00Z"),
+        receipt("SDA-SOURCE-M2-INACTIVE", "2026-01-10T00:00:00Z"),
     ]
 
     for item in sources:
         validate_instance("source.schema.json", item, failures)
-    for item in documents:
-        validate_instance("document.schema.json", item, failures)
 
     report = build_source_freshness_report(
         sources=sources,
-        documents=documents,
+        retrieval_receipts=receipts,
         as_of="2026-01-11T00:00:00Z",
         default_poll_days=7,
         source_poll_days={"SDA-SOURCE-M2-DUE": 10},
@@ -109,70 +94,116 @@ def main() -> int:
         failures,
     )
     by_id = {item["source_id"]: item for item in report["items"]}
-    expect(
-        "SDA-SOURCE-M2-INACTIVE" not in by_id,
-        "inactive Source must not enter active acquisition workload",
-        failures,
-    )
+    expect("SDA-SOURCE-M2-INACTIVE" not in by_id, "inactive Source entered workload", failures)
     fresh = by_id["SDA-SOURCE-M2-FRESH"]
     expect(fresh["status"] == "fresh", "recent retrieval must remain fresh", failures)
+    expect(fresh["receipt_count"] == 2, "successful receipt count changed", failures)
     expect(
-        fresh["latest_document_id"] == "SDA-DOC-M2-FRESH-B",
-        "latest retrieval selection changed",
-        failures,
-    )
-    expect(
-        fresh["latest_retrieved_at"] == "2026-01-10T00:00:00Z",
-        "latest retrieval timestamp was not normalized",
+        fresh["latest_observed_at"] == "2026-01-10T00:00:00Z",
+        "latest receipt timestamp was not normalized",
         failures,
     )
 
     due = by_id["SDA-SOURCE-M2-DUE"]
-    expect(due["status"] == "due", "retrieval at polling deadline must be due", failures)
-    expect(
-        due["next_retrieval_due_at"] == "2026-01-11T00:00:00Z",
-        "source polling deadline changed",
-        failures,
-    )
+    expect(due["status"] == "due", "receipt at polling deadline must be due", failures)
+    expect(due["next_check_due_at"] == "2026-01-11T00:00:00Z", "poll deadline changed", failures)
     expect(
         "does not imply factual staleness" in due["reason"],
-        "due status must not imply stale/false source content",
+        "due status must not imply factual staleness",
         failures,
     )
 
     never = by_id["SDA-SOURCE-M2-NEVER"]
     expect(
-        never["status"] == "never_retrieved" and never["latest_retrieved_at"] is None,
+        never["status"] == "never_retrieved" and never["latest_observed_at"] is None,
         "unretrieved Source must remain explicit",
         failures,
     )
 
     reversed_report = build_source_freshness_report(
         sources=list(reversed(sources)),
-        documents=list(reversed(documents)),
+        retrieval_receipts=list(reversed(receipts)),
         as_of="2026-01-11T00:00:00+00:00",
         default_poll_days=7,
         source_poll_days={"SDA-SOURCE-M2-DUE": 10},
     )
     expect(report == reversed_report, "source freshness output must be order-independent", failures)
 
-    future_documents = copy.deepcopy(documents)
-    future_documents[0]["retrieved_at"] = "2026-01-12T00:00:00Z"
+    # Prove unchanged canonical content still refreshes acquisition health via receipt.
+    policy = SourceAcquisitionPolicy(
+        source_id="SDA-SOURCE-M2-FRESH",
+        document_key="m2-source-freshness-fixture",
+        canonical_url="https://official.example.test/source-freshness",
+        allowed_hosts=("official.example.test",),
+        language="en",
+        document_type="press_release",
+    )
+    content = b"<article>same canonical content</article>"
+    response = FetchResponse(
+        content=content,
+        retrieved_url=policy.canonical_url,
+        status_code=200,
+        media_type="text/html",
+        etag=None,
+        last_modified=None,
+    )
+    first = classify_fetch(
+        policy=policy,
+        response=response,
+        observed_at="2026-01-01T00:00:00Z",
+        canonical_content_sha256=content_sha256(content),
+        canonical_content_length_bytes=len(content),
+    )
+    unchanged = classify_fetch(
+        policy=policy,
+        response=response,
+        observed_at="2026-01-10T00:00:00Z",
+        canonical_content_sha256=content_sha256(content),
+        canonical_content_length_bytes=len(content),
+        previous_document=first.document,
+    )
+    expect(unchanged.status == "unchanged", "integration fixture must remain unchanged", failures)
+    expect(
+        unchanged.document["retrieved_at"] == first.document["retrieved_at"],
+        "unchanged fetch must not rewrite immutable Document retrieval metadata",
+        failures,
+    )
+    expect(
+        unchanged.receipt.source_id == policy.source_id
+        and unchanged.receipt.observed_at == "2026-01-10T00:00:00Z",
+        "retrieval receipt must preserve source identity and latest observation time",
+        failures,
+    )
+    integration_report = build_source_freshness_report(
+        sources=[sources[0]],
+        retrieval_receipts=[first.receipt, unchanged.receipt],
+        as_of="2026-01-11T00:00:00Z",
+        default_poll_days=7,
+    )
+    expect(
+        integration_report["items"][0]["status"] == "fresh"
+        and integration_report["items"][0]["latest_observed_at"] == "2026-01-10T00:00:00Z",
+        "unchanged re-fetch must refresh source monitoring health without new Document",
+        failures,
+    )
+
+    future_receipts = copy.deepcopy(receipts)
+    future_receipts[0]["observed_at"] = "2026-01-12T00:00:00Z"
     try:
         build_source_freshness_report(
             sources=sources,
-            documents=future_documents,
+            retrieval_receipts=future_receipts,
             as_of="2026-01-11T00:00:00Z",
             default_poll_days=7,
         )
-        failures.append("future Document retrieval was accepted")
+        failures.append("future retrieval receipt was accepted")
     except SourceFreshnessError:
         pass
 
     try:
         build_source_freshness_report(
             sources=sources,
-            documents=documents,
+            retrieval_receipts=receipts,
             as_of="2026-01-11T00:00:00Z",
             default_poll_days=7,
             source_poll_days={"SDA-SOURCE-M2-UNKNOWN": 1},
@@ -181,38 +212,25 @@ def main() -> int:
     except SourceFreshnessError:
         pass
 
-    duplicate_sources = [sources[0], copy.deepcopy(sources[0])]
-    try:
-        build_source_freshness_report(
-            sources=duplicate_sources,
-            documents=[],
-            as_of="2026-01-11T00:00:00Z",
-            default_poll_days=7,
-        )
-        failures.append("duplicate Source ID was accepted")
-    except SourceFreshnessError:
-        pass
-
-    orphan_document = [document("SDA-DOC-M2-ORPHAN", "SDA-SOURCE-M2-UNKNOWN", "2026-01-10T00:00:00Z")]
     try:
         build_source_freshness_report(
             sources=sources,
-            documents=orphan_document,
+            retrieval_receipts=[receipt("SDA-SOURCE-M2-UNKNOWN", "2026-01-10T00:00:00Z")],
             as_of="2026-01-11T00:00:00Z",
             default_poll_days=7,
         )
-        failures.append("Document with unknown Source was accepted")
+        failures.append("receipt with unknown Source was accepted")
     except SourceFreshnessError:
         pass
 
     try:
         build_source_freshness_report(
             sources=sources,
-            documents=documents,
-            as_of="2026-01-11T00:00:00",
+            retrieval_receipts=[receipt("SDA-SOURCE-M2-FRESH", "2026-01-10T00:00:00Z", status_code=500)],
+            as_of="2026-01-11T00:00:00Z",
             default_poll_days=7,
         )
-        failures.append("timezone-naive as_of was accepted")
+        failures.append("failed HTTP receipt was accepted as successful freshness evidence")
     except SourceFreshnessError:
         pass
 
@@ -223,9 +241,9 @@ def main() -> int:
         return 1
 
     print(
-        "Validated M2 source acquisition freshness: explicit polling policy, exact deadline "
-        "semantics, latest-retrieval selection, never-retrieved state, active-source filtering, "
-        "order independence, and no inference from monitoring health to factual truth."
+        "Validated M2 source acquisition freshness from retrieval receipts: unchanged re-fetches "
+        "refresh monitoring health without new Documents, polling deadlines are explicit, and "
+        "monitoring health never becomes a factual-truth judgment."
     )
     return 0
 
