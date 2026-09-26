@@ -3,7 +3,7 @@
   "$id": "https://schemas.saudi-defense-atlas.org/v0.1/procurement-program-view.schema.json",
   "title": "Saudi Defense Atlas Public Procurement Program View",
   "type": "object",
-  "required": ["id", "entity_type", "names", "descriptions", "lifecycle_state", "facts", "graph", "staleness", "provenance"],
+  "required": ["id", "entity_type", "names", "descriptions", "lifecycle_history", "facts", "graph", "staleness", "provenance"],
   "properties": {
     "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
     "entity_type": { "const": "procurement_program" },
@@ -14,17 +14,30 @@
         { "type": "null" }
       ]
     },
-    "lifecycle_state": {
+    "lifecycle_history": {
       "type": "object",
-      "required": ["state", "claim_ids", "values", "reason"],
+      "required": ["status", "claim_ids", "observations", "reason"],
       "properties": {
-        "state": { "type": "string", "enum": ["known", "disputed", "unknown"] },
+        "status": { "type": "string", "enum": ["documented", "disputed", "unknown"] },
         "claim_ids": {
           "type": "array",
           "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
           "uniqueItems": true
         },
-        "values": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true },
+        "observations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["claim_id", "value", "claim_state", "validity"],
+            "properties": {
+              "claim_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+              "value": { "type": "string", "minLength": 1 },
+              "claim_state": { "type": "string", "enum": ["active", "disputed"] },
+              "validity": { "$ref": "common.schema.json#/$defs/validity_interval" }
+            },
+            "additionalProperties": false
+          }
+        },
         "reason": { "type": ["string", "null"] }
       },
       "additionalProperties": false
