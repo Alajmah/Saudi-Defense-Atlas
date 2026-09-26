@@ -60,3 +60,6 @@ jobs:
 
       - name: Validate M2 graph isolation and event intervals
         run: python scripts/validate_m2_relationship_graph_isolation.py
+
+      - name: Validate M2 claim staleness policy
+        run: python scripts/validate_m2_staleness.py
