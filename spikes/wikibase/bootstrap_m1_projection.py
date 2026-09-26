@@ -25,6 +25,7 @@ def property_defs() -> dict[str, dict[str, str]]:
         "payload_sha256": {"en": "SDA payload SHA-256", "datatype": "external-id"},
         "projection_version": {"en": "SDA projection version", "datatype": "string"},
         "read_projection_version": {"en": "SDA public read projection version", "datatype": "string"},
+        "read_projection_sha256": {"en": "SDA public read projection SHA-256", "datatype": "external-id"},
         "record_type": {"en": "SDA record type", "datatype": "string"},
         "entity_type": {"en": "SDA entity type", "datatype": "string"},
         "entity_subtype": {"en": "SDA entity subtype", "datatype": "string"},
