@@ -61,6 +61,7 @@ def main() -> int:
         'lang="ar"',
         'dir="rtl"',
         "إف-15 إس إيه",
+        "بوينغ",
         "غير معروف",
         "/en/equipment/f-15sa",
         "SDA-EQUIP-F15SA",
@@ -69,6 +70,7 @@ def main() -> int:
         'lang="en"',
         'dir="ltr"',
         "F-15SA",
+        "Boeing",
         "Unknown",
         "/ar/equipment/f-15sa",
         "SDA-EQUIP-F15SA",
@@ -92,7 +94,8 @@ def main() -> int:
 
     print(
         "Validated M1 web shell: SDA-ID JSON API, Arabic/English pages from one "
-        "EquipmentView, visible citations/timeline, explicit unknowns, and no Q/P leakage."
+        "EquipmentView, localized manufacturer, visible citations/timeline, explicit "
+        "unknowns, and no Q/P leakage."
     )
     return 0
 
