@@ -1,8 +1,9 @@
 """Backend-independent canonical mutation reconciliation for M1.
 
 A proposal is complete only when every intended backend effect is demonstrably
-equivalent. Ambiguous effects are never blindly retried. Project Revision
-creation is permitted only after full proposal convergence.
+equivalent. Ambiguous effects are never blindly retried. Backend inspection
+failures become explicit unknown state rather than escaping the audit result.
+Project Revision creation is permitted only after full proposal convergence.
 """
 
 from __future__ import annotations
@@ -111,6 +112,25 @@ def _find_mutations(proposal: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     return result
 
 
+def _inspect_or_unknown(
+    *,
+    backend: MutationBackend,
+    key: str,
+    mutation: Mapping[str, Any],
+) -> EffectInspection:
+    """Convert backend inspection failures into explicit, fail-closed uncertainty."""
+    try:
+        inspection = backend.inspect_effect(idempotency_key=key, mutation=mutation)
+    except Exception as exc:  # noqa: BLE001 - backend read failure must remain auditable.
+        return EffectInspection(
+            "unknown",
+            detail=f"inspection_error={type(exc).__name__}: {exc}",
+        )
+    if inspection.state not in {"absent", "equivalent", "conflict", "unknown"}:
+        raise ValueError(f"backend returned invalid inspection state: {inspection.state}")
+    return inspection
+
+
 def _result_from_inspection(
     *, mutation: Mapping[str, Any], key: str, inspection: EffectInspection
 ) -> EffectResult:
@@ -151,7 +171,9 @@ def execute_authorized_proposal(
     effects are skipped. Any preflight conflict/unknown state blocks all new
     writes. During execution, each absent effect receives at most one write
     attempt. If a write outcome is ambiguous, the backend is inspected once;
-    only observed equivalence is accepted as success.
+    only observed equivalence is accepted as success. If inspection itself is
+    unavailable, the result is explicit ``effect_unknown`` rather than an
+    unstructured exception or retry.
     """
     proposal_digest = validate_approval(proposal, decision)
     proposal_id = str(proposal["id"])
@@ -165,9 +187,9 @@ def execute_authorized_proposal(
             proposal_sha256=proposal_digest,
             mutation=mutation,
         )
-        inspection = backend.inspect_effect(idempotency_key=key, mutation=mutation)
-        if inspection.state not in {"absent", "equivalent", "conflict", "unknown"}:
-            raise ValueError(f"backend returned invalid inspection state: {inspection.state}")
+        inspection = _inspect_or_unknown(
+            backend=backend, key=key, mutation=mutation
+        )
         preflight.append((mutation, key, inspection))
 
     if any(
@@ -215,7 +237,9 @@ def execute_authorized_proposal(
                 effects=tuple(results),
             )
         except AmbiguousWriteError as exc:
-            reconciled = backend.inspect_effect(idempotency_key=key, mutation=mutation)
+            reconciled = _inspect_or_unknown(
+                backend=backend, key=key, mutation=mutation
+            )
             if reconciled.state == "equivalent":
                 results.append(
                     EffectResult(
@@ -235,7 +259,7 @@ def execute_authorized_proposal(
                     status="effect_unknown",
                     write_attempted=True,
                     receipt=reconciled.receipt,
-                    detail=f"{exc}; reconciliation={reconciled.state}",
+                    detail=f"{exc}; reconciliation={reconciled.state}; {reconciled.detail or ''}".rstrip(),
                 )
             )
             results.extend(_remaining_results(preflight, index + 1))
@@ -245,7 +269,9 @@ def execute_authorized_proposal(
                 effects=tuple(results),
             )
 
-        reconciled = backend.inspect_effect(idempotency_key=key, mutation=mutation)
+        reconciled = _inspect_or_unknown(
+            backend=backend, key=key, mutation=mutation
+        )
         if reconciled.state != "equivalent":
             results.append(
                 EffectResult(
@@ -254,7 +280,10 @@ def execute_authorized_proposal(
                     status="effect_unknown",
                     write_attempted=True,
                     receipt=write_receipt or reconciled.receipt,
-                    detail=f"write returned but reconciliation={reconciled.state}",
+                    detail=(
+                        f"write returned but reconciliation={reconciled.state}; "
+                        f"{reconciled.detail or ''}"
+                    ).rstrip(),
                 )
             )
             results.extend(_remaining_results(preflight, index + 1))
