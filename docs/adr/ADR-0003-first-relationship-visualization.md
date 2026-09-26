@@ -1,6 +1,6 @@
 # ADR-0003 — First Relationship Visualization
 
-- status: TRIAL-AUTHORIZED
+- status: ACCEPTED — VERIFIED for bounded M2 role
 - date: 2026-09-26
 - milestone: M2
 - pattern: APR-007
@@ -72,7 +72,7 @@ Liabilities for the current forcing function:
 
 ## Decision
 
-Authorize **Option A: project-owned deterministic inline SVG + semantic HTML fallback** as the bounded M2 trial.
+Accept **Option A: project-owned deterministic inline SVG + semantic HTML fallback** for the bounded M2 relationship-visualization role.
 
 This decision does **not** reject Cytoscape.js or D3 for later milestones. It deliberately avoids promoting a general graph runtime before evidence requires one.
 
@@ -82,16 +82,20 @@ This decision does **not** reject Cytoscape.js or D3 for later milestones. It de
 2. It never adds inferred nodes or edges.
 3. Node/edge order and coordinates are deterministic for identical graph input.
 4. SDA IDs remain identity; Q/P IDs never appear.
-5. Arabic and English use the same graph identity/data, with localized visible labels.
-6. The SVG has an accessible title/description and the page includes an HTML relationship fallback.
-7. Citations/provenance remain available in the HTML fallback; the graphic is not treated as self-authenticating evidence.
-8. No live operational geography or movement semantics are introduced.
+5. Arabic and English use the same graph identity/data, with localized visible node and relationship labels.
+6. Canonical relationship codes remain available in the semantic fallback for auditability.
+7. The SVG has an accessible title/description with graph-scoped DOM IDs and the page includes an HTML relationship fallback.
+8. Every material rendered edge requires at least one supporting Evidence citation.
+9. Citations/provenance remain available in the HTML fallback; the graphic is not treated as self-authenticating evidence.
+10. No live operational geography or movement semantics are introduced.
 
-## Trial scope
+## Accepted scope
 
 - bounded one-root M2 procurement/exercise graph;
 - server-rendered/static inline SVG;
 - desktop/mobile responsive `viewBox`;
+- bilingual node and relationship labels;
+- semantic cited fallback;
 - no client-side force simulation;
 - no drag/pan/zoom requirement;
 - no graph editing.
@@ -109,17 +113,14 @@ Re-evaluate Cytoscape.js, D3, or another mechanism if one or more become real re
 
 These are forcing functions, not automatic migration triggers; a new APR comparison is required.
 
-## Verification plan
+## Verification evidence
 
-The M2 trial must prove:
+The bounded trial passed on implementation/review head `b78564fa83bf128803205bc2a22ea88a8284ecb2`:
 
-- deterministic output under reordered graph input;
-- valid graph endpoints only;
-- accessible SVG title/description;
-- Arabic and English labels from the same SDA IDs;
-- semantic HTML fallback with source-record identity and citation links;
-- no backend identifiers;
-- a public route/API integration over the accepted relationship graph projection.
+- schema-validation run `36260932930` / run #395 — **PASS**;
+- Wikibase regression run `36260932947` / run #124 — **PASS**;
+- exhaustive first-pass review: `docs/reviews/M2_RELATIONSHIP_VISUALIZATION_FIRST_PASS.md`;
+- validation covers deterministic rendering under reordered input, supporting-Evidence enforcement, localized relation labels, canonical relation-code fallback, graph-scoped SVG accessibility IDs, bilingual routes, unchanged graph JSON API, and Q/P leakage rejection.
 
 ## External evidence inspected
 
@@ -132,4 +133,4 @@ The M2 trial must prove:
 
 ## Claim ceiling
 
-Passing this trial establishes suitability for the first bounded M2 relationship visualization only. It does not establish suitability for large-scale interactive graph exploration or select the final frontend stack.
+Verification establishes suitability for the first bounded M2 relationship visualization only. It does not establish suitability for large-scale interactive graph exploration or select the final frontend stack.
