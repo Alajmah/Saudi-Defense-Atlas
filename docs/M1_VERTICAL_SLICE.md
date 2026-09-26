@@ -2,7 +2,11 @@
 
 ## Status
 
-**Phase:** implementation started
+**Phase:** canonical-write increment verified; public projection pending
+
+**Completed in PR #2:** deterministic acquisition, bounded parsing, Evidence materialization, typed AMBER proposal generation, exact human-review binding, guarded single-writer Wikibase mutation/reconciliation, and project Revision construction.
+
+**Still required for M1 acceptance:** project-owned read projection/API, Arabic and English public equipment views from the same canonical records, visible citations/evidence, related entities/timeline presentation, and the remaining M1 acceptance checks in `docs/ROADMAP.md`.
 
 **Target:** one authoritative public source → provenance records → typed proposal → review-gated Wikibase mutation → bilingual public projection.
 
