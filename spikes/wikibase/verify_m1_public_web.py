@@ -79,7 +79,7 @@ def main() -> int:
         "timeline_visible": "2020-12-10" in ar and "2020-12-10" in en,
         "legacy_operator_excluded": view["field_states"]["operator"]["state"] == "unknown",
         "backend_ids_excluded": not re.search(
-            r"(?<![A-Za-z0-9_-])[QP]\\d+(?![A-Za-z0-9_-])", ar + en
+            r"(?<![A-Za-z0-9_-])[QP]\d+(?![A-Za-z0-9_-])", ar + en
         ),
     }
     failed = [name for name, passed in assertions.items() if not passed]
