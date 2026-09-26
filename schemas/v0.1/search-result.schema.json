@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/search-result.schema.json",
+  "title": "Saudi Defense Atlas Search Result",
+  "type": "object",
+  "required": ["query", "normalized_query", "locale", "total", "hits"],
+  "properties": {
+    "query": { "type": "string", "minLength": 1 },
+    "normalized_query": { "type": "string", "minLength": 1 },
+    "locale": { "type": "string", "enum": ["ar", "en"] },
+    "total": { "type": "integer", "minimum": 0 },
+    "hits": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "rank",
+          "id",
+          "entity_type",
+          "names",
+          "descriptions",
+          "match_quality",
+          "matched_fields"
+        ],
+        "properties": {
+          "rank": { "type": "integer", "minimum": 1 },
+          "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "entity_type": {
+            "type": "string",
+            "enum": [
+              "organization",
+              "military_unit",
+              "equipment",
+              "equipment_variant",
+              "facility",
+              "exercise",
+              "procurement_program",
+              "contract",
+              "localization_program",
+              "country"
+            ]
+          },
+          "names": { "$ref": "common.schema.json#/$defs/localized_text" },
+          "descriptions": {
+            "oneOf": [
+              { "$ref": "common.schema.json#/$defs/localized_text" },
+              { "type": "null" }
+            ]
+          },
+          "match_quality": {
+            "type": "string",
+            "enum": ["exact_id", "exact_name", "exact_alias", "prefix", "token"]
+          },
+          "matched_fields": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": ["id", "name", "alias", "description"]
+            },
+            "minItems": 1,
+            "uniqueItems": true
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
