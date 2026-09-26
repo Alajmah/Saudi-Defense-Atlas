@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/source-freshness-report.schema.json",
+  "title": "Saudi Defense Atlas Source Acquisition Freshness Report",
+  "description": "Deterministic monitoring-health projection. Due means source retrieval is overdue under an explicit polling policy; it does not assert that the source or represented facts are stale or false.",
+  "type": "object",
+  "required": ["as_of", "policy", "summary", "items"],
+  "properties": {
+    "as_of": { "type": "string", "format": "date-time" },
+    "policy": {
+      "type": "object",
+      "required": ["default_poll_days", "source_poll_days"],
+      "properties": {
+        "default_poll_days": { "type": "integer", "minimum": 1 },
+        "source_poll_days": {
+          "type": "object",
+          "additionalProperties": { "type": "integer", "minimum": 1 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "summary": {
+      "type": "object",
+      "required": ["total", "fresh", "due", "never_retrieved"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "fresh": { "type": "integer", "minimum": 0 },
+        "due": { "type": "integer", "minimum": 0 },
+        "never_retrieved": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source_id",
+          "publisher",
+          "source_class",
+          "document_count",
+          "latest_document_id",
+          "latest_retrieved_at",
+          "age_days",
+          "poll_after_days",
+          "next_retrieval_due_at",
+          "status",
+          "reason"
+        ],
+        "properties": {
+          "source_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "publisher": { "$ref": "common.schema.json#/$defs/localized_text" },
+          "source_class": { "type": "string", "enum": ["A", "B", "C", "D", "E"] },
+          "document_count": { "type": "integer", "minimum": 0 },
+          "latest_document_id": {
+            "oneOf": [
+              { "$ref": "common.schema.json#/$defs/canonical_id" },
+              { "type": "null" }
+            ]
+          },
+          "latest_retrieved_at": { "type": ["string", "null"], "format": "date-time" },
+          "age_days": { "type": ["integer", "null"], "minimum": 0 },
+          "poll_after_days": { "type": "integer", "minimum": 1 },
+          "next_retrieval_due_at": { "type": ["string", "null"], "format": "date-time" },
+          "status": { "type": "string", "enum": ["fresh", "due", "never_retrieved"] },
+          "reason": { "type": "string", "minLength": 1 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
