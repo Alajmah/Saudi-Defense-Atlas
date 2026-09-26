@@ -13,6 +13,22 @@ from typing import Any
 
 from .equipment_view import ProjectionError
 
+_RELATION_LABELS = {
+    "manufacturer.manufactures.equipment": {"en": "manufactures", "ar": "يصنّع"},
+    "company.participates_in.procurement_program": {"en": "participates in", "ar": "يشارك في"},
+    "procurement_program.acquires.equipment_variant": {"en": "acquires", "ar": "يقتني"},
+    "contract.part_of.procurement_program": {"en": "part of", "ar": "جزء من"},
+    "contract.awarded_to.company": {"en": "awarded to", "ar": "مُرسى على"},
+    "exercise.participant.organization": {"en": "participant", "ar": "مشارك"},
+    "exercise.uses.equipment_variant": {"en": "uses", "ar": "يستخدم"},
+    "related_entity": {"en": "related to", "ar": "مرتبط بـ"},
+    "recipient": {"en": "recipient", "ar": "المستلم"},
+    "manufacturer": {"en": "manufacturer", "ar": "المُصنّع"},
+    "buyer": {"en": "buyer", "ar": "المشتري"},
+    "contractor": {"en": "contractor", "ar": "المتعاقد"},
+    "participant": {"en": "participant", "ar": "مشارك"},
+}
+
 
 def _text(localized: Any, locale: str) -> str:
     if not isinstance(localized, Mapping):
@@ -25,6 +41,13 @@ def _text(localized: Any, locale: str) -> str:
         if isinstance(value, str) and value:
             return value
     return ""
+
+
+def _relation_label(relation: str, locale: str) -> str:
+    labels = _RELATION_LABELS.get(relation)
+    if labels is None:
+        return relation
+    return labels[locale]
 
 
 def _labels(locale: str) -> dict[str, str]:
@@ -186,13 +209,14 @@ def render_relationship_figure(graph: Mapping[str, Any], *, locale: str) -> str:
                 f"visualization edge {edge_id} requires at least one supporting Evidence citation"
             )
 
+        relation_label = _relation_label(relation, locale)
         x1, y1 = positions[from_id]
         x2, y2 = positions[to_id]
         mx, my = (x1 + x2) // 2, (y1 + y2) // 2
         rendered_edges.append(
-            f'<g class="relationship-edge" data-source-record-id="{html.escape(source_record_id, quote=True)}">'
+            f'<g class="relationship-edge" data-source-record-id="{html.escape(source_record_id, quote=True)}" data-relation="{html.escape(relation, quote=True)}">'
             f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" marker-end="url(#{arrow_id})" />'
-            f'<text x="{mx}" y="{my - 8}" text-anchor="middle" direction="ltr">{html.escape(relation)}</text>'
+            f'<text x="{mx}" y="{my - 8}" text-anchor="middle" direction="{direction}">{html.escape(relation_label)}</text>'
             "</g>"
         )
 
@@ -201,7 +225,7 @@ def render_relationship_figure(graph: Mapping[str, Any], *, locale: str) -> str:
             "<li "
             f'data-source-record-id="{html.escape(source_record_id, quote=True)}">'
             f'<strong>{html.escape(_node_label(node_by_id[from_id], locale))}</strong> '
-            f'<code>{html.escape(relation)}</code> '
+            f'{html.escape(relation_label)} <code>{html.escape(relation)}</code> '
             f'<strong>{html.escape(_node_label(node_by_id[to_id], locale))}</strong> '
             f'— {html.escape(labels["source"])}: {citation_text}</li>'
         )
