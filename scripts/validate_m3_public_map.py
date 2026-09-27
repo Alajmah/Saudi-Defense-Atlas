@@ -294,6 +294,44 @@ def main() -> int:
         failures,
     )
 
+    # Optional disputed metadata must not suppress an otherwise safe fixed-facility feature.
+    disputed_label = copy.deepcopy(claims)
+    disputed_label[2]["claim_state"] = "disputed"
+    disputed_label_view = build(entities, disputed_label, evidence, documents, sources)
+    disputed_label_feature = disputed_label_view["features"][0]
+    expect(
+        disputed_label_feature["location_label"] == {"ar": "منطقة الرياض"},
+        "disputed optional location label was not omitted",
+        failures,
+    )
+
+    disputed_association = copy.deepcopy(claims)
+    disputed_association[4]["claim_state"] = "disputed"
+    disputed_association_view = build(
+        entities, disputed_association, evidence, documents, sources
+    )
+    expect(
+        disputed_association_view["features"][0]["associated_organization_ids"] == [],
+        "disputed optional organization association was not omitted",
+        failures,
+    )
+
+    unresolved_association = copy.deepcopy(claims)
+    unresolved_association[4]["value"]["entity_id"] = "SDA-ORG-MISSING"
+    expect_raises(
+        "unresolved organization association",
+        lambda: build(entities, unresolved_association, evidence, documents, sources),
+        failures,
+    )
+
+    mistyped_association = copy.deepcopy(claims)
+    mistyped_association[4]["value"]["entity_id"] = "SDA-FAC-MAP-TEST"
+    expect_raises(
+        "non-organization association target",
+        lambda: build(entities, mistyped_association, evidence, documents, sources),
+        failures,
+    )
+
     non_facility_entities = copy.deepcopy(entities)
     non_facility_entities.append(
         entity("SDA-ORG-BAD-MAP", "organization", subtype=None, names={"en": "Bad map subject"})
@@ -322,7 +360,8 @@ def main() -> int:
     print(
         "Validated M3 public non-operational map contract: allowlisted fixed facilities only, "
         "supporting Evidence, high/verified coordinates, 2dp public coarsening, explicit broad labels, "
-        "restricted subtype exclusion, fail-closed coordinate conflicts, and no backend-ID leakage."
+        "restricted subtype exclusion, fail-closed coordinate conflicts, optional-metadata dispute isolation, "
+        "resolved active organization associations, and no backend-ID leakage."
     )
     return 0
 
