@@ -94,6 +94,7 @@ A successful technical test establishes only the property tested in the tested e
 | APR-005 | Typed structured AI proposals | ACCEPTED | LINKED | current-plan-authorized |
 | APR-006 | Deterministic-before-generative processing | ACCEPTED | LINKED | current-plan-authorized |
 | APR-007 | Deterministic inline-SVG relationship visualization | ACCEPTED | VERIFIED | current-plan-authorized |
+| APR-008 | OpenSearch as bounded public lexical-search index | ACCEPTED | VERIFIED | current-plan-authorized |
 
 `VERIFIED` above is bounded to the documented contracts and evidence. It is not a production-qualification label.
 
@@ -283,3 +284,40 @@ A successful technical test establishes only the property tested in the tested e
 **Replacement forcing functions:** sustained large visible graphs, pan/zoom/drag requirements, compound nodes, frequent client-side relayout/filtering, browser-side graph analysis, or demonstrated layout-quality failure.
 
 **Claim ceiling:** verification is bounded to the first M2 relationship visualization and does not select the final frontend stack or large-graph engine.
+
+---
+
+## APR-008 — OpenSearch as bounded public lexical-search index
+
+**Problem:** M3 requires Arabic-aware public lexical/entity search and faceted navigation at a scale where a reusable search index can reduce custom engineering, without allowing engine-native scoring, analyzers, or identity to redefine the accepted SDA search contract.
+
+**Invariant:** `SearchDocument`, `SearchQuery`, and `SearchResult` remain project-owned contracts. OpenSearch is a downstream index only; SDA IDs, normalization, portable match-quality semantics, and facet meaning remain authoritative.
+
+**Mechanism:** OpenSearch 3.8.0 with strict mappings over SDA-projected keyword/token fields, fixed `constant_score` quality tiers combined with `dis_max`, locale-specific deterministic tie fields, and a separately characterized conservative Arabic analyzer (`standard + lowercase + decimal_digit + arabic_normalization`).
+
+**Alternatives characterized:** Meilisearch Community Edition and PostgreSQL full-text search + `pg_trgm`. Both remain viable future candidates if forcing functions change; neither is rejected globally.
+
+**Benefits observed:** dedicated open-source search index; explicit analyzer inspection through `_analyze`; strict mappings; native filters; deterministic contract-preserving ranking can be implemented without exposing engine scores; Arabic normalization components can be composed without enabling stemming or stop-word removal.
+
+**Liabilities retained:** additional operational service; production security/HA/backup/upgrade/capacity work remains unqualified; engine-specific query DSL is adapter implementation detail; semantic/vector features are intentionally not adopted by this decision.
+
+**Failure modes reviewed:** additive `_score` overriding portable quality order; English-only tie ordering on Arabic queries; malformed `SearchDocument` entering the index; substring leakage; facet semantic drift; Q/P leakage; indexing-order dependence; analyzer scope exceeding the M3 capability ceiling.
+
+**Forcing function:** `docs/ROADMAP.md` M3 requires Arabic-aware search and explicitly requires APR evidence before search-engine adoption.
+
+**Decision:**
+
+- pattern_status: ACCEPTED
+- implementation_status: VERIFIED for the bounded M3 lexical-index contract
+- planning_disposition: current-plan-authorized
+- authority: `docs/adr/ADR-0004-search-engine-trial.md`
+
+**Implementation links:** `spikes/opensearch/run_contract_trial.py`, `spikes/opensearch/README.md`, `.github/workflows/opensearch-verification.yml`, `services/presentation/search_contract.py`.
+
+**Verification evidence:** hardened implementation head `5372d7642b945cddfbd240b1c294b4ce77ed4d5f`; schema-validation run `36326666973` (#464) PASS; OpenSearch verification run `36326666946` (#10) PASS; workflow artifact `m3-opensearch-trial-evidence`; `docs/reviews/M3_OPENSEARCH_TRIAL_FIRST_PASS.md`.
+
+**Verified properties:** exact designation and alias matching; Arabic orthographic normalization; whole-token isolation; OR-within-facet / AND-across-facets behavior; fixed portable quality order; exact-ID priority over alias collision; Arabic-locale tie ordering; indexing-order independence; portable `match_quality` equivalence; no backend Q/P identifiers in trial payloads/results; conservative Arabic analyzer tokens; exact OpenSearch 3.8.0 runtime pin.
+
+**Replacement/promotion forcing functions:** production deployment qualification; target-scale performance; semantic/vector retrieval; fuzzy matching; stemming/stop-word policy; materially different multilingual relevance requirements; or evidence that operational complexity outweighs index benefits.
+
+**Claim ceiling:** verification establishes suitability only for the tested M3 downstream lexical-index role. It does not qualify production security, HA, backup/recovery, upgrades, capacity, semantic/vector relevance, final deployment topology, or final frontend architecture.
