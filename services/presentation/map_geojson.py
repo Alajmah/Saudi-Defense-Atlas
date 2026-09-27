@@ -46,6 +46,21 @@ def _localized_text(value: Any, label: str) -> dict[str, str]:
     return rendered
 
 
+def _canonical_id_list(value: Any, label: str, *, exact_items: int | None = None) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise ProjectionError(f"{label} must be an array")
+    rendered: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise ProjectionError(f"{label} contains invalid canonical ID")
+        rendered.append(item)
+    if len(rendered) != len(set(rendered)):
+        raise ProjectionError(f"{label} contains duplicate canonical IDs")
+    if exact_items is not None and len(rendered) != exact_items:
+        raise ProjectionError(f"{label} requires exactly {exact_items} IDs")
+    return sorted(rendered)
+
+
 def _citations(value: Any, feature_id: str) -> list[dict[str, Any]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or not value:
         raise ProjectionError(f"map feature {feature_id} requires citations")
@@ -115,6 +130,12 @@ def build_map_renderer_payload(public_map_view: Mapping[str, Any]) -> dict[str, 
             else _localized_text(location_label_raw, f"{feature_id}.location_label")
         )
 
+        coordinate_claim_ids = _canonical_id_list(
+            raw.get("coordinate_claim_ids"),
+            f"map feature {feature_id} coordinate_claim_ids",
+            exact_items=2,
+        )
+
         coordinate = raw.get("coordinate")
         if not isinstance(coordinate, Mapping):
             raise ProjectionError(f"map feature {feature_id} requires public coordinate")
@@ -134,10 +155,10 @@ def build_map_renderer_payload(public_map_view: Mapping[str, Any]) -> dict[str, 
             raise ProjectionError(f"map feature {feature_id} exceeds public 2dp precision")
 
         citations = _citations(raw.get("citations"), feature_id)
-        organizations = raw.get("associated_organization_ids", [])
-        if not isinstance(organizations, Sequence) or isinstance(organizations, (str, bytes)):
-            raise ProjectionError(f"map feature {feature_id} organization IDs must be an array")
-        organization_ids = sorted({str(item) for item in organizations if isinstance(item, str) and item})
+        organization_ids = _canonical_id_list(
+            raw.get("associated_organization_ids", []),
+            f"map feature {feature_id} organization IDs",
+        )
 
         geo_features.append(
             {
@@ -166,6 +187,7 @@ def build_map_renderer_payload(public_map_view: Mapping[str, Any]) -> dict[str, 
                 "names": names,
                 "location_label": location_label,
                 "coordinate": {"latitude": float(latitude), "longitude": float(longitude)},
+                "coordinate_claim_ids": coordinate_claim_ids,
                 "citations": citations,
             }
         )
