@@ -82,3 +82,6 @@ jobs:
 
       - name: Validate M3 search contract isolation
         run: python scripts/validate_m3_search_contract_isolation.py
+
+      - name: Validate M3 public non-operational map contract
+        run: python scripts/validate_m3_public_map.py
