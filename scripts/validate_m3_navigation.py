@@ -184,6 +184,9 @@ def fixtures() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         "day",
         name_en="F-15SA delivery milestone",
     )
+    delivery["citations"].append(
+        citation("SDA-EVENT-F15-DELIVERY-CONTRA", role="contradicts")
+    )
     exercise = timeline_event(
         "SDA-EVENT-EXERCISE-2025",
         "exercise",
@@ -232,6 +235,13 @@ def main() -> int:
     )
     expect(all("current_state" not in item and "status" not in item for item in view["timeline"]), "timeline inferred current state", failures)
     expect(all(any(citation["evidence_role"] == "supports" for citation in item["citations"]) for item in view["timeline"]), "timeline supporting Evidence missing", failures)
+    delivery_item = next(item for item in view["timeline"] if item["event_id"] == "SDA-EVENT-F15-DELIVERY")
+    expect(
+        {item["evidence_role"] for item in delivery_item["citations"]}
+        == {"supports", "contradicts"},
+        "timeline dropped contradictory Evidence",
+        failures,
+    )
 
     duplicate_graphs = copy.deepcopy(graphs)
     duplicate_graphs.append(
@@ -344,8 +354,9 @@ def main() -> int:
 
     print(
         "Validated M3 timeline/filter navigation: deterministic facet counts, typed bilingual entity facets, "
-        "chronological Event navigation with supporting Evidence, duplicate-event context merging, "
-        "fail-closed material/citation/provenance conflicts, explicit unknown dates, and no inferred current state."
+        "chronological Event navigation preserving supports/contradicts/contextualizes Evidence, "
+        "duplicate-event context merging, fail-closed material/citation/provenance conflicts, "
+        "explicit unknown dates, and no inferred current state."
     )
     return 0
 
