@@ -93,7 +93,7 @@
         map.fitBounds(bounds, { padding: 48, duration: 0 });
       }
 
-      requestAnimationFrame(() => {
+      map.once('idle', () => {
         window.__SDA_MAP_RESULT__ = {
           rendererContract: payload.renderer_contract,
           featureCount: payload.geojson.features.length,
