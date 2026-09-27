@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
 
 const ROOT = fileURLToPath(new URL('.', import.meta.url));
+const EXPECTED_MAPLIBRE_VERSION = '6.11.2';
 const MIME = new Map([
   ['.html', 'text/html; charset=utf-8'],
   ['.js', 'text/javascript; charset=utf-8'],
@@ -27,6 +28,14 @@ function safePath(urlPath) {
   assert(resolved.startsWith(normalize(ROOT)), 'path escaped trial root');
   return resolved;
 }
+
+const maplibrePackage = JSON.parse(
+  await readFile(join(ROOT, 'node_modules/maplibre-gl/package.json'), 'utf8')
+);
+assert(
+  maplibrePackage.version === EXPECTED_MAPLIBRE_VERSION,
+  `MapLibre version mismatch: expected ${EXPECTED_MAPLIBRE_VERSION}, got ${maplibrePackage.version}`
+);
 
 const server = createServer(async (request, response) => {
   try {
@@ -84,7 +93,10 @@ try {
     fallbackItems: [...document.querySelectorAll('#fallback li')].map((node) => ({
       featureId: node.dataset.featureId,
       text: node.textContent,
-      citationCount: Number(node.querySelector('span')?.dataset.citationCount || '0')
+      citationCount: Number(node.querySelector('.citations')?.dataset.citationCount || '0'),
+      evidenceIds: [...node.querySelectorAll('.citations a')].map((anchor) => anchor.dataset.evidenceId),
+      documentIds: [...node.querySelectorAll('.citations a')].map((anchor) => anchor.dataset.documentId),
+      sourceIds: [...node.querySelectorAll('.citations a')].map((anchor) => anchor.dataset.sourceId)
     }))
   }));
 
@@ -99,6 +111,9 @@ try {
   assert(result.bodyText.includes('منشأة تدريب تجريبية'), 'Arabic facility label missing from semantic fallback');
   assert(result.bodyText.includes('Trial Training Facility'), 'English facility label missing from semantic fallback');
   assert(result.fallbackItems[0]?.citationCount >= 1, 'semantic fallback lost supporting citation count');
+  assert(result.fallbackItems[0]?.evidenceIds.includes('SDA-EVID-TRIAL-MAP'), 'Evidence identity missing from fallback');
+  assert(result.fallbackItems[0]?.documentIds.includes('SDA-DOC-TRIAL-MAP'), 'Document identity missing from fallback');
+  assert(result.fallbackItems[0]?.sourceIds.includes('SDA-SOURCE-TRIAL-MAP'), 'Source identity missing from fallback');
   assert(!/\b[QP]\d+\b/.test(result.bodyText), 'backend Q/P identifier leaked into rendered page');
   assert(externalRequests.length === 0, `external network requests detected: ${externalRequests.join(', ')}`);
   assert(consoleErrors.length === 0, `browser console errors: ${consoleErrors.join(' | ')}`);
@@ -106,7 +121,7 @@ try {
 
   const evidence = {
     status: 'PASS',
-    maplibre_version: '6.11.2',
+    maplibre_version: maplibrePackage.version,
     renderer_contract: result.result.rendererContract,
     feature_count: result.result.featureCount,
     rendered_feature_count: result.result.renderedFeatureCount,
@@ -116,7 +131,8 @@ try {
     external_network_request_count: externalRequests.length,
     arabic_label_verified: true,
     english_label_verified: true,
-    supporting_citation_fallback_verified: true,
+    supporting_evidence_identity_verified: true,
+    installed_version_verified: true,
     tile_provider_selected: false,
     geocoder_selected: false
   };
