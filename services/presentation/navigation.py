@@ -24,6 +24,7 @@ _ENTITY_FACET_TYPES = {
     "manufacturer_ids": {"organization"},
     "country_ids": {"country"},
 }
+_EVIDENCE_ROLES = {"supports", "contradicts", "contextualizes"}
 
 
 def _utc(value: str, label: str) -> str:
@@ -160,15 +161,19 @@ def _build_filter_catalog(
     return result
 
 
-def _supporting_citations(value: Any, event_id: str) -> list[dict[str, Any]]:
+def _timeline_citations(value: Any, event_id: str) -> list[dict[str, Any]]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or not value:
         raise ProjectionError(f"timeline event {event_id} requires citations")
     citations: dict[tuple[str, str, str], dict[str, Any]] = {}
+    has_support = False
     for raw in value:
         if not isinstance(raw, Mapping):
             raise ProjectionError(f"timeline event {event_id} citation must be an object")
-        if raw.get("evidence_role") != "supports":
-            continue
+        role = raw.get("evidence_role")
+        if role not in _EVIDENCE_ROLES:
+            raise ProjectionError(f"timeline event {event_id} has invalid Evidence role")
+        if role == "supports":
+            has_support = True
         evidence_id = raw.get("evidence_id")
         document_id = raw.get("document_id")
         source_id = raw.get("source_id")
@@ -180,7 +185,7 @@ def _supporting_citations(value: Any, event_id: str) -> list[dict[str, Any]]:
         key = (evidence_id, document_id, source_id)
         rendered = {
             "evidence_id": evidence_id,
-            "evidence_role": "supports",
+            "evidence_role": role,
             "document_id": document_id,
             "source_id": source_id,
             "url": raw.get("url") if isinstance(raw.get("url"), str) else None,
@@ -191,7 +196,7 @@ def _supporting_citations(value: Any, event_id: str) -> list[dict[str, Any]]:
                 f"timeline event {event_id} has conflicting duplicate citation identity"
             )
         citations[key] = rendered
-    if not citations:
+    if not has_support:
         raise ProjectionError(f"timeline event {event_id} requires supporting Evidence")
     return [citations[key] for key in sorted(citations)]
 
@@ -292,7 +297,7 @@ def _build_timeline(
                     f"timeline event {event_id} is missing from graph provenance record_ids"
                 )
             material = _event_material(raw, event_id)
-            citations = _supporting_citations(raw.get("citations"), event_id)
+            citations = _timeline_citations(raw.get("citations"), event_id)
             existing = events.get(event_id)
             if existing is None:
                 citation_map: dict[tuple[str, str, str], dict[str, Any]] = {}
