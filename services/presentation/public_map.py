@@ -229,15 +229,21 @@ def build_public_map_view(
     sources_by_id = index_by_id(sources, "Source")
     projected = _utc(projected_at, "projected_at")
 
-    # Location predicates are valid only for facility entities. A malformed
-    # subject is a publication error rather than something to silently reinterpret.
+    # Facility-location/association predicates are valid only for facility
+    # subjects. Malformed cross-record semantics fail closed instead of being
+    # silently ignored by the public projection.
     for claim in claims:
-        if claim.get("predicate_id") not in {_LATITUDE, _LONGITUDE, _LOCATION_LABEL}:
+        if claim.get("predicate_id") not in {
+            _LATITUDE,
+            _LONGITUDE,
+            _LOCATION_LABEL,
+            _ASSOCIATED_ORG,
+        }:
             continue
         subject_id = claim.get("subject_id")
         subject = entity_by_id.get(subject_id) if isinstance(subject_id, str) else None
         if not isinstance(subject, Mapping) or subject.get("entity_type") != "facility":
-            raise ProjectionError("public facility-location Claim has non-facility subject")
+            raise ProjectionError("public facility Claim has non-facility subject")
 
     features: list[dict[str, Any]] = []
     record_ids: set[str] = set()
