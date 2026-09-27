@@ -91,3 +91,6 @@ jobs:
 
       - name: Validate M3 map renderer payload adapter
         run: python scripts/validate_m3_map_renderer_payload.py
+
+      - name: Validate M3 timeline and filter navigation
+        run: python scripts/validate_m3_navigation.py
