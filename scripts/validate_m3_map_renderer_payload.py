@@ -102,6 +102,11 @@ def main() -> int:
         "supporting Evidence missing from fallback",
         failures,
     )
+    expect(
+        len(baseline["fallback_items"][0]["coordinate_claim_ids"]) == 2,
+        "coordinate Claim provenance missing from fallback",
+        failures,
+    )
 
     reordered = view()
     reordered["features"] = list(reversed(reordered["features"]))
@@ -131,6 +136,22 @@ def main() -> int:
     restricted["features"][0]["category"] = "air_defense_site"
     expect_raises("restricted category", lambda: build_map_renderer_payload(restricted), failures)
 
+    malformed_org = view()
+    malformed_org["features"][0]["associated_organization_ids"] = ["SDA-ORG-TEST", 123]
+    expect_raises("malformed organization ID", lambda: build_map_renderer_payload(malformed_org), failures)
+
+    duplicate_org = view()
+    duplicate_org["features"][0]["associated_organization_ids"] = ["SDA-ORG-TEST", "SDA-ORG-TEST"]
+    expect_raises("duplicate organization ID", lambda: build_map_renderer_payload(duplicate_org), failures)
+
+    missing_coordinate_claim = view()
+    missing_coordinate_claim["features"][0]["coordinate_claim_ids"] = ["SDA-CLAIM-ONLY-ONE"]
+    expect_raises(
+        "missing coordinate Claim provenance",
+        lambda: build_map_renderer_payload(missing_coordinate_claim),
+        failures,
+    )
+
     if failures:
         print("M3 map renderer payload validation FAILED:")
         for failure in failures:
@@ -139,7 +160,8 @@ def main() -> int:
 
     print(
         "Validated deterministic PublicMapView -> GeoJSON/fallback adaptation: public scope only, "
-        "2dp coordinates, supporting Evidence, deterministic order, bilingual fallback, and no backend-ID leakage."
+        "2dp coordinates, exact coordinate-Claim provenance, supporting Evidence, strict association IDs, "
+        "deterministic order, bilingual fallback, and no backend-ID leakage."
     )
     return 0
 
