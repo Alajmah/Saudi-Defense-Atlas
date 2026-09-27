@@ -19,6 +19,11 @@ _BACKEND_ID_RE = re.compile(r"(?<![A-Za-z0-9_-])[QP]\d+(?![A-Za-z0-9_-])")
 _ENTITY_FACETS = ("service_ids", "manufacturer_ids", "country_ids")
 _STRING_FACETS = ("equipment_classes", "status_values")
 _REQUIRED_FACETS = (*_ENTITY_FACETS, *_STRING_FACETS)
+_ENTITY_FACET_TYPES = {
+    "service_ids": {"organization", "military_unit"},
+    "manufacturer_ids": {"organization"},
+    "country_ids": {"country"},
+}
 
 
 def _utc(value: str, label: str) -> str:
@@ -124,11 +129,16 @@ def _build_filter_catalog(
 
     for facet in _ENTITY_FACETS:
         options: list[dict[str, Any]] = []
+        allowed_types = _ENTITY_FACET_TYPES[facet]
         for entity_id in sorted(facet_counts[facet]):
             target = indexed.get(entity_id)
             if target is None:
                 raise ProjectionError(
                     f"filter facet {facet} references missing SearchDocument {entity_id}"
+                )
+            if target.get("entity_type") not in allowed_types:
+                raise ProjectionError(
+                    f"filter facet {facet} target {entity_id} has incompatible entity_type"
                 )
             options.append(
                 {
@@ -168,13 +178,19 @@ def _supporting_citations(value: Any, event_id: str) -> list[dict[str, Any]]:
         ):
             raise ProjectionError(f"timeline event {event_id} citation identity is incomplete")
         key = (evidence_id, document_id, source_id)
-        citations[key] = {
+        rendered = {
             "evidence_id": evidence_id,
             "evidence_role": "supports",
             "document_id": document_id,
             "source_id": source_id,
             "url": raw.get("url") if isinstance(raw.get("url"), str) else None,
         }
+        existing = citations.get(key)
+        if existing is not None and existing != rendered:
+            raise ProjectionError(
+                f"timeline event {event_id} has conflicting duplicate citation identity"
+            )
+        citations[key] = rendered
     if not citations:
         raise ProjectionError(f"timeline event {event_id} requires supporting Evidence")
     return [citations[key] for key in sorted(citations)]
@@ -211,6 +227,20 @@ def _event_material(raw: Mapping[str, Any], event_id: str) -> dict[str, Any]:
     }
 
 
+def _merge_citation(
+    citations: dict[tuple[str, str, str], dict[str, Any]],
+    item: dict[str, Any],
+    event_id: str,
+) -> None:
+    key = (item["evidence_id"], item["document_id"], item["source_id"])
+    existing = citations.get(key)
+    if existing is not None and existing != item:
+        raise ProjectionError(
+            f"timeline event {event_id} citation conflicts across public graph projections"
+        )
+    citations[key] = item
+
+
 def _build_timeline(
     relationship_graphs: Sequence[Mapping[str, Any]],
 ) -> tuple[list[dict[str, Any]], set[str], set[str]]:
@@ -240,9 +270,10 @@ def _build_timeline(
         provenance = graph.get("provenance")
         if not isinstance(provenance, Mapping):
             raise ProjectionError("RelationshipGraphView requires provenance")
-        graph_record_ids.update(
-            _string_array(provenance.get("record_ids"), "graph provenance record_ids")
+        graph_records = _string_array(
+            provenance.get("record_ids"), "graph provenance record_ids"
         )
+        graph_record_ids.update(graph_records)
         revision_ids.update(
             _string_array(provenance.get("revision_ids"), "graph provenance revision_ids")
         )
@@ -256,18 +287,22 @@ def _build_timeline(
             event_id = raw.get("event_id")
             if not isinstance(event_id, str) or not event_id:
                 raise ProjectionError("timeline item requires event_id")
+            if event_id not in graph_records:
+                raise ProjectionError(
+                    f"timeline event {event_id} is missing from graph provenance record_ids"
+                )
             material = _event_material(raw, event_id)
             citations = _supporting_citations(raw.get("citations"), event_id)
             existing = events.get(event_id)
             if existing is None:
+                citation_map: dict[tuple[str, str, str], dict[str, Any]] = {}
+                for item in citations:
+                    _merge_citation(citation_map, item, event_id)
                 events[event_id] = {
                     **material,
                     "domains": set(domains),
                     "root_entity_ids": set(roots),
-                    "citations": {
-                        (item["evidence_id"], item["document_id"], item["source_id"]): item
-                        for item in citations
-                    },
+                    "citations": citation_map,
                 }
                 continue
             for field in ("event_type", "names", "occurred_at", "ended_at", "confidence"):
@@ -278,9 +313,7 @@ def _build_timeline(
             existing["domains"].update(domains)
             existing["root_entity_ids"].update(roots)
             for item in citations:
-                existing["citations"][
-                    (item["evidence_id"], item["document_id"], item["source_id"])
-                ] = item
+                _merge_citation(existing["citations"], item, event_id)
 
     rendered: list[dict[str, Any]] = []
     for event_id, item in events.items():
