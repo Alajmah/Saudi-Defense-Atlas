@@ -80,7 +80,7 @@
       "required": ["evidence_id", "evidence_role", "document_id", "source_id"],
       "properties": {
         "evidence_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
-        "evidence_role": { "const": "supports" },
+        "evidence_role": { "type": "string", "enum": ["supports", "contradicts", "contextualizes"] },
         "document_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
         "source_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
         "url": { "type": ["string", "null"], "format": "uri" }
