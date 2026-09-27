@@ -1,0 +1,11 @@
+{
+  "name": "sda-maplibre-trial",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "maplibre-gl": "6.11.2"
+  },
+  "devDependencies": {
+    "playwright": "1.62.0"
+  }
+}

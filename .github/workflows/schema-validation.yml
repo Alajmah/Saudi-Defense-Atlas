@@ -88,3 +88,6 @@ jobs:
 
       - name: Validate M3 public map cross-record isolation
         run: python scripts/validate_m3_public_map_isolation.py
+
+      - name: Validate M3 map renderer payload adapter
+        run: python scripts/validate_m3_map_renderer_payload.py
