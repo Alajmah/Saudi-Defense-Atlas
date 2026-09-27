@@ -233,8 +233,6 @@ def main() -> int:
     expect(all("current_state" not in item and "status" not in item for item in view["timeline"]), "timeline inferred current state", failures)
     expect(all(any(citation["evidence_role"] == "supports" for citation in item["citations"]) for item in view["timeline"]), "timeline supporting Evidence missing", failures)
 
-    # Same Event appearing in another public graph may broaden navigation context,
-    # but it must not create a duplicate timeline event.
     duplicate_graphs = copy.deepcopy(graphs)
     duplicate_graphs.append(
         graph(
@@ -265,6 +263,18 @@ def main() -> int:
         failures,
     )
 
+    conflicting_citation = copy.deepcopy(duplicate_graphs)
+    conflicting_citation[-1]["timeline"][0]["citations"][0]["url"] = "https://example.invalid/different"
+    expect_raises(
+        "conflicting duplicate citation identity",
+        lambda: build_navigation_view(
+            search_documents=documents,
+            relationship_graphs=conflicting_citation,
+            projected_at="2026-09-27T00:00:00Z",
+        ),
+        failures,
+    )
+
     unresolved = copy.deepcopy(documents)
     unresolved[0]["facets"]["manufacturer_ids"] = ["SDA-ORG-MISSING"]
     expect_raises(
@@ -272,6 +282,31 @@ def main() -> int:
         lambda: build_navigation_view(
             search_documents=unresolved,
             relationship_graphs=graphs,
+            projected_at="2026-09-27T00:00:00Z",
+        ),
+        failures,
+    )
+
+    mistyped_country = copy.deepcopy(documents)
+    next(item for item in mistyped_country if item["id"] == "SDA-COUNTRY-SA")["entity_type"] = "organization"
+    expect_raises(
+        "country facet target with wrong entity type",
+        lambda: build_navigation_view(
+            search_documents=mistyped_country,
+            relationship_graphs=graphs,
+            projected_at="2026-09-27T00:00:00Z",
+        ),
+        failures,
+    )
+
+    missing_event_provenance = copy.deepcopy(graphs)
+    event_id = missing_event_provenance[0]["timeline"][0]["event_id"]
+    missing_event_provenance[0]["provenance"]["record_ids"].remove(event_id)
+    expect_raises(
+        "timeline Event absent from graph provenance",
+        lambda: build_navigation_view(
+            search_documents=documents,
+            relationship_graphs=missing_event_provenance,
             projected_at="2026-09-27T00:00:00Z",
         ),
         failures,
@@ -308,9 +343,9 @@ def main() -> int:
         return 1
 
     print(
-        "Validated M3 timeline/filter navigation: deterministic facet counts, bilingual entity facets, "
+        "Validated M3 timeline/filter navigation: deterministic facet counts, typed bilingual entity facets, "
         "chronological Event navigation with supporting Evidence, duplicate-event context merging, "
-        "fail-closed conflicts/references, explicit unknown dates, and no inferred current state."
+        "fail-closed material/citation/provenance conflicts, explicit unknown dates, and no inferred current state."
     )
     return 0
 
