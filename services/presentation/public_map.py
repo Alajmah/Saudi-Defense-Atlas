@@ -59,8 +59,12 @@ def _coarsen(value: float) -> float:
     return float(Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
 
 
-def _active_location_claims(
-    claims: Sequence[Mapping[str, Any]], entity_id: str, predicate: str
+def _eligible_claims(
+    claims: Sequence[Mapping[str, Any]],
+    entity_id: str,
+    predicate: str,
+    *,
+    fail_on_disputed: bool,
 ) -> list[Mapping[str, Any]]:
     result: list[Mapping[str, Any]] = []
     for claim in claims:
@@ -68,9 +72,13 @@ def _active_location_claims(
             continue
         state = claim.get("claim_state")
         if state == "disputed":
-            raise ProjectionError(
-                f"facility {entity_id} has disputed public-location Claim {claim.get('id')}"
-            )
+            if fail_on_disputed:
+                raise ProjectionError(
+                    f"facility {entity_id} has disputed public-location Claim {claim.get('id')}"
+                )
+            # Optional metadata cannot make an otherwise safe fixed-facility
+            # coordinate feature disappear merely because that metadata is disputed.
+            continue
         if state != "active":
             continue
         if claim.get("confidence") not in _ALLOWED_CONFIDENCE:
@@ -82,7 +90,12 @@ def _active_location_claims(
 def _single_coordinate_claim(
     claims: Sequence[Mapping[str, Any]], entity_id: str, predicate: str
 ) -> Mapping[str, Any] | None:
-    eligible = _active_location_claims(claims, entity_id, predicate)
+    eligible = _eligible_claims(
+        claims,
+        entity_id,
+        predicate,
+        fail_on_disputed=True,
+    )
     if not eligible:
         return None
     if len(eligible) != 1:
@@ -103,7 +116,12 @@ def _localized_location_label(
     labels: dict[str, str] = {}
     citations: list[dict[str, Any]] = []
     claim_ids: list[str] = []
-    for claim in _active_location_claims(claims, entity_id, _LOCATION_LABEL):
+    for claim in _eligible_claims(
+        claims,
+        entity_id,
+        _LOCATION_LABEL,
+        fail_on_disputed=False,
+    ):
         value = claim.get("value")
         if not isinstance(value, Mapping) or value.get("kind") != "string":
             raise ProjectionError("public location label must use string Claim value")
@@ -136,6 +154,7 @@ def _associated_organizations(
     claims: Sequence[Mapping[str, Any]],
     entity_id: str,
     *,
+    entity_by_id: Mapping[str, Mapping[str, Any]],
     evidence_by_id: Mapping[str, Mapping[str, Any]],
     documents_by_id: Mapping[str, Mapping[str, Any]],
     sources_by_id: Mapping[str, Mapping[str, Any]],
@@ -143,13 +162,27 @@ def _associated_organizations(
     organization_ids: set[str] = set()
     citations: list[dict[str, Any]] = []
     claim_ids: list[str] = []
-    for claim in _active_location_claims(claims, entity_id, _ASSOCIATED_ORG):
+    for claim in _eligible_claims(
+        claims,
+        entity_id,
+        _ASSOCIATED_ORG,
+        fail_on_disputed=False,
+    ):
         value = claim.get("value")
         if not isinstance(value, Mapping) or value.get("kind") != "entity":
             raise ProjectionError("facility association must use entity Claim value")
         organization_id = value.get("entity_id")
         if not isinstance(organization_id, str) or not organization_id:
             raise ProjectionError("facility association requires organization ID")
+        organization = entity_by_id.get(organization_id)
+        if (
+            not isinstance(organization, Mapping)
+            or organization.get("entity_type") != "organization"
+            or organization.get("record_status") != "active"
+        ):
+            raise ProjectionError(
+                f"facility association target {organization_id!r} must resolve to an active organization Entity"
+            )
         organization_ids.add(organization_id)
         claim_id = claim.get("id")
         if isinstance(claim_id, str):
@@ -196,7 +229,7 @@ def build_public_map_view(
     sources_by_id = index_by_id(sources, "Source")
     projected = _utc(projected_at, "projected_at")
 
-    # Location predicates are valid only for fixed facility entities. A malformed
+    # Location predicates are valid only for facility entities. A malformed
     # subject is a publication error rather than something to silently reinterpret.
     for claim in claims:
         if claim.get("predicate_id") not in {_LATITUDE, _LONGITUDE, _LOCATION_LABEL}:
@@ -258,6 +291,7 @@ def build_public_map_view(
         organization_ids, org_citations, org_claim_ids = _associated_organizations(
             claims,
             entity_id,
+            entity_by_id=entity_by_id,
             evidence_by_id=evidence_by_id,
             documents_by_id=documents_by_id,
             sources_by_id=sources_by_id,
