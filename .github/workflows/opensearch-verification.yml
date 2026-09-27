@@ -59,8 +59,8 @@ jobs:
           docker logs sda-opensearch-trial || true
           exit 1
 
-      - name: Run M3 OpenSearch contract trial
-        run: python spikes/opensearch/run_trial.py | tee opensearch-trial-evidence.json
+      - name: Run hardened M3 OpenSearch contract trial
+        run: python spikes/opensearch/run_contract_trial.py | tee opensearch-trial-evidence.json
 
       - name: Upload trial evidence
         uses: actions/upload-artifact@v4
@@ -68,6 +68,7 @@ jobs:
           name: m3-opensearch-trial-evidence
           path: opensearch-trial-evidence.json
           if-no-files-found: error
+          retention-days: 90
 
       - name: Dump diagnostics on failure
         if: failure()
