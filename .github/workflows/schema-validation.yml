@@ -85,3 +85,6 @@ jobs:
 
       - name: Validate M3 public non-operational map contract
         run: python scripts/validate_m3_public_map.py
+
+      - name: Validate M3 public map cross-record isolation
+        run: python scripts/validate_m3_public_map_isolation.py
