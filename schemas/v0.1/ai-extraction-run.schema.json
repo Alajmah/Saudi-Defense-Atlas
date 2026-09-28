@@ -116,8 +116,8 @@
         "properties": { "validation": { "properties": { "errors": { "maxItems": 0 } } } },
         "anyOf": [
           { "properties": { "candidates": { "properties": { "entities": { "minItems": 1 } } } } },
-          { "properties": { "candidates": { "properties": { "claims": { "minItems": 1 } } } },
-          { "properties": { "candidates": { "properties": { "events": { "minItems": 1 } } } }
+          { "properties": { "candidates": { "properties": { "claims": { "minItems": 1 } } } } },
+          { "properties": { "candidates": { "properties": { "events": { "minItems": 1 } } } } }
         ]
       }
     },
