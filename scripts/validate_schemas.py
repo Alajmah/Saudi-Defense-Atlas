@@ -16,8 +16,13 @@ FIXTURE_FILE = ROOT / "tests" / "fixtures" / "schema-fixtures.json"
 
 
 def load_json(path: Path) -> dict:
-    with path.open("r", encoding="utf-8") as handle:
-        return json.load(handle)
+    try:
+        with path.open("r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"{path}: invalid JSON at line {exc.lineno}, column {exc.colno}: {exc.msg}"
+        ) from exc
 
 
 def build_registry() -> tuple[dict[str, dict], Registry]:
