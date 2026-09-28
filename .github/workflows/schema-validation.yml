@@ -9,6 +9,7 @@ on:
       - "m1/**"
       - "m2/**"
       - "m3/**"
+      - "m4/**"
 
 permissions:
   contents: read
@@ -94,3 +95,6 @@ jobs:
 
       - name: Validate M3 timeline and filter navigation
         run: python scripts/validate_m3_navigation.py
+
+      - name: Validate M4 deterministic monitoring and editorial routing
+        run: python scripts/validate_m4_editorial_routing.py
