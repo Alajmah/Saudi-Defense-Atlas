@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/editorial-decision-binding.schema.json",
+  "title": "Saudi Defense Atlas Editorial Decision Binding",
+  "description": "Operational audit record binding one human ReviewDecision to the exact M4 editorial review packet and ChangeProposal. It carries no independent approval, mutation, or publication authority.",
+  "type": "object",
+  "required": [
+    "id",
+    "review_packet_id",
+    "review_packet_sha256",
+    "proposal_id",
+    "proposal_sha256",
+    "review_decision_id",
+    "review_decision_sha256",
+    "decision",
+    "decided_at",
+    "decided_by",
+    "bound_at",
+    "authority"
+  ],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "review_packet_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "review_packet_sha256": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    },
+    "proposal_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "proposal_sha256": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    },
+    "review_decision_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "review_decision_sha256": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    },
+    "decision": {
+      "type": "string",
+      "enum": ["approve", "reject", "return_for_revision"]
+    },
+    "decided_at": { "type": "string", "format": "date-time" },
+    "decided_by": { "$ref": "common.schema.json#/$defs/actor" },
+    "bound_at": { "type": "string", "format": "date-time" },
+    "authority": {
+      "type": "object",
+      "required": [
+        "mode",
+        "approval_authority",
+        "canonical_mutation_authority",
+        "publication_authority"
+      ],
+      "properties": {
+        "mode": { "const": "decision_binding_only" },
+        "approval_authority": { "const": false },
+        "canonical_mutation_authority": { "const": false },
+        "publication_authority": { "const": false }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
