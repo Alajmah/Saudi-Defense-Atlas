@@ -78,7 +78,6 @@ def _matched_terms(text: str, terms: Sequence[str]) -> list[str]:
     normalized_text = " ".join(text.casefold().split())
     matched: list[str] = []
     for term in terms:
-        # Unicode word boundaries without relying on ASCII-only tokenization.
         pattern = rf"(?<!\w){re.escape(term)}(?!\w)"
         if re.search(pattern, normalized_text, flags=re.UNICODE):
             matched.append(term)
@@ -100,26 +99,32 @@ def build_monitoring_observation(
     if not isinstance(canonical_text, str):
         raise EditorialRoutingError("canonical_text must be text")
 
+    receipt = ingestion.receipt
     source_id = source.get("id")
     source_class = source.get("source_class")
     if not isinstance(source_id, str) or not source_id:
         raise EditorialRoutingError("Source requires canonical id")
-    if source_id != ingestion.receipt.source_id:
+    if source_id != receipt.source_id:
         raise EditorialRoutingError("Source id does not match RetrievalReceipt source_id")
     if source_class not in {"A", "B", "C", "D", "E"}:
         raise EditorialRoutingError("Source requires valid source_class")
     if source.get("active") is False:
         raise EditorialRoutingError("inactive Source cannot produce monitoring observation")
+    if receipt.status_code != 200:
+        raise EditorialRoutingError("monitoring observation requires successful HTTP receipt")
+    if not isinstance(receipt.document_key, str) or not receipt.document_key:
+        raise EditorialRoutingError("RetrievalReceipt requires registered document_key")
 
     document = ingestion.document
     document_id = document.get("id")
     canonical_sha = document.get("content_sha256")
     if not isinstance(document_id, str) or not document_id:
         raise EditorialRoutingError("IngestionResult Document requires canonical id")
+    if document.get("source_id") != source_id:
+        raise EditorialRoutingError("Document source_id does not match Source/Receipt")
     if not isinstance(canonical_sha, str) or not re.fullmatch(r"[A-Fa-f0-9]{64}", canonical_sha):
         raise EditorialRoutingError("IngestionResult Document requires canonical content SHA-256")
 
-    receipt = ingestion.receipt
     observed_at = _utc(receipt.observed_at, "RetrievalReceipt.observed_at")
     raw_sha = receipt.raw_content_sha256
     if not re.fullmatch(r"[A-Fa-f0-9]{64}", raw_sha):
@@ -140,8 +145,7 @@ def build_monitoring_observation(
     )
 
     relevance_rule_ids = [f"term:{term}" for term in relevant_terms]
-    if priority_terms:
-        relevance_rule_ids.extend(f"priority:{term}" for term in priority_terms)
+    relevance_rule_ids.extend(f"priority:{term}" for term in priority_terms)
 
     return {
         "id": observation_id,
@@ -208,6 +212,19 @@ def _priority(observation: Mapping[str, Any], lane: str) -> str:
     return "high" if observation.get("source_class") in {"A", "B"} else "normal"
 
 
+def _string_array(value: Any, label: str) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise EditorialRoutingError(f"{label} must be an array")
+    rendered: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise EditorialRoutingError(f"{label} contains invalid value")
+        rendered.append(item)
+    if len(rendered) != len(set(rendered)):
+        raise EditorialRoutingError(f"{label} contains duplicates")
+    return rendered
+
+
 def route_observation(
     observation: Mapping[str, Any],
     *,
@@ -224,7 +241,7 @@ def route_observation(
     observation_id = observation.get("id")
     source_id = observation.get("source_id")
     document_id = observation.get("document_id")
-    if not isinstance(dedupe_key, str) or not dedupe_key.startswith("sha256:"):
+    if not isinstance(dedupe_key, str) or not re.fullmatch(r"sha256:[A-Fa-f0-9]{64}", dedupe_key):
         raise EditorialRoutingError("observation requires valid dedupe_key")
     if not all(isinstance(item, str) and item for item in (observation_id, source_id, document_id)):
         raise EditorialRoutingError("observation identity is incomplete")
@@ -249,20 +266,34 @@ def route_observation(
 
     if existing_item.get("dedupe_key") != dedupe_key:
         raise EditorialRoutingError("existing queue item dedupe_key does not match observation")
-    if existing_item.get("state") not in {"queued", "claimed"}:
+    state = existing_item.get("state")
+    if state not in {"queued", "claimed"}:
         raise EditorialRoutingError("completed/dismissed queue item cannot absorb new observation")
     existing_lane = existing_item.get("lane")
     if existing_lane not in {"candidate_extraction", "discovery_review", "restricted_human"}:
         raise EditorialRoutingError("existing queue item lane is invalid")
+    if existing_item.get("canonical_mutation_authority") is not False:
+        raise EditorialRoutingError("editorial queue item must not have canonical mutation authority")
+    if existing_item.get("ai_extraction_allowed") is not (existing_lane == "candidate_extraction"):
+        raise EditorialRoutingError("existing queue item extraction authority is inconsistent with lane")
+
+    existing_observations = _string_array(existing_item.get("observation_ids"), "observation_ids")
+    existing_sources = _string_array(existing_item.get("source_ids"), "source_ids")
+    existing_documents = _string_array(existing_item.get("document_ids"), "document_ids")
+    existing_reasons = _string_array(existing_item.get("reason_codes"), "reason_codes")
 
     merged_lane = lane if _lane_rank(lane) > _lane_rank(existing_lane) else existing_lane
-    observations = sorted(set([*existing_item.get("observation_ids", []), observation_id]))
-    sources = sorted(set([*existing_item.get("source_ids", []), source_id]))
-    documents = sorted(set([*existing_item.get("document_ids", []), document_id]))
-    reasons = set(str(item) for item in existing_item.get("reason_codes", []) if isinstance(item, str))
-    reasons.update(_reason_codes(observation, lane))
+    if state == "claimed" and merged_lane != existing_lane:
+        raise EditorialRoutingError(
+            "claimed queue item cannot change routing lane; coordination/cancellation is required"
+        )
+
+    observations = sorted(set([*existing_observations, observation_id]))
+    sources = sorted(set([*existing_sources, source_id]))
+    documents = sorted(set([*existing_documents, document_id]))
+    reasons = {item for item in existing_reasons if not item.startswith("lane:")}
+    reasons.update(item for item in _reason_codes(observation, lane) if not item.startswith("lane:"))
     reasons.add(f"lane:{merged_lane}")
-    reasons.discard(f"lane:{existing_lane}") if existing_lane != merged_lane else None
 
     item = dict(existing_item)
     item.update(
