@@ -208,8 +208,12 @@ def main() -> int:
     extraction["source_document_ids"] = sorted(queue["document_ids"])
     extraction["started_at"] = "2026-01-02T00:00:30Z"
     extraction["completed_at"] = "2026-01-02T00:01:00Z"
+    document_ids = sorted(queue["document_ids"])
     for index, candidate in enumerate(extraction["candidates"]["evidence"]):
-        candidate["document_id"] = sorted(queue["document_ids"])[index % 2]
+        # Deliberately distribute proposal-bearing Evidence across both source
+        # Documents. A simple odd/even alternation made every material candidate
+        # land on one document because those candidate IDs were all even-numbered.
+        candidate["document_id"] = document_ids[(index // 2) % 2]
 
     validate("ai-extraction-run.schema.json", extraction, failures)
 
@@ -298,6 +302,11 @@ def main() -> int:
         ),
     ]
     evidence = list(backend.records["evidence"].values())
+    expect(
+        {item["document_id"] for item in evidence} == set(queue["document_ids"]),
+        "canonical Evidence lost one of the multi-source Documents",
+        failures,
+    )
     claims = list(backend.records["claim"].values())
     events = list(backend.records["event"].values())
     view = build_equipment_view(
@@ -332,8 +341,8 @@ def main() -> int:
         for citation in event["citations"]
     }
     expect(
-        cited_source_ids.issubset({source_a["id"], source_b["id"]}) and cited_source_ids,
-        "public projection citations escaped the multi-source evidence context",
+        cited_source_ids == {source_a["id"], source_b["id"]},
+        "public projection did not preserve citations from both authoritative sources",
         failures,
     )
     expect(
@@ -354,7 +363,7 @@ def main() -> int:
     print(
         "Validated M4 multi-source editorial vertical slice: two authoritative observations -> deduplicated claimed queue -> "
         "candidate-only extraction -> resolver/verifier -> human review packet -> exact human decision binding -> existing "
-        "canonical mutation guard -> project Revision -> cited EquipmentView, with multi-source provenance preserved and no AI approval authority."
+        "canonical mutation guard -> project Revision -> cited EquipmentView, with both authoritative source provenances preserved and no AI approval authority."
     )
     return 0
 
