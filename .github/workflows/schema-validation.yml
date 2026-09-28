@@ -101,3 +101,6 @@ jobs:
 
       - name: Validate M4 editorial routing isolation
         run: python scripts/validate_m4_editorial_routing_isolation.py
+
+      - name: Validate M4 typed AI extraction boundary
+        run: python scripts/validate_m4_ai_extraction_boundary.py
