@@ -26,6 +26,13 @@ _FINDING_KINDS = {
     "queue_action_required",
 }
 _PRIORITIES = {"high", "normal"}
+_AUTHORITY_KEYS = {
+    "mode",
+    "truth_authority",
+    "approval_authority",
+    "canonical_mutation_authority",
+    "publication_authority",
+}
 _AUDIT_AUTHORITY = {
     "mode": "operational_audit_only",
     "truth_authority": False,
@@ -55,6 +62,12 @@ def _sha256(value: Any) -> str:
 
 def _stable_id(prefix: str, value: Any) -> str:
     return f"{prefix}-{_sha256(value)[:24].upper()}"
+
+
+def _canonical_id(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not value or len(value) > 128:
+        raise EditorialAuditError(f"{label} must be a non-empty canonical ID <= 128 characters")
+    return value
 
 
 def _parse_utc(value: Any, label: str) -> datetime:
@@ -98,6 +111,21 @@ def _string_list(value: Any, label: str) -> list[str]:
     return result
 
 
+def _validate_authority(value: Any, *, mode: str, label: str) -> None:
+    if not isinstance(value, Mapping) or set(value) != _AUTHORITY_KEYS:
+        raise EditorialAuditError(f"{label} authority fields do not match the contract")
+    if value.get("mode") != mode:
+        raise EditorialAuditError(f"{label} authority mode is invalid")
+    for key in (
+        "truth_authority",
+        "approval_authority",
+        "canonical_mutation_authority",
+        "publication_authority",
+    ):
+        if value.get(key) is not False:
+            raise EditorialAuditError(f"{label} {key} must be false")
+
+
 def _finding(
     *,
     kind: str,
@@ -110,11 +138,10 @@ def _finding(
         raise EditorialAuditError("finding kind is invalid")
     if priority not in _PRIORITIES:
         raise EditorialAuditError("finding priority is invalid")
-    if not isinstance(subject_id, str) or not subject_id:
-        raise EditorialAuditError("finding subject_id is required")
+    _canonical_id(subject_id, "finding subject_id")
     reasons = sorted({str(reason) for reason in reason_codes if isinstance(reason, str) and reason})
-    if not reasons:
-        raise EditorialAuditError("finding requires reason codes")
+    if not reasons or any(len(reason) > 128 for reason in reasons):
+        raise EditorialAuditError("finding requires reason codes <= 128 characters")
     body = {
         "kind": kind,
         "priority": priority,
@@ -151,6 +178,13 @@ def build_editorial_audit_report(
     later mutable records.
     """
 
+    if not isinstance(staleness_report, Mapping):
+        raise EditorialAuditError("staleness_report must be an object")
+    if not isinstance(source_freshness_report, Mapping):
+        raise EditorialAuditError("source_freshness_report must be an object")
+    if not isinstance(queue_items, Sequence) or isinstance(queue_items, (str, bytes)):
+        raise EditorialAuditError("queue_items must be an array")
+
     normalized_as_of = _utc(as_of, "as_of")
     for report, label in (
         (staleness_report, "staleness_report"),
@@ -166,16 +200,14 @@ def build_editorial_audit_report(
     findings: list[dict[str, Any]] = []
     seen_claim_ids: set[str] = set()
     for item in _items(staleness_report, "staleness_report"):
-        claim_id = item.get("claim_id")
-        if not isinstance(claim_id, str) or not claim_id:
-            raise EditorialAuditError("staleness item requires claim_id")
+        claim_id = _canonical_id(item.get("claim_id"), "staleness claim_id")
         if claim_id in seen_claim_ids:
             raise EditorialAuditError(f"duplicate Claim staleness item: {claim_id}")
         seen_claim_ids.add(claim_id)
         status = item.get("status")
         state = item.get("claim_state")
         confidence = item.get("confidence")
-        subject_id = item.get("subject_id")
+        subject_id = _canonical_id(item.get("subject_id"), f"Claim {claim_id} subject_id")
         predicate_id = item.get("predicate_id")
         if status not in {"fresh", "due", "unverified"}:
             raise EditorialAuditError(f"Claim {claim_id} has invalid staleness status")
@@ -183,8 +215,6 @@ def build_editorial_audit_report(
             raise EditorialAuditError(f"Claim {claim_id} has invalid visible state")
         if confidence not in {"verified", "high", "medium", "low", "unverified"}:
             raise EditorialAuditError(f"Claim {claim_id} has invalid confidence")
-        if not isinstance(subject_id, str) or not subject_id:
-            raise EditorialAuditError(f"Claim {claim_id} has invalid subject_id")
         if not isinstance(predicate_id, str) or not predicate_id:
             raise EditorialAuditError(f"Claim {claim_id} has invalid predicate_id")
 
@@ -224,12 +254,10 @@ def build_editorial_audit_report(
 
     seen_feeds: set[str] = set()
     for item in _items(source_freshness_report, "source_freshness_report"):
-        source_id = item.get("source_id")
+        source_id = _canonical_id(item.get("source_id"), "source freshness source_id")
         feed_key = item.get("feed_key")
         status = item.get("status")
         source_class = item.get("source_class")
-        if not isinstance(source_id, str) or not source_id:
-            raise EditorialAuditError("source freshness item requires source_id")
         if not isinstance(feed_key, str) or not feed_key:
             raise EditorialAuditError("source freshness item requires feed_key")
         if feed_key in seen_feeds:
@@ -266,9 +294,7 @@ def build_editorial_audit_report(
     for item in queue_items:
         if not isinstance(item, Mapping):
             raise EditorialAuditError("queue_items must contain objects")
-        queue_id = item.get("id")
-        if not isinstance(queue_id, str) or not queue_id:
-            raise EditorialAuditError("queue item requires id")
+        queue_id = _canonical_id(item.get("id"), "queue item id")
         if queue_id in seen_queue_ids:
             raise EditorialAuditError(f"duplicate editorial queue item: {queue_id}")
         seen_queue_ids.add(queue_id)
@@ -297,6 +323,10 @@ def build_editorial_audit_report(
         document_ids = _string_list(item.get("document_ids"), f"queue item {queue_id} document_ids")
         if not source_ids or not document_ids:
             raise EditorialAuditError(f"queue item {queue_id} requires source/document provenance")
+        for source_id in source_ids:
+            _canonical_id(source_id, f"queue item {queue_id} source_id")
+        for document_id in document_ids:
+            _canonical_id(document_id, f"queue item {queue_id} document_id")
         priority = "high" if item_priority == "high" or lane == "restricted_human" else "normal"
         findings.append(
             _finding(
@@ -345,18 +375,17 @@ def build_editorial_audit_report(
 
 
 def _validate_audit_report_integrity(audit_report: Mapping[str, Any]) -> tuple[str, list[Mapping[str, Any]]]:
-    if set(audit_report) != _AUDIT_REPORT_KEYS:
+    if not isinstance(audit_report, Mapping) or set(audit_report) != _AUDIT_REPORT_KEYS:
         raise EditorialAuditError("audit report fields do not match the contract")
 
-    report_id = audit_report.get("id")
-    if not isinstance(report_id, str) or not report_id:
-        raise EditorialAuditError("audit report requires id")
+    report_id = _canonical_id(audit_report.get("id"), "audit report id")
     _utc(audit_report.get("as_of"), "audit report as_of")
     input_sha256 = audit_report.get("input_sha256")
     if not isinstance(input_sha256, str) or not _SHA256_RE.fullmatch(input_sha256):
         raise EditorialAuditError("audit report input_sha256 is invalid")
-    if audit_report.get("authority") != _AUDIT_AUTHORITY:
-        raise EditorialAuditError("audit report authority boundary is invalid")
+    _validate_authority(
+        audit_report.get("authority"), mode="operational_audit_only", label="audit report"
+    )
 
     findings_raw = audit_report.get("findings")
     summary = audit_report.get("summary")
@@ -372,20 +401,18 @@ def _validate_audit_report_integrity(audit_report: Mapping[str, Any]) -> tuple[s
             raise EditorialAuditError("audit findings must contain objects")
         if set(finding) != _FINDING_KEYS:
             raise EditorialAuditError("audit finding fields do not match the contract")
-        finding_id = finding.get("id")
-        if not isinstance(finding_id, str) or not finding_id or finding_id in seen_ids:
+        finding_id = _canonical_id(finding.get("id"), "audit finding id")
+        if finding_id in seen_ids:
             raise EditorialAuditError("audit findings require unique IDs")
         seen_ids.add(finding_id)
         if finding.get("kind") not in _FINDING_KINDS:
             raise EditorialAuditError("audit finding kind is invalid")
         if finding.get("priority") not in _PRIORITIES:
             raise EditorialAuditError("audit finding priority is invalid")
-        subject_id = finding.get("subject_id")
-        if not isinstance(subject_id, str) or not subject_id:
-            raise EditorialAuditError("audit finding subject_id is invalid")
+        _canonical_id(finding.get("subject_id"), "audit finding subject_id")
         reasons = _string_list(finding.get("reason_codes"), "audit finding reason_codes")
-        if not reasons:
-            raise EditorialAuditError("audit finding requires reason_codes")
+        if not reasons or any(len(reason) > 128 for reason in reasons):
+            raise EditorialAuditError("audit finding requires reason_codes <= 128 characters")
         context = finding.get("context")
         if not isinstance(context, Mapping):
             raise EditorialAuditError("audit finding context must be an object")
@@ -395,6 +422,10 @@ def _validate_audit_report_integrity(audit_report: Mapping[str, Any]) -> tuple[s
         findings.append(finding)
 
     expected_summary = _summary(findings)
+    if set(summary) != set(expected_summary):
+        raise EditorialAuditError("audit report summary fields do not match findings")
+    if any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in summary.values()):
+        raise EditorialAuditError("audit report summary values must be non-negative integers")
     if dict(summary) != expected_summary:
         raise EditorialAuditError("audit report summary does not match findings")
 
