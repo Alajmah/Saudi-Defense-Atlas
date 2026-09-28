@@ -75,3 +75,68 @@ The first pass independently examined:
 **Areas requiring deeper verification after remediation:** multi-feed source action identity, semantic fail-closed brief validation, and explicit queue snapshot / `as_of` alignment.
 
 This baseline is intentionally frozen before any second-review or remediation pass.
+
+---
+
+# Remediation and Review Reconciliation
+
+The frozen first-pass baseline above was not rewritten after remediation or second review.
+
+## M4-AUD-F01 — CONFIRMED / FIXED
+
+The daily brief now retains the full bounded finding `context` in each action reference. A regression uses two `never_retrieved` feeds owned by the same authoritative Source and proves both distinct `feed_key` values survive into the editor-facing `source_monitoring` section.
+
+**Result:** feed-level acquisition actions remain actionable without changing the Source-level subject identity or creating a second source/feed truth model.
+
+## M4-AUD-F02 — CONFIRMED / FIXED
+
+The brief boundary now performs semantic validation in addition to content-address integrity. It validates exact field sets, date-time syntax, SHA-256 syntax, finding kind/priority, canonical-ID bounds, reason-code bounds, context shape, summary keys/counts/types, and type-strict zero-authority flags before rendering.
+
+Adversarial regressions cover:
+
+- changed content without re-hashing;
+- a re-hashed but empty `subject_id`;
+- a re-hashed 129-character `subject_id`;
+- a re-hashed 129-character reason code;
+- a re-hashed numeric `0` substituted for JSON boolean `false` in an authority field;
+- summary tampering.
+
+**Result:** content identity and semantic validity are no longer conflated. A self-consistent malformed report fails closed before a brief is emitted.
+
+## M4-AUD-F03 — CONFIRMED / FIXED WITH BOUNDED CLAIM CEILING
+
+`build_editorial_audit_report` now requires an explicit `queue_snapshot_as_of`, normalizes it to UTC, and requires exact alignment with the staleness report, source-freshness report, and audit `as_of`. The snapshot timestamp is included in the exact audit input digest.
+
+This deliberately does **not** add queue event sourcing or historical reconstruction. The qualified contract is only:
+
+> a contemporaneously captured current queue snapshot may participate in an audit at the same `as_of` boundary.
+
+It does not establish that current mutable queue records can reconstruct historical queue state, and it does not qualify queue transition history.
+
+## Codex independent second review
+
+Codex was invoked only after the first-pass baseline was frozen. Its review of remediation head `51f16cfcae` reported one P2 issue: the semantic brief validator still needed to enforce the JSON Schema's 128-character bounds for `subject_id` and reason codes.
+
+### Reconciliation
+
+**CODEX CLAIM:** a self-consistent re-hashed report with an overlong subject ID or reason code could pass the semantic boundary and cause the generated brief to fail its own JSON Schema.
+
+**OUR VERIFICATION:** confirmed independently during the post-remediation adversarial pass. The same review pass also identified a Python-specific type-strictness risk where `0 == False` and `True == 1` can make ordinary equality insufficient for JSON boolean/integer semantics.
+
+**RESULT:** CONFIRMED and remediated. Canonical IDs and reason codes now enforce the same 128-character ceiling as the schemas, authority flags are checked with identity semantics (`is False`), summary values reject booleans masquerading as integers, and dedicated regressions cover these cases.
+
+**Provenance:** M4-AUD-F01/F02/F03 were independently discovered in our first pass. The schema-bound subcase of F02 was independently identified during our remediation/adversarial pass and then corroborated by Codex.
+
+## Final bounded assessment
+
+No architectural scope was expanded while closing these findings. This increment still:
+
+- emits operational/editorial attention only;
+- carries no truth, approval, canonical-mutation, or publication authority;
+- performs no canonical writes;
+- uses no LLM or model judgment;
+- selects no scheduler, alerting channel, dashboard framework, orchestrator, or second truth store;
+- does not reconstruct historical queue state;
+- does not qualify autonomous remediation.
+
+Merge remains contingent on exact-head schema-validation and Wikibase regression success and a final independent review of the final head.
