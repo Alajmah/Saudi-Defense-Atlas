@@ -61,6 +61,14 @@ def _stable_id(prefix: str, value: Any) -> str:
     return f"{prefix}-{digest[:24].upper()}"
 
 
+def _rehash_report(report: dict[str, Any]) -> None:
+    for finding in report["findings"]:
+        finding_body = {key: value for key, value in finding.items() if key != "id"}
+        finding["id"] = _stable_id("SDA-AUDIT-FINDING", finding_body)
+    report_body = {key: value for key, value in report.items() if key != "id"}
+    report["id"] = _stable_id("SDA-EDITORIAL-AUDIT", report_body)
+
+
 def claim(
     claim_id: str,
     *,
@@ -347,12 +355,7 @@ def main() -> int:
 
     numeric_false_authority = copy.deepcopy(report)
     numeric_false_authority["authority"]["truth_authority"] = 0
-    numeric_false_body = {
-        key: value for key, value in numeric_false_authority.items() if key != "id"
-    }
-    numeric_false_authority["id"] = _stable_id(
-        "SDA-EDITORIAL-AUDIT", numeric_false_body
-    )
+    _rehash_report(numeric_false_authority)
     expect_raises(
         "self-consistent numeric false authority",
         lambda: build_daily_editorial_brief(audit_report=numeric_false_authority),
@@ -376,15 +379,29 @@ def main() -> int:
     )
 
     self_consistent_invalid = copy.deepcopy(report)
-    invalid_finding = self_consistent_invalid["findings"][0]
-    invalid_finding["subject_id"] = ""
-    finding_body = {key: value for key, value in invalid_finding.items() if key != "id"}
-    invalid_finding["id"] = _stable_id("SDA-AUDIT-FINDING", finding_body)
-    report_body = {key: value for key, value in self_consistent_invalid.items() if key != "id"}
-    self_consistent_invalid["id"] = _stable_id("SDA-EDITORIAL-AUDIT", report_body)
+    self_consistent_invalid["findings"][0]["subject_id"] = ""
+    _rehash_report(self_consistent_invalid)
     expect_raises(
         "self-consistent invalid audit finding semantics",
         lambda: build_daily_editorial_brief(audit_report=self_consistent_invalid),
+        failures,
+    )
+
+    overlong_subject = copy.deepcopy(report)
+    overlong_subject["findings"][0]["subject_id"] = "S" * 129
+    _rehash_report(overlong_subject)
+    expect_raises(
+        "self-consistent overlong audit subject_id",
+        lambda: build_daily_editorial_brief(audit_report=overlong_subject),
+        failures,
+    )
+
+    overlong_reason = copy.deepcopy(report)
+    overlong_reason["findings"][0]["reason_codes"] = ["R" * 129]
+    _rehash_report(overlong_reason)
+    expect_raises(
+        "self-consistent overlong audit reason code",
+        lambda: build_daily_editorial_brief(audit_report=overlong_reason),
         failures,
     )
 
@@ -396,7 +413,7 @@ def main() -> int:
 
     print(
         "Validated M4 deterministic editorial audit + daily brief: aligned staleness/acquisition/current-queue snapshot inputs, "
-        "action-only findings, deterministic priority/grouping, completed-item suppression, multi-feed action identity, type-strict semantic/content integrity, and zero truth/approval/mutation authority."
+        "action-only findings, deterministic priority/grouping, completed-item suppression, multi-feed action identity, type-strict/schema-bounded semantic and content integrity, and zero truth/approval/mutation authority."
     )
     return 0
 
