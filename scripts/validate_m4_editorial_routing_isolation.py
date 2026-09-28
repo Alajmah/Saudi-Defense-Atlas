@@ -40,19 +40,6 @@ def source() -> dict[str, Any]:
 
 
 def ingestion(*, document_source_id: str = "SDA-SOURCE-A", status_code: int = 200) -> IngestionResult:
-    receipt = RetrievalReceipt(
-        source_id="SDA-SOURCE-A",
-        document_key="feed:test",
-        observed_at="2026-09-28T00:00:00Z",
-        requested_url="https://example.invalid/item",
-        retrieved_url="https://example.invalid/item",
-        status_code=status_code,
-        media_type="text/html",
-        raw_content_sha256="1" * 64,
-        raw_content_length_bytes=100,
-        etag=None,
-        last_modified=None,
-    )
     return IngestionResult(
         status="new",
         document={
@@ -60,15 +47,29 @@ def ingestion(*, document_source_id: str = "SDA-SOURCE-A", status_code: int = 20
             "source_id": document_source_id,
             "content_sha256": "2" * 64,
         },
-        receipt=receipt,
+        receipt=RetrievalReceipt(
+            source_id="SDA-SOURCE-A",
+            document_key="feed:test",
+            observed_at="2026-09-28T00:00:00Z",
+            requested_url="https://example.invalid/item",
+            retrieved_url="https://example.invalid/item",
+            status_code=status_code,
+            media_type="text/html",
+            raw_content_sha256="1" * 64,
+            raw_content_length_bytes=100,
+            etag=None,
+            last_modified=None,
+        ),
     )
 
 
 def main() -> int:
     failures: list[str] = []
     policy = RoutingPolicy(
+        policy_id="M4-ROUTING-v0.1",
         relevance_terms=("exercise",),
         restricted_terms=("live unit movement",),
+        ai_extraction_feed_keys=("SDA-SOURCE-A|feed:test",),
     )
 
     expect_raises(
@@ -88,6 +89,21 @@ def main() -> int:
             source=source(),
             canonical_text="exercise",
             policy=policy,
+        ),
+        failures,
+    )
+    expect_raises(
+        "missing restricted policy",
+        lambda: build_monitoring_observation(
+            ingestion=ingestion(),
+            source=source(),
+            canonical_text="exercise",
+            policy=RoutingPolicy(
+                policy_id="BAD-POLICY",
+                relevance_terms=("exercise",),
+                restricted_terms=(),
+                ai_extraction_feed_keys=("SDA-SOURCE-A|feed:test",),
+            ),
         ),
         failures,
     )
@@ -148,7 +164,7 @@ def main() -> int:
         return 1
 
     print(
-        "Validated M4 routing isolation: cross-record source integrity, successful receipt requirement, "
+        "Validated M4 routing isolation: cross-record source integrity, successful receipt requirement, explicit RED policy, "
         "queue authority invariants, and claimed-item escalation all fail closed."
     )
     return 0
