@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/editorial-audit-report.schema.json",
+  "title": "Saudi Defense Atlas Editorial Audit Report",
+  "description": "Operational deterministic audit over accepted staleness, acquisition-freshness, and editorial-queue signals. Findings request editorial attention; they do not alter canonical truth.",
+  "type": "object",
+  "required": ["id", "as_of", "input_sha256", "summary", "findings", "authority"],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "as_of": { "type": "string", "format": "date-time" },
+    "input_sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+    "summary": {
+      "type": "object",
+      "required": ["total", "high", "normal", "claim_review_required", "source_monitoring_required", "queue_action_required"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "high": { "type": "integer", "minimum": 0 },
+        "normal": { "type": "integer", "minimum": 0 },
+        "claim_review_required": { "type": "integer", "minimum": 0 },
+        "source_monitoring_required": { "type": "integer", "minimum": 0 },
+        "queue_action_required": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "priority", "subject_id", "reason_codes", "context"],
+        "properties": {
+          "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "kind": {
+            "type": "string",
+            "enum": ["claim_review_required", "source_monitoring_required", "queue_action_required"]
+          },
+          "priority": { "type": "string", "enum": ["high", "normal"] },
+          "subject_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "reason_codes": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+          },
+          "context": { "type": "object" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "authority": {
+      "type": "object",
+      "required": ["mode", "truth_authority", "approval_authority", "canonical_mutation_authority", "publication_authority"],
+      "properties": {
+        "mode": { "const": "operational_audit_only" },
+        "truth_authority": { "const": false },
+        "approval_authority": { "const": false },
+        "canonical_mutation_authority": { "const": false },
+        "publication_authority": { "const": false }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
