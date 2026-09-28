@@ -79,6 +79,79 @@ def _assessment_ids(
     return sorted(set(result))
 
 
+def _candidate_ids(
+    extraction_run: Mapping[str, Any], *, kind: str, label: str
+) -> set[str]:
+    candidates = extraction_run.get("candidates")
+    if not isinstance(candidates, Mapping):
+        raise EditorialReviewPacketError("extraction run requires candidates")
+    records = candidates.get(kind)
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        raise EditorialReviewPacketError(f"extraction {label} candidates must be an array")
+    result: set[str] = set()
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise EditorialReviewPacketError(f"extraction {label} candidate must be an object")
+        candidate_id = record.get("candidate_id")
+        if not isinstance(candidate_id, str) or not candidate_id:
+            raise EditorialReviewPacketError(f"extraction {label} candidate requires ID")
+        if candidate_id in result:
+            raise EditorialReviewPacketError(
+                f"duplicate extraction {label} candidate ID {candidate_id}"
+            )
+        result.add(candidate_id)
+    return result
+
+
+def _assessment_candidate_ids(records: Any, *, id_field: str, label: str) -> set[str]:
+    if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
+        raise EditorialReviewPacketError(f"{label} assessments must be an array")
+    result: set[str] = set()
+    for record in records:
+        if not isinstance(record, Mapping):
+            raise EditorialReviewPacketError(f"{label} assessment must be an object")
+        candidate_id = record.get(id_field)
+        if not isinstance(candidate_id, str) or not candidate_id:
+            raise EditorialReviewPacketError(f"{label} assessment requires candidate ID")
+        if candidate_id in result:
+            raise EditorialReviewPacketError(
+                f"duplicate {label} assessment for candidate {candidate_id}"
+            )
+        result.add(candidate_id)
+    return result
+
+
+def _require_complete_assessments(
+    extraction_run: Mapping[str, Any], resolution_run: Mapping[str, Any]
+) -> tuple[Any, Any]:
+    claims = resolution_run.get("claim_assessments")
+    events = resolution_run.get("event_assessments")
+
+    expected_claims = _candidate_ids(extraction_run, kind="claims", label="Claim")
+    assessed_claims = _assessment_candidate_ids(
+        claims, id_field="candidate_claim_id", label="Claim"
+    )
+    if assessed_claims != expected_claims:
+        missing = sorted(expected_claims - assessed_claims)
+        extra = sorted(assessed_claims - expected_claims)
+        raise EditorialReviewPacketError(
+            f"Claim assessments must cover extraction candidates exactly; missing={missing}, extra={extra}"
+        )
+
+    expected_events = _candidate_ids(extraction_run, kind="events", label="Event")
+    assessed_events = _assessment_candidate_ids(
+        events, id_field="candidate_event_id", label="Event"
+    )
+    if assessed_events != expected_events:
+        missing = sorted(expected_events - assessed_events)
+        extra = sorted(assessed_events - expected_events)
+        raise EditorialReviewPacketError(
+            f"Event assessments must cover extraction candidates exactly; missing={missing}, extra={extra}"
+        )
+
+    return claims, events
+
+
 def _require_authority(resolution_run: Mapping[str, Any]) -> None:
     authority = resolution_run.get("authority")
     expected = {
@@ -116,8 +189,8 @@ def build_editorial_review_packet(
 
     if queue_item.get("lane") != "candidate_extraction":
         raise EditorialReviewPacketError("review packet requires candidate_extraction queue lane")
-    if queue_item.get("state") not in {"queued", "claimed"}:
-        raise EditorialReviewPacketError("review packet requires an active queue item")
+    if queue_item.get("state") != "claimed":
+        raise EditorialReviewPacketError("review packet requires a claimed queue item")
     if queue_item.get("ai_extraction_allowed") is not True:
         raise EditorialReviewPacketError("queue item does not authorize candidate extraction")
     if queue_item.get("canonical_mutation_authority") is not False:
@@ -214,8 +287,7 @@ def build_editorial_review_packet(
     if not factual_evidence_refs.issubset(evidence_ids):
         raise EditorialReviewPacketError("factual mutation references Evidence outside exact proposal")
 
-    claims = resolution_run.get("claim_assessments", [])
-    events = resolution_run.get("event_assessments", [])
+    claims, events = _require_complete_assessments(extraction_run, resolution_run)
     summary = {
         "new_claim_candidate_ids": _assessment_ids(claims, id_field="candidate_claim_id", outcome="new"),
         "conflict_claim_candidate_ids": _assessment_ids(claims, id_field="candidate_claim_id", outcome="conflict"),
