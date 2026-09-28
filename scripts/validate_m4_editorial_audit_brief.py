@@ -405,6 +405,56 @@ def main() -> int:
         failures,
     )
 
+    missing_claim_context = copy.deepcopy(report)
+    next(
+        item for item in missing_claim_context["findings"]
+        if item["kind"] == "claim_review_required"
+    )["context"] = {}
+    _rehash_report(missing_claim_context)
+    expect_raises(
+        "self-consistent missing claim-review context",
+        lambda: build_daily_editorial_brief(audit_report=missing_claim_context),
+        failures,
+    )
+
+    missing_source_context = copy.deepcopy(report)
+    next(
+        item for item in missing_source_context["findings"]
+        if item["kind"] == "source_monitoring_required"
+    )["context"] = {}
+    _rehash_report(missing_source_context)
+    expect_raises(
+        "self-consistent missing source-monitoring context",
+        lambda: build_daily_editorial_brief(audit_report=missing_source_context),
+        failures,
+    )
+
+    missing_queue_provenance = copy.deepcopy(report)
+    queue_finding = next(
+        item for item in missing_queue_provenance["findings"]
+        if item["kind"] == "queue_action_required"
+    )
+    queue_finding["context"]["source_ids"] = []
+    _rehash_report(missing_queue_provenance)
+    expect_raises(
+        "self-consistent queue action without source provenance",
+        lambda: build_daily_editorial_brief(audit_report=missing_queue_provenance),
+        failures,
+    )
+
+    mismatched_source_reason = copy.deepcopy(report)
+    source_finding = next(
+        item for item in mismatched_source_reason["findings"]
+        if item["kind"] == "source_monitoring_required"
+    )
+    source_finding["reason_codes"] = ["acquisition:poll_due", "source_class:A"]
+    _rehash_report(mismatched_source_reason)
+    expect_raises(
+        "self-consistent source reason/context mismatch",
+        lambda: build_daily_editorial_brief(audit_report=mismatched_source_reason),
+        failures,
+    )
+
     if failures:
         print("M4 editorial audit/brief validation FAILED:")
         for failure in failures:
@@ -413,7 +463,7 @@ def main() -> int:
 
     print(
         "Validated M4 deterministic editorial audit + daily brief: aligned staleness/acquisition/current-queue snapshot inputs, "
-        "action-only findings, deterministic priority/grouping, completed-item suppression, multi-feed action identity, type-strict/schema-bounded semantic and content integrity, and zero truth/approval/mutation authority."
+        "action-only findings, deterministic priority/grouping, completed-item suppression, multi-feed action identity, type-strict/schema-bounded kind-specific semantic and content integrity, and zero truth/approval/mutation authority."
     )
     return 0
 
