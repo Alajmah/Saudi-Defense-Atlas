@@ -58,6 +58,19 @@ def _items(report: Mapping[str, Any], label: str) -> list[Mapping[str, Any]]:
     return result
 
 
+def _string_list(value: Any, label: str) -> list[str]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        raise EditorialAuditError(f"{label} must be an array")
+    result: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item:
+            raise EditorialAuditError(f"{label} contains invalid identity")
+        result.append(item)
+    if len(result) != len(set(result)):
+        raise EditorialAuditError(f"{label} contains duplicates")
+    return result
+
+
 def _finding(
     *,
     kind: str,
@@ -66,8 +79,12 @@ def _finding(
     reason_codes: Sequence[str],
     context: Mapping[str, Any],
 ) -> dict[str, Any]:
+    if kind not in {"claim_review_required", "source_monitoring_required", "queue_action_required"}:
+        raise EditorialAuditError("finding kind is invalid")
     if priority not in {"high", "normal"}:
         raise EditorialAuditError("finding priority is invalid")
+    if not isinstance(subject_id, str) or not subject_id:
+        raise EditorialAuditError("finding subject_id is required")
     reasons = sorted({str(reason) for reason in reason_codes if isinstance(reason, str) and reason})
     if not reasons:
         raise EditorialAuditError("finding requires reason codes")
@@ -79,6 +96,17 @@ def _finding(
         "context": dict(context),
     }
     return {"id": _stable_id("SDA-AUDIT-FINDING", body), **body}
+
+
+def _summary(findings: Sequence[Mapping[str, Any]]) -> dict[str, int]:
+    return {
+        "total": len(findings),
+        "high": sum(item.get("priority") == "high" for item in findings),
+        "normal": sum(item.get("priority") == "normal" for item in findings),
+        "claim_review_required": sum(item.get("kind") == "claim_review_required" for item in findings),
+        "source_monitoring_required": sum(item.get("kind") == "source_monitoring_required" for item in findings),
+        "queue_action_required": sum(item.get("kind") == "queue_action_required" for item in findings),
+    }
 
 
 def build_editorial_audit_report(
@@ -216,6 +244,8 @@ def build_editorial_audit_report(
         if state in {"completed", "dismissed"}:
             continue
 
+        source_ids = _string_list(item.get("source_ids"), f"queue item {queue_id} source_ids")
+        document_ids = _string_list(item.get("document_ids"), f"queue item {queue_id} document_ids")
         priority = "high" if item_priority == "high" or lane == "restricted_human" else "normal"
         findings.append(
             _finding(
@@ -228,8 +258,8 @@ def build_editorial_audit_report(
                     "lane": lane,
                     "state": state,
                     "priority": item_priority,
-                    "source_ids": sorted(item.get("source_ids", [])),
-                    "document_ids": sorted(item.get("document_ids", [])),
+                    "source_ids": sorted(source_ids),
+                    "document_ids": sorted(document_ids),
                     "created_at": _utc(item.get("created_at"), f"queue item {queue_id} created_at"),
                 },
             )
@@ -249,19 +279,10 @@ def build_editorial_audit_report(
         "source_freshness_report": source_freshness_report,
         "queue_items": sorted((dict(item) for item in queue_items), key=lambda item: str(item.get("id"))),
     }
-    input_digest = _sha256(input_payload)
-    summary = {
-        "total": len(findings),
-        "high": sum(item["priority"] == "high" for item in findings),
-        "normal": sum(item["priority"] == "normal" for item in findings),
-        "claim_review_required": sum(item["kind"] == "claim_review_required" for item in findings),
-        "source_monitoring_required": sum(item["kind"] == "source_monitoring_required" for item in findings),
-        "queue_action_required": sum(item["kind"] == "queue_action_required" for item in findings),
-    }
     report: dict[str, Any] = {
         "as_of": normalized_as_of,
-        "input_sha256": input_digest,
-        "summary": summary,
+        "input_sha256": _sha256(input_payload),
+        "summary": _summary(findings),
         "findings": findings,
         "authority": {
             "mode": "operational_audit_only",
@@ -275,18 +296,10 @@ def build_editorial_audit_report(
     return report
 
 
-def build_daily_editorial_brief(*, audit_report: Mapping[str, Any]) -> dict[str, Any]:
-    """Project one audit report into deterministic editor-facing sections."""
-
+def _validate_audit_report_integrity(audit_report: Mapping[str, Any]) -> tuple[str, list[Mapping[str, Any]]]:
     report_id = audit_report.get("id")
     if not isinstance(report_id, str) or not report_id:
         raise EditorialAuditError("audit report requires id")
-    findings = audit_report.get("findings")
-    summary = audit_report.get("summary")
-    if not isinstance(findings, Sequence) or isinstance(findings, (str, bytes)):
-        raise EditorialAuditError("audit report findings must be an array")
-    if not isinstance(summary, Mapping):
-        raise EditorialAuditError("audit report summary must be an object")
     if audit_report.get("authority") != {
         "mode": "operational_audit_only",
         "truth_authority": False,
@@ -296,25 +309,51 @@ def build_daily_editorial_brief(*, audit_report: Mapping[str, Any]) -> dict[str,
     }:
         raise EditorialAuditError("audit report authority boundary is invalid")
 
-    refs: list[dict[str, Any]] = []
+    findings_raw = audit_report.get("findings")
+    summary = audit_report.get("summary")
+    if not isinstance(findings_raw, Sequence) or isinstance(findings_raw, (str, bytes)):
+        raise EditorialAuditError("audit report findings must be an array")
+    if not isinstance(summary, Mapping):
+        raise EditorialAuditError("audit report summary must be an object")
+
+    findings: list[Mapping[str, Any]] = []
     seen_ids: set[str] = set()
-    for finding in findings:
+    for finding in findings_raw:
         if not isinstance(finding, Mapping):
             raise EditorialAuditError("audit findings must contain objects")
         finding_id = finding.get("id")
         if not isinstance(finding_id, str) or not finding_id or finding_id in seen_ids:
             raise EditorialAuditError("audit findings require unique IDs")
         seen_ids.add(finding_id)
-        refs.append(
-            {
-                "finding_id": finding_id,
-                "kind": finding.get("kind"),
-                "priority": finding.get("priority"),
-                "subject_id": finding.get("subject_id"),
-                "reason_codes": list(finding.get("reason_codes", [])),
-            }
-        )
+        body = {key: value for key, value in finding.items() if key != "id"}
+        if finding_id != _stable_id("SDA-AUDIT-FINDING", body):
+            raise EditorialAuditError("audit finding content does not match its ID")
+        findings.append(finding)
 
+    expected_summary = _summary(findings)
+    if dict(summary) != expected_summary:
+        raise EditorialAuditError("audit report summary does not match findings")
+
+    report_body = {key: value for key, value in audit_report.items() if key != "id"}
+    if report_id != _stable_id("SDA-EDITORIAL-AUDIT", report_body):
+        raise EditorialAuditError("audit report content does not match its ID")
+    return report_id, findings
+
+
+def build_daily_editorial_brief(*, audit_report: Mapping[str, Any]) -> dict[str, Any]:
+    """Project one integrity-checked audit report into editor-facing sections."""
+
+    report_id, findings = _validate_audit_report_integrity(audit_report)
+    refs = [
+        {
+            "finding_id": str(finding["id"]),
+            "kind": finding.get("kind"),
+            "priority": finding.get("priority"),
+            "subject_id": finding.get("subject_id"),
+            "reason_codes": list(finding.get("reason_codes", [])),
+        }
+        for finding in findings
+    ]
     refs.sort(
         key=lambda item: (
             0 if item["priority"] == "high" else 1,
