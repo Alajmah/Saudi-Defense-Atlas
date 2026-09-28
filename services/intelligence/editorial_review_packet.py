@@ -1,9 +1,4 @@
-"""Deterministic M4 editorial review-packet construction.
-
-A review packet binds the exact AMBER ChangeProposal payload to the queue,
-extraction, resolver/verifier, source-document context, and assessment summary a
-human editor must see. It cannot approve, mutate canonical knowledge, or publish.
-"""
+"""Public M4 editorial review-packet boundary with first-pass hardening."""
 
 from __future__ import annotations
 
@@ -13,17 +8,14 @@ from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
 
-
-class EditorialReviewPacketError(ValueError):
-    """Raised when the review handoff is incomplete or internally inconsistent."""
+from ._editorial_review_packet_core import (
+    EditorialReviewPacketError,
+    build_editorial_review_packet as _build_core_packet,
+)
 
 
 def _stable_json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-def _sha256(value: Any) -> str:
-    return hashlib.sha256(_stable_json(value).encode("utf-8")).hexdigest()
 
 
 def _stable_id(prefix: str, *parts: Any) -> str:
@@ -31,7 +23,7 @@ def _stable_id(prefix: str, *parts: Any) -> str:
     return f"{prefix}-{digest}"
 
 
-def _utc(value: str, label: str) -> str:
+def _parse_datetime(value: Any, label: str) -> datetime:
     if not isinstance(value, str) or not value:
         raise EditorialReviewPacketError(f"{label} must be a date-time string")
     try:
@@ -40,55 +32,70 @@ def _utc(value: str, label: str) -> str:
         raise EditorialReviewPacketError(f"{label} must be ISO date-time") from exc
     if parsed.tzinfo is None:
         raise EditorialReviewPacketError(f"{label} must include timezone")
-    return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    return parsed.astimezone(timezone.utc)
 
 
-def _string_set(value: Any, label: str, *, nonempty: bool = True) -> set[str]:
-    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
-        raise EditorialReviewPacketError(f"{label} must be an array")
-    result: set[str] = set()
-    for item in value:
-        if not isinstance(item, str) or not item:
-            raise EditorialReviewPacketError(f"{label} must contain non-empty IDs")
-        if item in result:
-            raise EditorialReviewPacketError(f"{label} contains duplicate ID {item}")
-        result.add(item)
-    if nonempty and not result:
-        raise EditorialReviewPacketError(f"{label} must not be empty")
-    return result
-
-
-def _assessment_ids(
-    records: Any,
+def _verify_temporal_order(
     *,
-    id_field: str,
-    outcome: str,
+    queue_item: Mapping[str, Any],
+    extraction_run: Mapping[str, Any],
+    resolution_run: Mapping[str, Any],
+    proposal: Mapping[str, Any],
+    created_at: str,
+) -> None:
+    queue_created = _parse_datetime(queue_item.get("created_at"), "queue created_at")
+    extraction_completed = _parse_datetime(
+        extraction_run.get("completed_at"), "extraction completed_at"
+    )
+    resolution_created = _parse_datetime(
+        resolution_run.get("created_at"), "resolution created_at"
+    )
+    proposal_created = _parse_datetime(proposal.get("created_at"), "proposal created_at")
+    packet_created = _parse_datetime(created_at, "review packet created_at")
+
+    if queue_created > extraction_completed:
+        raise EditorialReviewPacketError("queue item cannot postdate completed extraction")
+    if resolution_created < extraction_completed:
+        raise EditorialReviewPacketError("resolution run cannot predate completed extraction")
+    if proposal_created < extraction_completed:
+        raise EditorialReviewPacketError("proposal cannot predate completed extraction")
+    if packet_created < max(extraction_completed, resolution_created, proposal_created):
+        raise EditorialReviewPacketError("review packet cannot predate its upstream artifacts")
+
+
+def _verify_deterministic_proposal_identity(
+    extraction_run: Mapping[str, Any], proposal: Mapping[str, Any]
+) -> None:
+    extraction_id = extraction_run.get("id")
+    mutations = proposal.get("mutations")
+    if not isinstance(extraction_id, str) or not extraction_id:
+        raise EditorialReviewPacketError("extraction run requires ID")
+    if not isinstance(mutations, Sequence) or isinstance(mutations, (str, bytes)):
+        raise EditorialReviewPacketError("proposal mutations must be an array")
+    expected_id = _stable_id("SDA-PROP-AI", extraction_id, mutations)
+    if proposal.get("id") != expected_id:
+        raise EditorialReviewPacketError(
+            "proposal ID does not bind the exact resolver mutation payload"
+        )
+
+
+def _resolution_entity_ids(
+    resolution_run: Mapping[str, Any], outcome: str
 ) -> list[str]:
+    records = resolution_run.get("entity_resolutions")
     if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
-        raise EditorialReviewPacketError("resolution assessments must be arrays")
+        raise EditorialReviewPacketError("entity_resolutions must be an array")
     result: list[str] = []
     for record in records:
         if not isinstance(record, Mapping):
-            raise EditorialReviewPacketError("resolution assessment must be an object")
+            raise EditorialReviewPacketError("entity resolution must be an object")
         if record.get("outcome") != outcome:
             continue
-        candidate_id = record.get(id_field)
+        candidate_id = record.get("candidate_entity_id")
         if not isinstance(candidate_id, str) or not candidate_id:
-            raise EditorialReviewPacketError("resolution assessment requires candidate ID")
+            raise EditorialReviewPacketError("entity resolution requires candidate ID")
         result.append(candidate_id)
     return sorted(set(result))
-
-
-def _require_authority(resolution_run: Mapping[str, Any]) -> None:
-    authority = resolution_run.get("authority")
-    expected = {
-        "mode": "proposal_preparation_only",
-        "approval_authority": False,
-        "canonical_mutation_authority": False,
-        "publication_authority": False,
-    }
-    if authority != expected:
-        raise EditorialReviewPacketError("resolver/verifier authority exceeded proposal-preparation-only boundary")
 
 
 def build_editorial_review_packet(
@@ -99,181 +106,49 @@ def build_editorial_review_packet(
     proposal: Mapping[str, Any],
     created_at: str,
 ) -> dict[str, Any]:
-    """Bind one exact resolver proposal into a human-review-only packet."""
+    """Build a content-bound, temporally valid, human-review-only packet."""
 
-    queue_id = queue_item.get("id")
-    extraction_id = extraction_run.get("id")
-    resolution_id = resolution_run.get("id")
-    proposal_id = proposal.get("id")
-    for label, value in (
-        ("queue item", queue_id),
-        ("extraction run", extraction_id),
-        ("resolution run", resolution_id),
-        ("proposal", proposal_id),
-    ):
-        if not isinstance(value, str) or not value:
-            raise EditorialReviewPacketError(f"{label} requires ID")
-
-    if queue_item.get("lane") != "candidate_extraction":
-        raise EditorialReviewPacketError("review packet requires candidate_extraction queue lane")
-    if queue_item.get("state") not in {"queued", "claimed"}:
-        raise EditorialReviewPacketError("review packet requires an active queue item")
-    if queue_item.get("ai_extraction_allowed") is not True:
-        raise EditorialReviewPacketError("queue item does not authorize candidate extraction")
-    if queue_item.get("canonical_mutation_authority") is not False:
-        raise EditorialReviewPacketError("queue item exceeded non-canonical authority")
-
-    if extraction_run.get("queue_item_id") != queue_id:
-        raise EditorialReviewPacketError("extraction run does not belong to queue item")
-    validation = extraction_run.get("validation")
-    if not isinstance(validation, Mapping) or validation.get("status") != "accepted_for_candidate_review":
-        raise EditorialReviewPacketError("review packet requires accepted extraction run")
-    extraction_authority = extraction_run.get("authority")
-    if (
-        not isinstance(extraction_authority, Mapping)
-        or extraction_authority.get("mode") != "candidate_only"
-        or extraction_authority.get("canonical_mutation_authority") is not False
-        or extraction_authority.get("publication_authority") is not False
-    ):
-        raise EditorialReviewPacketError("extraction authority exceeded candidate-only boundary")
-
-    if resolution_run.get("extraction_run_id") != extraction_id:
-        raise EditorialReviewPacketError("resolution run does not belong to extraction run")
-    if resolution_run.get("change_proposal_id") != proposal_id:
-        raise EditorialReviewPacketError("resolution run is not bound to this proposal")
-    _require_authority(resolution_run)
-
-    queue_documents = _string_set(queue_item.get("document_ids"), "queue document_ids")
-    extraction_documents = _string_set(
-        extraction_run.get("source_document_ids"), "extraction source_document_ids"
+    _verify_temporal_order(
+        queue_item=queue_item,
+        extraction_run=extraction_run,
+        resolution_run=resolution_run,
+        proposal=proposal,
+        created_at=created_at,
     )
-    proposal_documents = _string_set(proposal.get("source_document_ids"), "proposal source_document_ids")
-    if queue_documents != extraction_documents:
-        raise EditorialReviewPacketError(
-            "multi-source review context must include exactly the queue documents used for extraction"
-        )
-    if extraction_documents != proposal_documents:
-        raise EditorialReviewPacketError("proposal source documents differ from extraction context")
+    _verify_deterministic_proposal_identity(extraction_run, proposal)
 
-    source_ids = _string_set(queue_item.get("source_ids"), "queue source_ids")
-    if proposal.get("risk_class") != "AMBER" or proposal.get("policy_outcome") != "human_review_required":
-        raise EditorialReviewPacketError("AI resolver proposal must remain AMBER human-review-required")
+    packet = _build_core_packet(
+        queue_item=queue_item,
+        extraction_run=extraction_run,
+        resolution_run=resolution_run,
+        proposal=proposal,
+        created_at=created_at,
+    )
 
-    mutations = proposal.get("mutations")
-    if not isinstance(mutations, Sequence) or isinstance(mutations, (str, bytes)) or not mutations:
-        raise EditorialReviewPacketError("review packet requires non-empty proposal mutations")
+    summary = packet.get("assessment_summary")
+    if not isinstance(summary, dict):
+        raise EditorialReviewPacketError("review packet requires assessment_summary")
+    ambiguous_entities = _resolution_entity_ids(resolution_run, "ambiguous")
+    unresolved_entities = _resolution_entity_ids(resolution_run, "unresolved")
 
-    mutation_ids: set[str] = set()
-    inventory = {"total": 0, "evidence": 0, "claims": 0, "events": 0}
-    evidence_ids: set[str] = set()
-    evidence_document_ids: set[str] = set()
-    factual_evidence_refs: set[str] = set()
+    summary["blocked_ambiguous_candidate_ids"] = sorted(
+        set(summary.get("blocked_ambiguous_candidate_ids", [])) | set(ambiguous_entities)
+    )
+    summary["blocked_unresolved_candidate_ids"] = sorted(
+        set(summary.get("blocked_unresolved_candidate_ids", [])) | set(unresolved_entities)
+    )
 
-    for mutation in mutations:
-        if not isinstance(mutation, Mapping):
-            raise EditorialReviewPacketError("proposal mutation must be an object")
-        mutation_id = mutation.get("id")
-        resource_type = mutation.get("resource_type")
-        payload = mutation.get("payload")
-        if not isinstance(mutation_id, str) or not mutation_id or mutation_id in mutation_ids:
-            raise EditorialReviewPacketError("proposal mutation IDs must be unique and non-empty")
-        mutation_ids.add(mutation_id)
-        if mutation.get("action") != "create" or resource_type not in {"evidence", "claim", "event"}:
-            raise EditorialReviewPacketError("AI review packet accepts create Evidence/Claim/Event mutations only")
-        if not isinstance(payload, Mapping):
-            raise EditorialReviewPacketError("proposal mutation payload must be an object")
-
-        inventory["total"] += 1
-        if resource_type == "evidence":
-            inventory["evidence"] += 1
-            evidence_id = payload.get("id")
-            document_id = payload.get("document_id")
-            if not isinstance(evidence_id, str) or not evidence_id:
-                raise EditorialReviewPacketError("Evidence mutation requires canonical ID")
-            if evidence_id in evidence_ids:
-                raise EditorialReviewPacketError("duplicate Evidence payload ID in proposal")
-            if not isinstance(document_id, str) or document_id not in extraction_documents:
-                raise EditorialReviewPacketError("Evidence mutation escaped extraction document provenance")
-            evidence_ids.add(evidence_id)
-            evidence_document_ids.add(document_id)
-        else:
-            inventory["claims" if resource_type == "claim" else "events"] += 1
-            links = payload.get("evidence_links")
-            if not isinstance(links, Sequence) or isinstance(links, (str, bytes)) or not links:
-                raise EditorialReviewPacketError("factual mutation requires Evidence links")
-            for link in links:
-                if not isinstance(link, Mapping) or link.get("role") != "supports":
-                    raise EditorialReviewPacketError("AI factual mutation requires supporting Evidence only")
-                evidence_id = link.get("evidence_id")
-                if not isinstance(evidence_id, str) or not evidence_id:
-                    raise EditorialReviewPacketError("factual mutation has invalid Evidence ID")
-                factual_evidence_refs.add(evidence_id)
-
-    if not evidence_ids:
-        raise EditorialReviewPacketError("review packet requires materialized Evidence mutations")
-    if not factual_evidence_refs.issubset(evidence_ids):
-        raise EditorialReviewPacketError("factual mutation references Evidence outside exact proposal")
-
-    claims = resolution_run.get("claim_assessments", [])
-    events = resolution_run.get("event_assessments", [])
-    summary = {
-        "new_claim_candidate_ids": _assessment_ids(claims, id_field="candidate_claim_id", outcome="new"),
-        "conflict_claim_candidate_ids": _assessment_ids(claims, id_field="candidate_claim_id", outcome="conflict"),
-        "duplicate_claim_candidate_ids": _assessment_ids(claims, id_field="candidate_claim_id", outcome="duplicate"),
-        "new_event_candidate_ids": _assessment_ids(events, id_field="candidate_event_id", outcome="new"),
-        "possible_duplicate_event_candidate_ids": _assessment_ids(events, id_field="candidate_event_id", outcome="possible_duplicate"),
-        "blocked_ambiguous_candidate_ids": sorted(set(
-            _assessment_ids(claims, id_field="candidate_claim_id", outcome="blocked_ambiguous")
-            + _assessment_ids(events, id_field="candidate_event_id", outcome="blocked_ambiguous")
-        )),
-        "blocked_unresolved_candidate_ids": sorted(set(
-            _assessment_ids(claims, id_field="candidate_claim_id", outcome="blocked_unresolved")
-            + _assessment_ids(events, id_field="candidate_event_id", outcome="blocked_unresolved")
-        )),
-        "blocked_policy_candidate_ids": _assessment_ids(
-            claims, id_field="candidate_claim_id", outcome="blocked_policy"
-        ),
-    }
-
-    flags = {"ai_generated_proposal"}
-    if len(extraction_documents) > 1:
-        flags.add("multi_source_context")
-    if summary["conflict_claim_candidate_ids"]:
-        flags.add("conflict_present")
-    if summary["blocked_ambiguous_candidate_ids"]:
+    flags = set(packet.get("review_flags", []))
+    if ambiguous_entities:
         flags.add("ambiguity_blocked")
-    if summary["blocked_unresolved_candidate_ids"]:
+    if unresolved_entities:
         flags.add("unresolved_entity_blocked")
-    if summary["blocked_policy_candidate_ids"]:
-        flags.add("policy_blocked")
-    if summary["duplicate_claim_candidate_ids"] or summary["possible_duplicate_event_candidate_ids"]:
-        flags.add("duplicates_suppressed")
+    packet["review_flags"] = sorted(flags)
 
-    normalized_created_at = _utc(created_at, "created_at")
-    proposal_hash = _sha256(proposal)
-    packet = {
-        "id": _stable_id("SDA-REVIEW-PACKET", queue_id, extraction_id, resolution_id, proposal_id, proposal_hash),
-        "queue_item_id": queue_id,
-        "extraction_run_id": extraction_id,
-        "resolution_run_id": resolution_id,
-        "proposal_id": proposal_id,
-        "proposal_sha256": proposal_hash,
-        "created_at": normalized_created_at,
-        "review_state": "awaiting_human",
-        "risk_class": "AMBER",
-        "source_ids": sorted(source_ids),
-        "source_document_ids": sorted(extraction_documents),
-        "evidence_document_ids": sorted(evidence_document_ids),
-        "mutation_inventory": inventory,
-        "assessment_summary": summary,
-        "review_flags": sorted(flags),
-        "authority": {
-            "mode": "review_handoff_only",
-            "approval_authority": False,
-            "canonical_mutation_authority": False,
-            "publication_authority": False,
-        },
-    }
+    # The final packet identity is content-addressed after all review context is
+    # attached, so a changed assessment summary cannot reuse an old packet ID.
+    packet_without_id = {key: value for key, value in packet.items() if key != "id"}
+    packet["id"] = _stable_id("SDA-REVIEW-PACKET", packet_without_id)
     return packet
 
 

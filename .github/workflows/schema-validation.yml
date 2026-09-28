@@ -116,3 +116,6 @@ jobs:
 
       - name: Validate M4 editorial review packet
         run: python scripts/validate_m4_editorial_review_packet.py
+
+      - name: Validate M4 editorial review packet isolation
+        run: python scripts/validate_m4_editorial_review_packet_isolation.py
