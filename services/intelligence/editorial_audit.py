@@ -49,6 +49,33 @@ _BRIEF_AUTHORITY = {
 }
 _AUDIT_REPORT_KEYS = {"id", "as_of", "input_sha256", "summary", "findings", "authority"}
 _FINDING_KEYS = {"id", "kind", "priority", "subject_id", "reason_codes", "context"}
+_CLAIM_CONTEXT_KEYS = {
+    "claim_id",
+    "subject_id",
+    "predicate_id",
+    "claim_state",
+    "confidence",
+    "staleness_status",
+    "verified_at",
+    "review_due_at",
+}
+_SOURCE_CONTEXT_KEYS = {
+    "source_id",
+    "feed_key",
+    "source_class",
+    "freshness_status",
+    "latest_observed_at",
+    "next_check_due_at",
+}
+_QUEUE_CONTEXT_KEYS = {
+    "queue_item_id",
+    "lane",
+    "state",
+    "priority",
+    "source_ids",
+    "document_ids",
+    "created_at",
+}
 _SHA256_RE = re.compile(r"^[A-Fa-f0-9]{64}$")
 
 
@@ -84,6 +111,12 @@ def _parse_utc(value: Any, label: str) -> datetime:
 
 def _utc(value: Any, label: str) -> str:
     return _parse_utc(value, label).isoformat().replace("+00:00", "Z")
+
+
+def _optional_utc(value: Any, label: str) -> datetime | None:
+    if value is None:
+        return None
+    return _parse_utc(value, label)
 
 
 def _items(report: Mapping[str, Any], label: str) -> list[Mapping[str, Any]]:
@@ -124,6 +157,154 @@ def _validate_authority(value: Any, *, mode: str, label: str) -> None:
     ):
         if value.get(key) is not False:
             raise EditorialAuditError(f"{label} {key} must be false")
+
+
+def _validate_finding_context(
+    *,
+    kind: str,
+    subject_id: str,
+    priority: str,
+    reasons: Sequence[str],
+    context: Mapping[str, Any],
+    as_of_dt: datetime,
+) -> None:
+    """Validate the actionable semantics retained in one audit finding."""
+
+    if kind == "claim_review_required":
+        if set(context) != _CLAIM_CONTEXT_KEYS:
+            raise EditorialAuditError("claim-review context fields do not match the contract")
+        claim_id = _canonical_id(context.get("claim_id"), "claim-review context claim_id")
+        if claim_id != subject_id:
+            raise EditorialAuditError("claim-review context does not match finding subject")
+        _canonical_id(context.get("subject_id"), "claim-review context subject_id")
+        predicate_id = context.get("predicate_id")
+        if not isinstance(predicate_id, str) or not predicate_id:
+            raise EditorialAuditError("claim-review context predicate_id is invalid")
+        state = context.get("claim_state")
+        confidence = context.get("confidence")
+        status = context.get("staleness_status")
+        if state not in {"active", "disputed"}:
+            raise EditorialAuditError("claim-review context claim_state is invalid")
+        if confidence not in {"verified", "high", "medium", "low", "unverified"}:
+            raise EditorialAuditError("claim-review context confidence is invalid")
+        if status not in {"fresh", "due", "unverified"}:
+            raise EditorialAuditError("claim-review context staleness_status is invalid")
+        verified_at = _optional_utc(context.get("verified_at"), "claim-review context verified_at")
+        review_due_at = _optional_utc(
+            context.get("review_due_at"), "claim-review context review_due_at"
+        )
+        if verified_at is not None and verified_at > as_of_dt:
+            raise EditorialAuditError("claim-review verified_at is newer than audit as_of")
+        if status == "unverified":
+            if verified_at is not None or review_due_at is not None:
+                raise EditorialAuditError("unverified claim-review context has verification dates")
+        elif verified_at is None or review_due_at is None:
+            raise EditorialAuditError("verified claim-review context requires verification dates")
+
+        expected_reasons: list[str] = []
+        if status == "due":
+            expected_reasons.append("review:due")
+        elif status == "unverified":
+            expected_reasons.append("review:never_verified")
+        if state == "disputed":
+            expected_reasons.append("claim_state:disputed")
+        if confidence == "unverified":
+            expected_reasons.append("confidence:unverified")
+        if sorted(reasons) != sorted(expected_reasons) or not expected_reasons:
+            raise EditorialAuditError("claim-review reasons do not match context")
+        expected_priority = (
+            "high"
+            if state == "disputed" or status == "unverified" or confidence == "unverified"
+            else "normal"
+        )
+        if priority != expected_priority:
+            raise EditorialAuditError("claim-review priority does not match context")
+        return
+
+    if kind == "source_monitoring_required":
+        if set(context) != _SOURCE_CONTEXT_KEYS:
+            raise EditorialAuditError("source-monitoring context fields do not match the contract")
+        source_id = _canonical_id(context.get("source_id"), "source-monitoring context source_id")
+        if source_id != subject_id:
+            raise EditorialAuditError("source-monitoring context does not match finding subject")
+        feed_key = context.get("feed_key")
+        source_class = context.get("source_class")
+        status = context.get("freshness_status")
+        if not isinstance(feed_key, str) or not feed_key:
+            raise EditorialAuditError("source-monitoring context feed_key is invalid")
+        if source_class not in {"A", "B", "C", "D", "E"}:
+            raise EditorialAuditError("source-monitoring context source_class is invalid")
+        if status not in {"due", "never_retrieved"}:
+            raise EditorialAuditError("source-monitoring context freshness_status is invalid")
+        latest = _optional_utc(
+            context.get("latest_observed_at"), "source-monitoring context latest_observed_at"
+        )
+        next_due = _optional_utc(
+            context.get("next_check_due_at"), "source-monitoring context next_check_due_at"
+        )
+        if latest is not None and latest > as_of_dt:
+            raise EditorialAuditError("source-monitoring latest observation is newer than audit as_of")
+        if status == "never_retrieved":
+            if latest is not None or next_due is not None:
+                raise EditorialAuditError("never-retrieved source context has acquisition dates")
+        elif latest is None or next_due is None or next_due > as_of_dt:
+            raise EditorialAuditError("due source-monitoring context requires due acquisition dates")
+
+        acquisition_reason = (
+            "acquisition:never_retrieved" if status == "never_retrieved" else "acquisition:poll_due"
+        )
+        expected_reasons = sorted([acquisition_reason, f"source_class:{source_class}"])
+        if sorted(reasons) != expected_reasons:
+            raise EditorialAuditError("source-monitoring reasons do not match context")
+        expected_priority = (
+            "high" if status == "never_retrieved" and source_class in {"A", "B"} else "normal"
+        )
+        if priority != expected_priority:
+            raise EditorialAuditError("source-monitoring priority does not match context")
+        return
+
+    if kind == "queue_action_required":
+        if set(context) != _QUEUE_CONTEXT_KEYS:
+            raise EditorialAuditError("queue-action context fields do not match the contract")
+        queue_id = _canonical_id(context.get("queue_item_id"), "queue-action context queue_item_id")
+        if queue_id != subject_id:
+            raise EditorialAuditError("queue-action context does not match finding subject")
+        lane = context.get("lane")
+        state = context.get("state")
+        item_priority = context.get("priority")
+        if lane not in {"candidate_extraction", "discovery_review", "restricted_human"}:
+            raise EditorialAuditError("queue-action context lane is invalid")
+        if state not in {"queued", "claimed"}:
+            raise EditorialAuditError("queue-action context state is invalid")
+        if item_priority not in _PRIORITIES:
+            raise EditorialAuditError("queue-action context priority is invalid")
+        source_ids = _string_list(context.get("source_ids"), "queue-action context source_ids")
+        document_ids = _string_list(
+            context.get("document_ids"), "queue-action context document_ids"
+        )
+        if not source_ids or not document_ids:
+            raise EditorialAuditError("queue-action context requires source/document provenance")
+        for source_id in source_ids:
+            _canonical_id(source_id, "queue-action context source_id")
+        for document_id in document_ids:
+            _canonical_id(document_id, "queue-action context document_id")
+        created_at = _parse_utc(context.get("created_at"), "queue-action context created_at")
+        if created_at > as_of_dt:
+            raise EditorialAuditError("queue-action created_at is newer than audit as_of")
+
+        expected_reasons = sorted(
+            [f"lane:{lane}", f"state:{state}", f"queue_priority:{item_priority}"]
+        )
+        if sorted(reasons) != expected_reasons:
+            raise EditorialAuditError("queue-action reasons do not match context")
+        expected_priority = (
+            "high" if item_priority == "high" or lane == "restricted_human" else "normal"
+        )
+        if priority != expected_priority:
+            raise EditorialAuditError("queue-action priority does not match context")
+        return
+
+    raise EditorialAuditError("finding kind is invalid")
 
 
 def _finding(
@@ -379,7 +560,7 @@ def _validate_audit_report_integrity(audit_report: Mapping[str, Any]) -> tuple[s
         raise EditorialAuditError("audit report fields do not match the contract")
 
     report_id = _canonical_id(audit_report.get("id"), "audit report id")
-    _utc(audit_report.get("as_of"), "audit report as_of")
+    as_of_dt = _parse_utc(audit_report.get("as_of"), "audit report as_of")
     input_sha256 = audit_report.get("input_sha256")
     if not isinstance(input_sha256, str) or not _SHA256_RE.fullmatch(input_sha256):
         raise EditorialAuditError("audit report input_sha256 is invalid")
@@ -405,17 +586,27 @@ def _validate_audit_report_integrity(audit_report: Mapping[str, Any]) -> tuple[s
         if finding_id in seen_ids:
             raise EditorialAuditError("audit findings require unique IDs")
         seen_ids.add(finding_id)
-        if finding.get("kind") not in _FINDING_KINDS:
+        kind = finding.get("kind")
+        priority = finding.get("priority")
+        if kind not in _FINDING_KINDS:
             raise EditorialAuditError("audit finding kind is invalid")
-        if finding.get("priority") not in _PRIORITIES:
+        if priority not in _PRIORITIES:
             raise EditorialAuditError("audit finding priority is invalid")
-        _canonical_id(finding.get("subject_id"), "audit finding subject_id")
+        subject_id = _canonical_id(finding.get("subject_id"), "audit finding subject_id")
         reasons = _string_list(finding.get("reason_codes"), "audit finding reason_codes")
         if not reasons or any(len(reason) > 128 for reason in reasons):
             raise EditorialAuditError("audit finding requires reason_codes <= 128 characters")
         context = finding.get("context")
         if not isinstance(context, Mapping):
             raise EditorialAuditError("audit finding context must be an object")
+        _validate_finding_context(
+            kind=str(kind),
+            subject_id=subject_id,
+            priority=str(priority),
+            reasons=reasons,
+            context=context,
+            as_of_dt=as_of_dt,
+        )
         body = {key: value for key, value in finding.items() if key != "id"}
         if finding_id != _stable_id("SDA-AUDIT-FINDING", body):
             raise EditorialAuditError("audit finding content does not match its ID")
