@@ -194,21 +194,80 @@ Earlier M2 increments were independently reviewed and merged through PRs #4–#7
 
 ---
 
-## M3 — Atlas and Search — NEXT
+## M3 — Atlas and Search — COMPLETE
 
-Planned outcomes:
+### Goal
 
-- Arabic-aware full-text search
-- semantic/entity search
-- public non-operational map
-- filters by service, equipment class, manufacturer, country, and status
-- timeline navigation
+Add public discovery/navigation over approved SDA projections without allowing search indexes, map runtimes, or navigation views to become new truth stores or broaden the operational-sensitivity boundary.
 
-Architecture choices that require separate APR evidence before adoption include the search engine/index, map/rendering mechanism, frontend framework if one is introduced, and deployment topology.
+### Delivered
+
+#### Search
+
+- engine-neutral `SearchDocument`, `SearchQuery`, and `SearchResult` contracts
+- conservative Arabic orthographic normalization with no hidden stemming, transliteration generation, fuzzy expansion, or semantic/vector inference
+- deterministic lexical reference oracle with portable match-quality classes
+- service, equipment-class, manufacturer, country, status, and entity-type facets
+- OpenSearch 3.8.0 accepted and verified as a downstream lexical index only
+- fixed portable quality tiers and locale-aware deterministic tie-breaking
+- SDA IDs remain canonical/public identity; engine `_score` and backend Q/P IDs never become public semantics
+
+#### Public map
+
+- backend-neutral `PublicMapView` for allowlisted fixed public facilities only
+- high/verified coordinate Claims with direct supporting Evidence
+- exactly one eligible latitude/longitude pair and explicit fail-closed conflict handling
+- coordinates coarsened to two decimals before entering the public projection
+- no Event/movement input and no operationally sensitive facility categories
+- deterministic `PublicMapView -> GeoJSON` renderer adapter
+- MapLibre GL JS 6.11.2 accepted and verified for the bounded browser-renderer role
+- provider-free browser verification with zero external requests
+- tile/basemap provider and geocoder remain deliberately unselected
+
+#### Navigation
+
+- public filter catalog derived only from accepted `SearchDocument.facets`
+- bilingual resolution for entity-backed service/manufacturer/country filter values
+- deterministic public counts over indexed SearchDocuments
+- timeline navigation derived only from `RelationshipGraphView.timeline`
+- supporting/contradicting/contextual Evidence retained with timeline events
+- root/domain context preserved when duplicate Event IDs are merged
+- unknown temporal precision remains explicit and sorts after known dates
+- no inferred lifecycle/current-state conclusion from event ordering
+
+### M3 Architecture Decisions
+
+- ADR-0004 / APR-008 — OpenSearch accepted and verified for the bounded lexical-index role
+- ADR-0005 / APR-009 — MapLibre GL JS accepted and verified for the bounded `PublicMapView` browser-renderer role
+- semantic/vector retrieval remains outside the M3 capability ceiling and is deferred to the research-assistant milestone where it can be evaluated with grounded retrieval/citation requirements
+- no frontend framework, tile provider, geocoder, or production deployment topology is selected by M3
+
+### M3 Acceptance Boundaries
+
+- indexes, navigation views, and map payloads remain disposable projections downstream of SDA canonical Entity/Claim/Event/Evidence authority;
+- no search/map component may mint canonical facts or identities;
+- no raw/canonical precise geography is exposed to the browser renderer;
+- live unit positions, movements, deployment timing, patrol patterns, readiness, stocks, tactical air-defense/radar/command-post geography, and unofficial precise operational coordinates remain excluded;
+- OpenSearch and MapLibre verification is bounded to tested contracts and does not constitute production security/HA/scale qualification;
+- semantic/vector retrieval, final frontend selection, tile-provider selection, geocoding, and deployment topology require later forcing functions and separate evidence.
+
+### Verification
+
+M3 was delivered through the reviewed increments merged in PRs #10, #12, #13, #14, #15, and #16. The final navigation increment passed exact-head gates on `180932049e8051b7014b62d3cc1b1c3e60a211a3`:
+
+- schema-validation run `36335528979` (#541) — **PASS**;
+- Wikibase regression run `36335528977` (#167) — **PASS**;
+- first-pass review: `docs/reviews/M3_NAVIGATION_FIRST_PASS.md`.
+
+The OpenSearch and MapLibre adoption evidence remains recorded in ADR-0004/ADR-0005 and APR-008/APR-009.
 
 ---
 
-## M4 — AI Editorial Operations
+## M4 — AI Editorial Operations — NEXT
+
+### Goal
+
+Scale the proven deterministic/source-backed pipeline into an AI-assisted editorial operating system without allowing models to bypass evidence, review, sensitivity, or canonical-mutation authority.
 
 Planned outcomes:
 
@@ -221,6 +280,8 @@ Planned outcomes:
 - daily editorial brief
 - model/prompt observability and evaluation dashboards
 
+M4 must preserve the existing proposal/review/revision boundary. Model output remains candidate/proposal data until policy and review authorize canonical effects.
+
 ---
 
 ## M5 — Research Assistant
@@ -232,17 +293,19 @@ Planned outcomes:
 - temporal queries
 - graph-aware retrieval
 - explicit uncertainty and source-conflict presentation
+- semantic/vector retrieval only after an explicit evaluation proves it improves grounded research without bypassing canonical evidence or citation constraints
 
 The assistant must answer from approved data/evidence rather than treat web search or model memory as canonical truth.
 
 ## Immediate Next Sequence
 
-After M2 closure:
+After M3 closure:
 
-1. start a dedicated M3 branch from verified `main`;
-2. define the search/query contract before selecting a search engine;
-3. characterize Arabic full-text/entity search requirements and evaluate candidate mechanisms through APR evidence;
-4. define the public non-operational map data contract and sensitivity boundary before selecting a map library/provider;
-5. expose timeline/filter navigation from existing canonical/public projections;
-6. keep all M3 indexes/maps downstream of SDA canonical IDs and Claim/Event/Evidence authority;
-7. run the same exhaustive first-pass review and exact-head CI gates for each promoted mechanism.
+1. define the M4 source-monitoring and editorial-queue contracts before selecting a scheduler/orchestrator;
+2. define a typed AI extraction boundary that emits candidate Entity/Claim/Event/Evidence records only;
+3. build deterministic relevance/deduplication/source-routing before invoking generative models;
+4. add model/prompt/version/evaluation metadata to every AI-produced proposal artifact;
+5. keep AMBER/RED review and operational-sensitivity gates intact;
+6. resolve the outstanding concurrent-writer coordination requirement before enabling multiple automated canonical mutation workers;
+7. prove one multi-source editorial vertical slice through discovery -> extraction -> verification -> review -> canonical Revision -> public projection;
+8. run exhaustive first-pass and exact-head CI gates before promoting any orchestration or model-dependent mechanism.
