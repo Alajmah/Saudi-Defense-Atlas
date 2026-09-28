@@ -90,6 +90,9 @@ jobs:
       - name: Validate M3 public map cross-record isolation
         run: python scripts/validate_m3_public_map_isolation.py
 
+      - name: Validate M3 public map post-merge hardening
+        run: python scripts/validate_m3_public_map_hardening.py
+
       - name: Validate M3 map renderer payload adapter
         run: python scripts/validate_m3_map_renderer_payload.py
 
@@ -107,3 +110,6 @@ jobs:
 
       - name: Validate M4 resolver verifier boundary
         run: python scripts/validate_m4_resolver_verifier.py
+
+      - name: Validate M4 resolver verifier isolation
+        run: python scripts/validate_m4_resolver_verifier_isolation.py
