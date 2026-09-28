@@ -143,6 +143,82 @@ def main() -> int:
         failures,
     )
 
+    queued = copy.deepcopy(queue_item)
+    queued["state"] = "queued"
+    expect_raises(
+        "unclaimed queue item reaches human review",
+        lambda: build_editorial_review_packet(
+            queue_item=queued,
+            extraction_run=extraction,
+            resolution_run=resolution,
+            proposal=proposal,
+            created_at="2026-01-02T00:02:00Z",
+        ),
+        failures,
+    )
+
+    late_queue = copy.deepcopy(queue_item)
+    late_queue["created_at"] = "2026-01-02T00:00:30Z"
+    expect_raises(
+        "queue item created after extraction started",
+        lambda: build_editorial_review_packet(
+            queue_item=late_queue,
+            extraction_run=extraction,
+            resolution_run=resolution,
+            proposal=proposal,
+            created_at="2026-01-02T00:02:00Z",
+        ),
+        failures,
+    )
+
+    missing_claim_assessment = copy.deepcopy(resolution)
+    missing_claim_assessment["claim_assessments"] = missing_claim_assessment[
+        "claim_assessments"
+    ][1:]
+    expect_raises(
+        "missing Claim assessment",
+        lambda: build_editorial_review_packet(
+            queue_item=queue_item,
+            extraction_run=extraction,
+            resolution_run=missing_claim_assessment,
+            proposal=proposal,
+            created_at="2026-01-02T00:02:00Z",
+        ),
+        failures,
+    )
+
+    missing_event_assessment = copy.deepcopy(resolution)
+    missing_event_assessment["event_assessments"] = missing_event_assessment[
+        "event_assessments"
+    ][1:]
+    expect_raises(
+        "missing Event assessment",
+        lambda: build_editorial_review_packet(
+            queue_item=queue_item,
+            extraction_run=extraction,
+            resolution_run=missing_event_assessment,
+            proposal=proposal,
+            created_at="2026-01-02T00:02:00Z",
+        ),
+        failures,
+    )
+
+    duplicate_claim_assessment = copy.deepcopy(resolution)
+    duplicate_claim_assessment["claim_assessments"].append(
+        copy.deepcopy(duplicate_claim_assessment["claim_assessments"][0])
+    )
+    expect_raises(
+        "duplicate Claim assessment",
+        lambda: build_editorial_review_packet(
+            queue_item=queue_item,
+            extraction_run=extraction,
+            resolution_run=duplicate_claim_assessment,
+            proposal=proposal,
+            created_at="2026-01-02T00:02:00Z",
+        ),
+        failures,
+    )
+
     if failures:
         print("M4 editorial review packet isolation FAILED:")
         for failure in failures:
@@ -150,8 +226,9 @@ def main() -> int:
         return 1
 
     print(
-        "Validated M4 review-packet first-pass isolation: deterministic proposal identity, "
-        "standalone entity-resolution visibility, temporal ordering, and content-addressed packet identity."
+        "Validated M4 review-packet isolation: deterministic proposal identity, standalone entity-resolution visibility, "
+        "claimed-before-extraction authority ordering, exact Claim/Event assessment coverage, temporal ordering, "
+        "and content-addressed packet identity."
     )
     return 0
 
