@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/ai-resolution-verification-run.schema.json",
+  "title": "Saudi Defense Atlas AI Resolution Verification Run",
+  "description": "Deterministic resolution/comparison record downstream of an accepted AIExtractionRun. It may prepare an AMBER ChangeProposal but has no approval, canonical mutation, or publication authority.",
+  "type": "object",
+  "required": [
+    "id",
+    "extraction_run_id",
+    "created_at",
+    "resolver_version",
+    "authority",
+    "entity_resolutions",
+    "claim_assessments",
+    "event_assessments",
+    "change_proposal_id"
+  ],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "extraction_run_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "created_at": { "type": "string", "format": "date-time" },
+    "resolver_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "authority": {
+      "type": "object",
+      "required": ["mode", "approval_authority", "canonical_mutation_authority", "publication_authority"],
+      "properties": {
+        "mode": { "const": "proposal_preparation_only" },
+        "approval_authority": { "const": false },
+        "canonical_mutation_authority": { "const": false },
+        "publication_authority": { "const": false }
+      },
+      "additionalProperties": false
+    },
+    "entity_resolutions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entity_resolution" }
+    },
+    "claim_assessments": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/claim_assessment" }
+    },
+    "event_assessments": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/event_assessment" }
+    },
+    "change_proposal_id": {
+      "oneOf": [
+        { "$ref": "common.schema.json#/$defs/canonical_id" },
+        { "type": "null" }
+      ]
+    }
+  },
+  "$defs": {
+    "candidate_id": { "$ref": "ai-extraction-run.schema.json#/$defs/candidate_id" },
+    "entity_resolution": {
+      "type": "object",
+      "required": ["candidate_entity_id", "outcome", "match_basis", "canonical_entity_id", "candidate_match_ids"],
+      "properties": {
+        "candidate_entity_id": { "$ref": "#/$defs/candidate_id" },
+        "outcome": { "type": "string", "enum": ["matched", "ambiguous", "unresolved"] },
+        "match_basis": { "type": "string", "enum": ["exact_name", "exact_alias", "ambiguous_exact", "none"] },
+        "canonical_entity_id": {
+          "oneOf": [
+            { "$ref": "common.schema.json#/$defs/canonical_id" },
+            { "type": "null" }
+          ]
+        },
+        "candidate_match_ids": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "outcome": { "const": "matched" } }, "required": ["outcome"] },
+          "then": {
+            "properties": {
+              "match_basis": { "enum": ["exact_name", "exact_alias"] },
+              "canonical_entity_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+              "candidate_match_ids": { "minItems": 1, "maxItems": 1 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "outcome": { "const": "ambiguous" } }, "required": ["outcome"] },
+          "then": {
+            "properties": {
+              "match_basis": { "const": "ambiguous_exact" },
+              "canonical_entity_id": { "type": "null" },
+              "candidate_match_ids": { "minItems": 2 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "outcome": { "const": "unresolved" } }, "required": ["outcome"] },
+          "then": {
+            "properties": {
+              "match_basis": { "const": "none" },
+              "canonical_entity_id": { "type": "null" },
+              "candidate_match_ids": { "maxItems": 0 }
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "claim_assessment": {
+      "type": "object",
+      "required": ["candidate_claim_id", "outcome", "canonical_claim_ids"],
+      "properties": {
+        "candidate_claim_id": { "$ref": "#/$defs/candidate_id" },
+        "outcome": { "type": "string", "enum": ["new", "duplicate", "conflict", "blocked_unresolved", "blocked_ambiguous", "blocked_policy"] },
+        "canonical_claim_ids": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "outcome": { "enum": ["duplicate", "conflict"] } }, "required": ["outcome"] },
+          "then": { "properties": { "canonical_claim_ids": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "outcome": { "enum": ["new", "blocked_unresolved", "blocked_ambiguous", "blocked_policy"] } }, "required": ["outcome"] },
+          "then": { "properties": { "canonical_claim_ids": { "maxItems": 0 } } }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "event_assessment": {
+      "type": "object",
+      "required": ["candidate_event_id", "outcome", "canonical_event_ids"],
+      "properties": {
+        "candidate_event_id": { "$ref": "#/$defs/candidate_id" },
+        "outcome": { "type": "string", "enum": ["new", "possible_duplicate", "blocked_unresolved", "blocked_ambiguous"] },
+        "canonical_event_ids": {
+          "type": "array",
+          "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "uniqueItems": true
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "outcome": { "const": "possible_duplicate" } }, "required": ["outcome"] },
+          "then": { "properties": { "canonical_event_ids": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "outcome": { "enum": ["new", "blocked_unresolved", "blocked_ambiguous"] } }, "required": ["outcome"] },
+          "then": { "properties": { "canonical_event_ids": { "maxItems": 0 } } }
+        }
+      ],
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
