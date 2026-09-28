@@ -49,7 +49,7 @@
       "uniqueItems": true,
       "items": {
         "type": "object",
-        "required": ["finding_id", "kind", "priority", "subject_id", "reason_codes"],
+        "required": ["finding_id", "kind", "priority", "subject_id", "reason_codes", "context"],
         "properties": {
           "finding_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
           "kind": {
@@ -63,7 +63,8 @@
             "minItems": 1,
             "uniqueItems": true,
             "items": { "type": "string", "minLength": 1, "maxLength": 128 }
-          }
+          },
+          "context": { "type": "object" }
         },
         "additionalProperties": false
       }
