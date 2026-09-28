@@ -76,6 +76,7 @@
           "if": { "properties": { "outcome": { "const": "matched" } }, "required": ["outcome"] },
           "then": {
             "properties": {
+              "match_basis": { "enum": ["exact_name", "exact_alias"] },
               "canonical_entity_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
               "candidate_match_ids": { "minItems": 1, "maxItems": 1 }
             }
@@ -85,6 +86,7 @@
           "if": { "properties": { "outcome": { "const": "ambiguous" } }, "required": ["outcome"] },
           "then": {
             "properties": {
+              "match_basis": { "const": "ambiguous_exact" },
               "canonical_entity_id": { "type": "null" },
               "candidate_match_ids": { "minItems": 2 }
             }
@@ -94,6 +96,7 @@
           "if": { "properties": { "outcome": { "const": "unresolved" } }, "required": ["outcome"] },
           "then": {
             "properties": {
+              "match_basis": { "const": "none" },
               "canonical_entity_id": { "type": "null" },
               "candidate_match_ids": { "maxItems": 0 }
             }
@@ -107,13 +110,23 @@
       "required": ["candidate_claim_id", "outcome", "canonical_claim_ids"],
       "properties": {
         "candidate_claim_id": { "$ref": "#/$defs/candidate_id" },
-        "outcome": { "type": "string", "enum": ["new", "duplicate", "conflict", "blocked_unresolved"] },
+        "outcome": { "type": "string", "enum": ["new", "duplicate", "conflict", "blocked_unresolved", "blocked_ambiguous"] },
         "canonical_claim_ids": {
           "type": "array",
           "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
           "uniqueItems": true
         }
       },
+      "allOf": [
+        {
+          "if": { "properties": { "outcome": { "enum": ["duplicate", "conflict"] } }, "required": ["outcome"] },
+          "then": { "properties": { "canonical_claim_ids": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "outcome": { "enum": ["new", "blocked_unresolved", "blocked_ambiguous"] } }, "required": ["outcome"] },
+          "then": { "properties": { "canonical_claim_ids": { "maxItems": 0 } } }
+        }
+      ],
       "additionalProperties": false
     },
     "event_assessment": {
@@ -121,13 +134,23 @@
       "required": ["candidate_event_id", "outcome", "canonical_event_ids"],
       "properties": {
         "candidate_event_id": { "$ref": "#/$defs/candidate_id" },
-        "outcome": { "type": "string", "enum": ["new", "duplicate", "blocked_unresolved"] },
+        "outcome": { "type": "string", "enum": ["new", "possible_duplicate", "blocked_unresolved", "blocked_ambiguous"] },
         "canonical_event_ids": {
           "type": "array",
           "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
           "uniqueItems": true
         }
       },
+      "allOf": [
+        {
+          "if": { "properties": { "outcome": { "const": "possible_duplicate" } }, "required": ["outcome"] },
+          "then": { "properties": { "canonical_event_ids": { "minItems": 1 } } }
+        },
+        {
+          "if": { "properties": { "outcome": { "enum": ["new", "blocked_unresolved", "blocked_ambiguous"] } }, "required": ["outcome"] },
+          "then": { "properties": { "canonical_event_ids": { "maxItems": 0 } } }
+        }
+      ],
       "additionalProperties": false
     }
   },
