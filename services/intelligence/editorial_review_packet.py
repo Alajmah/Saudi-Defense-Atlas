@@ -44,6 +44,9 @@ def _verify_temporal_order(
     created_at: str,
 ) -> None:
     queue_created = _parse_datetime(queue_item.get("created_at"), "queue created_at")
+    extraction_started = _parse_datetime(
+        extraction_run.get("started_at"), "extraction started_at"
+    )
     extraction_completed = _parse_datetime(
         extraction_run.get("completed_at"), "extraction completed_at"
     )
@@ -53,8 +56,10 @@ def _verify_temporal_order(
     proposal_created = _parse_datetime(proposal.get("created_at"), "proposal created_at")
     packet_created = _parse_datetime(created_at, "review packet created_at")
 
-    if queue_created > extraction_completed:
-        raise EditorialReviewPacketError("queue item cannot postdate completed extraction")
+    if queue_created > extraction_started:
+        raise EditorialReviewPacketError("queue item must exist before extraction starts")
+    if extraction_started > extraction_completed:
+        raise EditorialReviewPacketError("extraction started_at cannot postdate completed_at")
     if resolution_created < extraction_completed:
         raise EditorialReviewPacketError("resolution run cannot predate completed extraction")
     if proposal_created < extraction_completed:
