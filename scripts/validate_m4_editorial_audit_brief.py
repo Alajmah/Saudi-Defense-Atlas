@@ -345,6 +345,20 @@ def main() -> int:
         failures,
     )
 
+    numeric_false_authority = copy.deepcopy(report)
+    numeric_false_authority["authority"]["truth_authority"] = 0
+    numeric_false_body = {
+        key: value for key, value in numeric_false_authority.items() if key != "id"
+    }
+    numeric_false_authority["id"] = _stable_id(
+        "SDA-EDITORIAL-AUDIT", numeric_false_body
+    )
+    expect_raises(
+        "self-consistent numeric false authority",
+        lambda: build_daily_editorial_brief(audit_report=numeric_false_authority),
+        failures,
+    )
+
     tampered_finding = copy.deepcopy(report)
     tampered_finding["findings"][0]["priority"] = "normal"
     expect_raises(
@@ -382,7 +396,7 @@ def main() -> int:
 
     print(
         "Validated M4 deterministic editorial audit + daily brief: aligned staleness/acquisition/current-queue snapshot inputs, "
-        "action-only findings, deterministic priority/grouping, completed-item suppression, multi-feed action identity, semantic/content integrity, and zero truth/approval/mutation authority."
+        "action-only findings, deterministic priority/grouping, completed-item suppression, multi-feed action identity, type-strict semantic/content integrity, and zero truth/approval/mutation authority."
     )
     return 0
 
