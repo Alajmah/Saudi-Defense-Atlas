@@ -122,3 +122,6 @@ jobs:
 
       - name: Validate M4 editorial decision binding
         run: python scripts/validate_m4_editorial_decision_binding.py
+
+      - name: Validate M4 multi-source editorial vertical slice
+        run: python scripts/validate_m4_multi_source_vertical_slice.py
