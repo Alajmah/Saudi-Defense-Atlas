@@ -1,9 +1,9 @@
 """Deterministic M4 candidate resolver/verifier and AMBER proposal preparation.
 
-This module is deliberately conservative. It performs exact multilingual name/alias
-matching only, preserves ambiguity, compares resolved candidate Claims/Events with
-canonical records, and may prepare a human-review ChangeProposal. It never approves,
-writes canonical knowledge, publishes, or promotes model self-confidence.
+Only exact, bounded identity matching is allowed here. Ambiguity remains explicit,
+model-extracted facts stay unverified, possible duplicate Events are not suppressed as
+certain duplicates, and the service has no approval, canonical-write, or publication
+authority.
 """
 
 from __future__ import annotations
@@ -18,10 +18,12 @@ from typing import Any
 
 
 class ResolverVerifierError(ValueError):
-    """Raised when candidate resolution/verification cannot proceed safely."""
+    """Raised when resolution/verification cannot proceed safely."""
 
 
-_RESOLVER_VERSION = "resolver-verifier-v0.1"
+_RESOLVER_VERSION = "resolver-verifier-v0.2"
+_CANDIDATE_RE = re.compile(r"^CAND-[A-Z0-9][A-Z0-9._-]{0,63}$")
+_RESOLUTION_ALIAS_KINDS = {"official", "abbreviation", "designation", "common"}
 _EVENT_ROLES = {
     "buyer",
     "seller",
@@ -35,7 +37,33 @@ _EVENT_ROLES = {
     "supplier",
     "other",
 }
-_CANDIDATE_RE = re.compile(r"^CAND-[A-Z0-9][A-Z0-9._-]{0,63}$")
+_QUANTITY_PREDICATES = {"inventory.quantity", "procurement.quantity"}
+_POLICY_BLOCKED_PREDICATES = {"facility.public_latitude", "facility.public_longitude"}
+_ENTITY_PREDICATES: dict[str, tuple[set[str], set[str]]] = {
+    "organization.parent_of.organization": ({"organization"}, {"organization"}),
+    "organization.operates.equipment_variant": ({"organization"}, {"equipment_variant"}),
+    "military_unit.part_of.organization": ({"military_unit"}, {"organization"}),
+    "military_unit.operates.equipment_variant": ({"military_unit"}, {"equipment_variant"}),
+    "manufacturer.manufactures.equipment": ({"organization"}, {"equipment"}),
+    "company.participates_in.procurement_program": ({"organization"}, {"procurement_program"}),
+    "equipment_variant.variant_of.equipment": ({"equipment_variant"}, {"equipment"}),
+    "procurement_program.acquires.equipment_variant": ({"procurement_program"}, {"equipment_variant"}),
+    "contract.part_of.procurement_program": ({"contract"}, {"procurement_program"}),
+    "contract.awarded_to.company": ({"contract"}, {"organization"}),
+    "exercise.participant.organization": ({"exercise"}, {"organization"}),
+    "exercise.uses.equipment_variant": ({"exercise"}, {"equipment_variant"}),
+    "localization_program.related_to.equipment": ({"localization_program"}, {"equipment"}),
+    "facility.associated_with.organization": ({"facility"}, {"organization"}),
+}
+_SCALAR_PREDICATES: dict[str, tuple[set[str], set[str]]] = {
+    "equipment.service_state": ({"equipment", "equipment_variant"}, {"string"}),
+    "procurement_program.lifecycle_state": ({"procurement_program"}, {"string"}),
+    "inventory.quantity": ({"equipment", "equipment_variant"}, {"number"}),
+    "procurement.quantity": ({"procurement_program", "contract"}, {"number"}),
+    "facility.public_latitude": ({"facility"}, {"number"}),
+    "facility.public_longitude": ({"facility"}, {"number"}),
+    "facility.public_location_label": ({"facility"}, {"string"}),
+}
 
 
 def _stable_json(value: Any) -> str:
@@ -98,10 +126,11 @@ def _terms(record: Mapping[str, Any]) -> tuple[set[str], set[str]]:
     raw_aliases = record.get("aliases", [])
     if isinstance(raw_aliases, Sequence) and not isinstance(raw_aliases, (str, bytes)):
         for alias in raw_aliases:
-            if isinstance(alias, Mapping):
-                value = alias.get("value")
-                if isinstance(value, str) and value.strip():
-                    aliases.add(_normalize_text(value))
+            if not isinstance(alias, Mapping) or alias.get("kind") not in _RESOLUTION_ALIAS_KINDS:
+                continue
+            value = alias.get("value")
+            if isinstance(value, str) and value.strip():
+                aliases.add(_normalize_text(value))
     return names, aliases
 
 
@@ -119,7 +148,7 @@ def _resolve_entities(
         candidate_names, candidate_aliases = _terms(candidate)
         candidate_all = candidate_names | candidate_aliases
         if not candidate_all:
-            raise ResolverVerifierError(f"candidate Entity {candidate_id} has no resolvable name/alias")
+            raise ResolverVerifierError(f"candidate Entity {candidate_id} has no safe exact name/alias term")
 
         matches: list[tuple[str, str]] = []
         for entity in canonical:
@@ -136,39 +165,33 @@ def _resolve_entities(
 
         match_ids = sorted({item[0] for item in matches})
         if len(match_ids) == 1:
-            basis = "exact_name" if any(item == (match_ids[0], "exact_name") for item in matches) else "exact_alias"
+            basis = "exact_name" if (match_ids[0], "exact_name") in matches else "exact_alias"
             resolved[candidate_id] = match_ids[0]
-            resolutions.append(
-                {
-                    "candidate_entity_id": candidate_id,
-                    "outcome": "matched",
-                    "match_basis": basis,
-                    "canonical_entity_id": match_ids[0],
-                    "candidate_match_ids": match_ids,
-                }
-            )
+            resolutions.append({
+                "candidate_entity_id": candidate_id,
+                "outcome": "matched",
+                "match_basis": basis,
+                "canonical_entity_id": match_ids[0],
+                "candidate_match_ids": match_ids,
+            })
         elif len(match_ids) > 1:
             resolved[candidate_id] = None
-            resolutions.append(
-                {
-                    "candidate_entity_id": candidate_id,
-                    "outcome": "ambiguous",
-                    "match_basis": "ambiguous_exact",
-                    "canonical_entity_id": None,
-                    "candidate_match_ids": match_ids,
-                }
-            )
+            resolutions.append({
+                "candidate_entity_id": candidate_id,
+                "outcome": "ambiguous",
+                "match_basis": "ambiguous_exact",
+                "canonical_entity_id": None,
+                "candidate_match_ids": match_ids,
+            })
         else:
             resolved[candidate_id] = None
-            resolutions.append(
-                {
-                    "candidate_entity_id": candidate_id,
-                    "outcome": "unresolved",
-                    "match_basis": "none",
-                    "canonical_entity_id": None,
-                    "candidate_match_ids": [],
-                }
-            )
+            resolutions.append({
+                "candidate_entity_id": candidate_id,
+                "outcome": "unresolved",
+                "match_basis": "none",
+                "canonical_entity_id": None,
+                "candidate_match_ids": [],
+            })
     return resolutions, resolved
 
 
@@ -192,26 +215,105 @@ def _resolved_claim_value(value: Any, resolved: Mapping[str, str | None]) -> dic
     return copy.deepcopy(dict(value))
 
 
+def _record_has_ambiguous_evidence(
+    record: Mapping[str, Any], evidence_by_id: Mapping[str, Mapping[str, Any]]
+) -> bool:
+    if record.get("extraction_assessment") == "ambiguous_text":
+        return True
+    refs = record.get("evidence_candidate_ids", [])
+    if not isinstance(refs, Sequence) or isinstance(refs, (str, bytes)):
+        raise ResolverVerifierError("candidate evidence references must be an array")
+    for ref in refs:
+        if not isinstance(ref, str) or ref not in evidence_by_id:
+            raise ResolverVerifierError(f"unresolved candidate Evidence {ref!r}")
+        if evidence_by_id[ref].get("capture_assessment") == "ambiguous_text":
+            return True
+    return False
+
+
+def _same_temporal_context(candidate: Mapping[str, Any], canonical: Mapping[str, Any]) -> bool:
+    return _stable_json(candidate.get("validity")) == _stable_json(canonical.get("validity"))
+
+
+def _proven_distinct_points(candidate: Mapping[str, Any], canonical: Mapping[str, Any]) -> bool:
+    left = candidate.get("validity")
+    right = canonical.get("validity")
+    if not isinstance(left, Mapping) or not isinstance(right, Mapping):
+        return False
+    if set(left) != {"point_in_time"} or set(right) != {"point_in_time"}:
+        return False
+    left_point = left.get("point_in_time")
+    right_point = right.get("point_in_time")
+    if not isinstance(left_point, Mapping) or not isinstance(right_point, Mapping):
+        return False
+    if left_point.get("precision") == "unknown" or right_point.get("precision") == "unknown":
+        return False
+    return _stable_json(left_point) != _stable_json(right_point)
+
+
+def _validate_predicate_shape(
+    predicate: Any,
+    subject_id: str,
+    value: Mapping[str, Any],
+    entity_by_id: Mapping[str, Mapping[str, Any]],
+) -> None:
+    subject = entity_by_id.get(subject_id)
+    if not isinstance(subject, Mapping):
+        raise ResolverVerifierError(f"resolved Claim subject {subject_id} is not canonical Entity")
+    subject_type = subject.get("entity_type")
+
+    if predicate in _ENTITY_PREDICATES:
+        allowed_subjects, allowed_values = _ENTITY_PREDICATES[str(predicate)]
+        if subject_type not in allowed_subjects:
+            raise ResolverVerifierError(f"predicate {predicate} has incompatible subject type {subject_type!r}")
+        if value.get("kind") != "entity":
+            raise ResolverVerifierError(f"predicate {predicate} requires entity value")
+        target_id = value.get("entity_id")
+        target = entity_by_id.get(target_id) if isinstance(target_id, str) else None
+        if not isinstance(target, Mapping) or target.get("entity_type") not in allowed_values:
+            raise ResolverVerifierError(f"predicate {predicate} has incompatible entity value")
+        return
+
+    if predicate in _SCALAR_PREDICATES:
+        allowed_subjects, allowed_kinds = _SCALAR_PREDICATES[str(predicate)]
+        if subject_type not in allowed_subjects or value.get("kind") not in allowed_kinds:
+            raise ResolverVerifierError(f"predicate {predicate} has incompatible scalar shape")
+        return
+
+    raise ResolverVerifierError(f"predicate {predicate!r} has no resolver/verifier semantic signature")
+
+
 def _claim_assessments(
     candidate_claims: Sequence[Mapping[str, Any]],
     canonical_claims: Sequence[Mapping[str, Any]],
     resolved: Mapping[str, str | None],
+    entity_by_id: Mapping[str, Mapping[str, Any]],
+    evidence_by_id: Mapping[str, Mapping[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any] | None]]:
     assessments: list[dict[str, Any]] = []
     prepared: dict[str, dict[str, Any] | None] = {}
 
     for candidate in sorted(candidate_claims, key=lambda item: str(item.get("candidate_id"))):
         candidate_id = str(candidate["candidate_id"])
-        subject = _candidate_ref(candidate.get("subject"), resolved, f"Claim {candidate_id} subject")
-        value = _resolved_claim_value(candidate.get("value"), resolved)
-        if subject is None or value is None:
-            assessments.append(
-                {"candidate_claim_id": candidate_id, "outcome": "blocked_unresolved", "canonical_claim_ids": []}
-            )
+        predicate = candidate.get("predicate_id")
+
+        if predicate in _POLICY_BLOCKED_PREDICATES:
+            assessments.append({"candidate_claim_id": candidate_id, "outcome": "blocked_policy", "canonical_claim_ids": []})
+            prepared[candidate_id] = None
+            continue
+        if predicate in _QUANTITY_PREDICATES or _record_has_ambiguous_evidence(candidate, evidence_by_id):
+            assessments.append({"candidate_claim_id": candidate_id, "outcome": "blocked_ambiguous", "canonical_claim_ids": []})
             prepared[candidate_id] = None
             continue
 
-        predicate = candidate.get("predicate_id")
+        subject = _candidate_ref(candidate.get("subject"), resolved, f"Claim {candidate_id} subject")
+        value = _resolved_claim_value(candidate.get("value"), resolved)
+        if subject is None or value is None:
+            assessments.append({"candidate_claim_id": candidate_id, "outcome": "blocked_unresolved", "canonical_claim_ids": []})
+            prepared[candidate_id] = None
+            continue
+
+        _validate_predicate_shape(predicate, subject, value, entity_by_id)
         relevant = [
             claim
             for claim in canonical_claims
@@ -219,23 +321,43 @@ def _claim_assessments(
             and claim.get("predicate_id") == predicate
             and claim.get("claim_state") in {"active", "disputed"}
         ]
-        same = sorted(
-            str(claim["id"])
-            for claim in relevant
-            if _stable_json(claim.get("value")) == _stable_json(value)
-        )
-        if same:
-            assessments.append(
-                {"candidate_claim_id": candidate_id, "outcome": "duplicate", "canonical_claim_ids": same}
-            )
+        if any(isinstance(claim.get("scope"), Mapping) and claim.get("scope") for claim in relevant):
+            assessments.append({"candidate_claim_id": candidate_id, "outcome": "blocked_ambiguous", "canonical_claim_ids": []})
             prepared[candidate_id] = None
             continue
 
-        conflicts = sorted(str(claim["id"]) for claim in relevant)
-        outcome = "conflict" if conflicts else "new"
-        assessments.append(
-            {"candidate_claim_id": candidate_id, "outcome": outcome, "canonical_claim_ids": conflicts}
+        same_context = [claim for claim in relevant if _same_temporal_context(candidate, claim)]
+        duplicates = sorted(
+            str(claim["id"])
+            for claim in same_context
+            if _stable_json(claim.get("value")) == _stable_json(value)
         )
+        if duplicates:
+            assessments.append({"candidate_claim_id": candidate_id, "outcome": "duplicate", "canonical_claim_ids": duplicates})
+            prepared[candidate_id] = None
+            continue
+
+        conflicts = sorted(
+            str(claim["id"])
+            for claim in same_context
+            if _stable_json(claim.get("value")) != _stable_json(value)
+        )
+        if conflicts:
+            outcome = "conflict"
+        else:
+            temporally_unclear = [
+                claim
+                for claim in relevant
+                if not _same_temporal_context(candidate, claim)
+                and not _proven_distinct_points(candidate, claim)
+            ]
+            if temporally_unclear:
+                assessments.append({"candidate_claim_id": candidate_id, "outcome": "blocked_ambiguous", "canonical_claim_ids": []})
+                prepared[candidate_id] = None
+                continue
+            outcome = "new"
+
+        assessments.append({"candidate_claim_id": candidate_id, "outcome": outcome, "canonical_claim_ids": conflicts})
         prepared[candidate_id] = {
             "subject_id": subject,
             "predicate_id": predicate,
@@ -255,21 +377,20 @@ def _event_signature(event: Mapping[str, Any]) -> str:
         if isinstance(item, Mapping)
     )
     related = sorted(str(item) for item in event.get("related_entity_ids", []))
-    return _stable_json(
-        {
-            "event_type": event.get("event_type"),
-            "occurred_at": event.get("occurred_at"),
-            "ended_at": event.get("ended_at"),
-            "participants": normalized_participants,
-            "related_entity_ids": related,
-        }
-    )
+    return _stable_json({
+        "event_type": event.get("event_type"),
+        "occurred_at": event.get("occurred_at"),
+        "ended_at": event.get("ended_at"),
+        "participants": normalized_participants,
+        "related_entity_ids": related,
+    })
 
 
 def _event_assessments(
     candidate_events: Sequence[Mapping[str, Any]],
     canonical_events: Sequence[Mapping[str, Any]],
     resolved: Mapping[str, str | None],
+    evidence_by_id: Mapping[str, Mapping[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, dict[str, Any] | None]]:
     by_signature: dict[str, list[str]] = {}
     for event in canonical_events:
@@ -280,9 +401,13 @@ def _event_assessments(
 
     assessments: list[dict[str, Any]] = []
     prepared: dict[str, dict[str, Any] | None] = {}
-
     for candidate in sorted(candidate_events, key=lambda item: str(item.get("candidate_id"))):
         candidate_id = str(candidate["candidate_id"])
+        if _record_has_ambiguous_evidence(candidate, evidence_by_id):
+            assessments.append({"candidate_event_id": candidate_id, "outcome": "blocked_ambiguous", "canonical_event_ids": []})
+            prepared[candidate_id] = None
+            continue
+
         participants: list[dict[str, str]] = []
         blocked = False
         for item in _sequence(candidate.get("participants", []), f"Event {candidate_id} participants"):
@@ -307,9 +432,7 @@ def _event_assessments(
                 related_ids.append(entity_id)
 
         if blocked:
-            assessments.append(
-                {"candidate_event_id": candidate_id, "outcome": "blocked_unresolved", "canonical_event_ids": []}
-            )
+            assessments.append({"candidate_event_id": candidate_id, "outcome": "blocked_unresolved", "canonical_event_ids": []})
             prepared[candidate_id] = None
             continue
 
@@ -320,38 +443,43 @@ def _event_assessments(
             "participants": sorted(participants, key=lambda item: (item["entity_id"], item["role"])),
             "related_entity_ids": sorted(set(related_ids)),
         }
-        signature = _event_signature(event_payload)
-        duplicates = sorted(by_signature.get(signature, []))
-        if duplicates:
-            assessments.append(
-                {"candidate_event_id": candidate_id, "outcome": "duplicate", "canonical_event_ids": duplicates}
-            )
+        possible_duplicates = sorted(by_signature.get(_event_signature(event_payload), []))
+        if possible_duplicates:
+            assessments.append({"candidate_event_id": candidate_id, "outcome": "possible_duplicate", "canonical_event_ids": possible_duplicates})
             prepared[candidate_id] = None
         else:
-            assessments.append(
-                {"candidate_event_id": candidate_id, "outcome": "new", "canonical_event_ids": []}
-            )
+            assessments.append({"candidate_event_id": candidate_id, "outcome": "new", "canonical_event_ids": []})
             prepared[candidate_id] = event_payload
-
     return assessments, prepared
+
+
+def _candidate_evidence_map(extraction_run: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
+    candidates = extraction_run.get("candidates")
+    if not isinstance(candidates, Mapping):
+        raise ResolverVerifierError("extraction run requires candidates")
+    evidence = _candidate_index(_sequence(candidates.get("evidence", []), "candidate evidence"), "Evidence")
+    source_documents = extraction_run.get("source_document_ids")
+    if not isinstance(source_documents, Sequence) or isinstance(source_documents, (str, bytes)) or not source_documents:
+        raise ResolverVerifierError("extraction run requires source_document_ids")
+    document_ids = {str(item) for item in source_documents}
+    for candidate_id, record in evidence.items():
+        if record.get("document_id") not in document_ids:
+            raise ResolverVerifierError(f"candidate Evidence {candidate_id} references Document outside extraction provenance")
+    return evidence
 
 
 def _materialize_evidence(
     extraction_run: Mapping[str, Any],
+    evidence_by_id: Mapping[str, Mapping[str, Any]],
     used_candidate_evidence_ids: set[str],
 ) -> tuple[dict[str, dict[str, Any]], dict[str, str]]:
-    candidates = extraction_run.get("candidates")
-    if not isinstance(candidates, Mapping):
-        raise ResolverVerifierError("extraction run requires candidates")
-    evidence_records = _candidate_index(_sequence(candidates.get("evidence", []), "candidate evidence"), "Evidence")
     completed_at = extraction_run.get("completed_at")
     if not isinstance(completed_at, str) or not completed_at:
         raise ResolverVerifierError("extraction run requires completed_at")
-
     materialized: dict[str, dict[str, Any]] = {}
     id_map: dict[str, str] = {}
     for candidate_id in sorted(used_candidate_evidence_ids):
-        candidate = evidence_records.get(candidate_id)
+        candidate = evidence_by_id.get(candidate_id)
         if candidate is None:
             raise ResolverVerifierError(f"unresolved candidate Evidence {candidate_id}")
         evidence_id = _stable_id("SDA-EVID-AI", extraction_run.get("id"), candidate_id)
@@ -377,7 +505,7 @@ def build_resolution_verification(
     canonical_claims: Sequence[Mapping[str, Any]],
     canonical_events: Sequence[Mapping[str, Any]],
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Resolve an accepted extraction run and prepare at most one AMBER proposal."""
+    """Resolve accepted candidates and prepare at most one human-review AMBER proposal."""
 
     validation = extraction_run.get("validation")
     authority = extraction_run.get("authority")
@@ -395,9 +523,10 @@ def build_resolution_verification(
     if not isinstance(completed_at, str) or not completed_at:
         raise ResolverVerifierError("extraction run requires completed_at")
 
-    _index(canonical_entities, "Entity")
+    entity_by_id = _index(canonical_entities, "Entity")
     _index(canonical_claims, "Claim")
     _index(canonical_events, "Event")
+    evidence_by_id = _candidate_evidence_map(extraction_run)
 
     candidates = extraction_run.get("candidates")
     if not isinstance(candidates, Mapping):
@@ -405,38 +534,39 @@ def build_resolution_verification(
     candidate_entities = _sequence(candidates.get("entities", []), "candidate entities")
     candidate_claims = _sequence(candidates.get("claims", []), "candidate claims")
     candidate_events = _sequence(candidates.get("events", []), "candidate events")
-    _candidate_index(candidate_entities, "Entity")
-    _candidate_index(candidate_claims, "Claim")
-    _candidate_index(candidate_events, "Event")
+    entity_candidates = _candidate_index(candidate_entities, "Entity")
+    claim_candidates = _candidate_index(candidate_claims, "Claim")
+    event_candidates = _candidate_index(candidate_events, "Event")
+
+    all_candidate_ids = [*evidence_by_id, *entity_candidates, *claim_candidates, *event_candidates]
+    if len(all_candidate_ids) != len(set(all_candidate_ids)):
+        raise ResolverVerifierError("candidate identities must be globally unique across record types")
 
     entity_resolutions, resolved = _resolve_entities(candidate_entities, canonical_entities)
-    claim_assessments, prepared_claims = _claim_assessments(candidate_claims, canonical_claims, resolved)
-    event_assessments, prepared_events = _event_assessments(candidate_events, canonical_events, resolved)
+    claim_assessments, prepared_claims = _claim_assessments(
+        candidate_claims, canonical_claims, resolved, entity_by_id, evidence_by_id
+    )
+    event_assessments, prepared_events = _event_assessments(
+        candidate_events, canonical_events, resolved, evidence_by_id
+    )
 
-    claim_by_id = _candidate_index(candidate_claims, "Claim")
-    event_by_id = _candidate_index(candidate_events, "Event")
     used_evidence: set[str] = set()
     for candidate_id, prepared in prepared_claims.items():
         if prepared is not None:
-            refs = claim_by_id[candidate_id].get("evidence_candidate_ids", [])
-            used_evidence.update(str(item) for item in refs)
+            used_evidence.update(str(item) for item in claim_candidates[candidate_id].get("evidence_candidate_ids", []))
     for candidate_id, prepared in prepared_events.items():
         if prepared is not None:
-            refs = event_by_id[candidate_id].get("evidence_candidate_ids", [])
-            used_evidence.update(str(item) for item in refs)
+            used_evidence.update(str(item) for item in event_candidates[candidate_id].get("evidence_candidate_ids", []))
 
-    evidence_payloads, evidence_id_map = _materialize_evidence(extraction_run, used_evidence)
+    evidence_payloads, evidence_id_map = _materialize_evidence(extraction_run, evidence_by_id, used_evidence)
     mutations: list[dict[str, Any]] = []
     for candidate_id in sorted(evidence_payloads):
-        payload = evidence_payloads[candidate_id]
-        mutations.append(
-            {
-                "id": _stable_id("SDA-MUT-AI", extraction_id, "evidence", candidate_id),
-                "action": "create",
-                "resource_type": "evidence",
-                "payload": payload,
-            }
-        )
+        mutations.append({
+            "id": _stable_id("SDA-MUT-AI", extraction_id, "evidence", candidate_id),
+            "action": "create",
+            "resource_type": "evidence",
+            "payload": evidence_payloads[candidate_id],
+        })
 
     conflict_present = False
     assessment_by_claim = {item["candidate_claim_id"]: item for item in claim_assessments}
@@ -444,21 +574,19 @@ def build_resolution_verification(
         prepared = prepared_claims[candidate_id]
         if prepared is None:
             continue
-        candidate = claim_by_id[candidate_id]
+        candidate = claim_candidates[candidate_id]
         assessment = assessment_by_claim[candidate_id]
         conflict_present = conflict_present or assessment["outcome"] == "conflict"
-        claim_id = _stable_id("SDA-CLAIM-AI", extraction_id, candidate_id)
-        evidence_links = [
-            {"evidence_id": evidence_id_map[str(item)], "role": "supports"}
-            for item in candidate.get("evidence_candidate_ids", [])
-        ]
         payload: dict[str, Any] = {
-            "id": claim_id,
+            "id": _stable_id("SDA-CLAIM-AI", extraction_id, candidate_id),
             "subject_id": prepared["subject_id"],
             "predicate_id": prepared["predicate_id"],
             "value": prepared["value"],
             "confidence": "unverified",
-            "evidence_links": evidence_links,
+            "evidence_links": [
+                {"evidence_id": evidence_id_map[str(item)], "role": "supports"}
+                for item in candidate.get("evidence_candidate_ids", [])
+            ],
             "claim_state": prepared["claim_state"],
             "supersedes_claim_ids": [],
             "verified_at": None,
@@ -466,23 +594,20 @@ def build_resolution_verification(
         }
         if prepared.get("validity") is not None:
             payload["validity"] = prepared["validity"]
-        mutations.append(
-            {
-                "id": _stable_id("SDA-MUT-AI", extraction_id, "claim", candidate_id),
-                "action": "create",
-                "resource_type": "claim",
-                "payload": payload,
-            }
-        )
+        mutations.append({
+            "id": _stable_id("SDA-MUT-AI", extraction_id, "claim", candidate_id),
+            "action": "create",
+            "resource_type": "claim",
+            "payload": payload,
+        })
 
     for candidate_id in sorted(prepared_events):
         prepared = prepared_events[candidate_id]
         if prepared is None:
             continue
-        candidate = event_by_id[candidate_id]
-        event_id = _stable_id("SDA-EVENT-AI", extraction_id, candidate_id)
-        payload = {
-            "id": event_id,
+        candidate = event_candidates[candidate_id]
+        payload: dict[str, Any] = {
+            "id": _stable_id("SDA-EVENT-AI", extraction_id, candidate_id),
             "event_type": prepared["event_type"],
             "occurred_at": prepared["occurred_at"],
             "participants": prepared["participants"],
@@ -498,14 +623,12 @@ def build_resolution_verification(
         }
         if prepared.get("ended_at") is not None:
             payload["ended_at"] = prepared["ended_at"]
-        mutations.append(
-            {
-                "id": _stable_id("SDA-MUT-AI", extraction_id, "event", candidate_id),
-                "action": "create",
-                "resource_type": "event",
-                "payload": payload,
-            }
-        )
+        mutations.append({
+            "id": _stable_id("SDA-MUT-AI", extraction_id, "event", candidate_id),
+            "action": "create",
+            "resource_type": "event",
+            "payload": payload,
+        })
 
     proposal: dict[str, Any] | None = None
     proposal_id: str | None = None
