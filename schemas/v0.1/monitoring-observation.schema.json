@@ -1,0 +1,77 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/monitoring-observation.schema.json",
+  "title": "Saudi Defense Atlas Monitoring Observation",
+  "description": "Deterministic source-monitoring observation derived from a registered-feed retrieval and canonical content classification. It is operational metadata, not canonical factual knowledge.",
+  "type": "object",
+  "required": [
+    "id",
+    "source_id",
+    "source_class",
+    "document_key",
+    "routing_policy_id",
+    "observed_at",
+    "ingestion_status",
+    "raw_content_sha256",
+    "canonical_content_sha256",
+    "document_id",
+    "relevance",
+    "sensitivity",
+    "ai_extraction_eligible",
+    "dedupe_key"
+  ],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "source_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "source_class": { "type": "string", "enum": ["A", "B", "C", "D", "E"] },
+    "document_key": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "routing_policy_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "observed_at": { "type": "string", "format": "date-time" },
+    "ingestion_status": { "type": "string", "enum": ["new", "changed", "unchanged"] },
+    "raw_content_sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+    "canonical_content_sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+    "document_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "relevance": {
+      "type": "object",
+      "required": ["classification", "rule_ids"],
+      "properties": {
+        "classification": { "type": "string", "enum": ["relevant", "irrelevant"] },
+        "rule_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "sensitivity": {
+      "type": "object",
+      "required": ["lane", "rule_ids"],
+      "properties": {
+        "lane": { "type": "string", "enum": ["GREEN", "AMBER", "RED"] },
+        "rule_ids": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 128 },
+          "uniqueItems": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "ai_extraction_eligible": { "type": "boolean" },
+    "dedupe_key": {
+      "type": "string",
+      "pattern": "^sha256:[A-Fa-f0-9]{64}$"
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "source_class": { "const": "E" } }, "required": ["source_class"] },
+      "then": { "properties": { "ai_extraction_eligible": { "const": false } } }
+    },
+    {
+      "if": { "properties": { "sensitivity": { "properties": { "lane": { "const": "RED" } }, "required": ["lane"] } }, "required": ["sensitivity"] },
+      "then": { "properties": { "ai_extraction_eligible": { "const": false } } }
+    }
+  ],
+  "additionalProperties": false
+}
