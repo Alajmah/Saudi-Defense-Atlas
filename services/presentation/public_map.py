@@ -19,6 +19,7 @@ _LATITUDE = "facility.public_latitude"
 _LONGITUDE = "facility.public_longitude"
 _LOCATION_LABEL = "facility.public_location_label"
 _ASSOCIATED_ORG = "facility.associated_with.organization"
+_COORDINATE_UNIT = "degrees"
 
 _ALLOWED_CATEGORIES = {
     "air_base",
@@ -30,7 +31,7 @@ _ALLOWED_CATEGORIES = {
     "administrative_facility",
 }
 _ALLOWED_CONFIDENCE = {"verified", "high"}
-_BACKEND_ID_RE = re.compile(r"(?<![A-Za-z0-9_-])[QP]\d+(?![A-Za-z0-9_-])")
+_BACKEND_ID_RE = re.compile(r"^[QP]\d+$")
 
 
 def _utc(value: str, label: str) -> str:
@@ -49,6 +50,10 @@ def _number_claim_value(claim: Mapping[str, Any], label: str) -> float:
     value = claim.get("value")
     if not isinstance(value, Mapping) or value.get("kind") != "number":
         raise ProjectionError(f"{label} must use a numeric Claim value")
+    if value.get("unit") != _COORDINATE_UNIT:
+        raise ProjectionError(
+            f"{label} must use {_COORDINATE_UNIT!r} as its coordinate unit"
+        )
     raw = value.get("value")
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
         raise ProjectionError(f"{label} requires numeric value")
@@ -76,8 +81,6 @@ def _eligible_claims(
                 raise ProjectionError(
                     f"facility {entity_id} has disputed public-location Claim {claim.get('id')}"
                 )
-            # Optional metadata cannot make an otherwise safe fixed-facility
-            # coordinate feature disappear merely because that metadata is disputed.
             continue
         if state != "active":
             continue
@@ -206,9 +209,26 @@ def _dedupe_citations(citations: Sequence[Mapping[str, Any]]) -> list[dict[str, 
     return [deduped[key] for key in sorted(deduped)]
 
 
-def _assert_no_backend_ids(value: Any) -> None:
-    if _BACKEND_ID_RE.search(repr(value)):
-        raise ProjectionError("backend Q/P identifier leaked into public map projection")
+def _assert_public_id(value: Any, label: str) -> None:
+    if not isinstance(value, str) or not value:
+        raise ProjectionError(f"{label} requires a public SDA identifier")
+    if _BACKEND_ID_RE.fullmatch(value):
+        raise ProjectionError(f"backend identifier leaked through {label}")
+
+
+def _assert_feature_identity_fields(feature: Mapping[str, Any]) -> None:
+    _assert_public_id(feature.get("id"), "map feature id")
+    _assert_public_id(feature.get("entity_id"), "map entity id")
+    for claim_id in feature.get("coordinate_claim_ids", []):
+        _assert_public_id(claim_id, "coordinate claim id")
+    for organization_id in feature.get("associated_organization_ids", []):
+        _assert_public_id(organization_id, "associated organization id")
+    for citation in feature.get("citations", []):
+        if not isinstance(citation, Mapping):
+            raise ProjectionError("public citation must be an object")
+        _assert_public_id(citation.get("evidence_id"), "citation evidence id")
+        _assert_public_id(citation.get("document_id"), "citation document id")
+        _assert_public_id(citation.get("source_id"), "citation source id")
 
 
 def build_public_map_view(
@@ -229,9 +249,6 @@ def build_public_map_view(
     sources_by_id = index_by_id(sources, "Source")
     projected = _utc(projected_at, "projected_at")
 
-    # Facility-location/association predicates are valid only for facility
-    # subjects. Malformed cross-record semantics fail closed instead of being
-    # silently ignored by the public projection.
     for claim in claims:
         if claim.get("predicate_id") not in {
             _LATITUDE,
@@ -246,6 +263,7 @@ def build_public_map_view(
             raise ProjectionError("public facility Claim has non-facility subject")
 
     features: list[dict[str, Any]] = []
+    feature_ids: set[str] = set()
     record_ids: set[str] = set()
 
     for entity_id in sorted(entity_by_id):
@@ -306,8 +324,13 @@ def build_public_map_view(
         all_citations = _dedupe_citations(
             [*coordinate_citations, *label_citations, *org_citations]
         )
+        feature_id = f"SDA-MAP-{entity_id}"
+        if feature_id in feature_ids:
+            raise ProjectionError(f"duplicate generated map feature id: {feature_id}")
+        feature_ids.add(feature_id)
+
         feature = {
-            "id": f"SDA-MAP-{entity_id.removeprefix('SDA-')}",
+            "id": feature_id,
             "entity_id": entity_id,
             "entity_type": "facility",
             "category": category,
@@ -323,7 +346,7 @@ def build_public_map_view(
             "associated_organization_ids": organization_ids,
             "citations": all_citations,
         }
-        _assert_no_backend_ids(feature)
+        _assert_feature_identity_fields(feature)
         features.append(feature)
         record_ids.add(entity_id)
         record_ids.update(coordinate_claim_ids)
@@ -338,14 +361,18 @@ def build_public_map_view(
                 }
             )
 
-    view = {
+    normalized_revision_ids = sorted(set(revision_ids))
+    for record_id in record_ids:
+        _assert_public_id(record_id, "provenance record id")
+    for revision_id in normalized_revision_ids:
+        _assert_public_id(revision_id, "provenance revision id")
+
+    return {
         "scope": "public_non_operational_fixed_facilities",
         "projected_at": projected,
         "features": features,
         "provenance": {
             "record_ids": sorted(record_ids),
-            "revision_ids": sorted(set(revision_ids)),
+            "revision_ids": normalized_revision_ids,
         },
     }
-    _assert_no_backend_ids(view)
-    return view
