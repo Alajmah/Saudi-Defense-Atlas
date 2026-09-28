@@ -23,9 +23,11 @@ class EditorialRoutingError(ValueError):
 
 @dataclass(frozen=True)
 class RoutingPolicy:
+    policy_id: str
     relevance_terms: tuple[str, ...]
-    restricted_terms: tuple[str, ...] = ()
+    restricted_terms: tuple[str, ...]
     high_priority_terms: tuple[str, ...] = ()
+    ai_extraction_feed_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -65,13 +67,36 @@ def _validate_terms(terms: Sequence[str], label: str) -> tuple[str, ...]:
     return tuple(rendered)
 
 
+def _validate_feed_keys(values: Sequence[str]) -> tuple[str, ...]:
+    rendered: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        if not isinstance(value, str) or "|" not in value:
+            raise EditorialRoutingError(
+                "ai_extraction_feed_keys must use 'source_id|document_key' strings"
+            )
+        source_id, document_key = value.split("|", 1)
+        if not source_id or not document_key:
+            raise EditorialRoutingError("ai_extraction_feed_keys contains empty identity")
+        if value in seen:
+            raise EditorialRoutingError(f"duplicate ai_extraction_feed_key: {value}")
+        seen.add(value)
+        rendered.append(value)
+    return tuple(rendered)
+
+
 def validate_policy(policy: RoutingPolicy) -> RoutingPolicy:
+    if not isinstance(policy.policy_id, str) or not policy.policy_id.strip():
+        raise EditorialRoutingError("routing policy requires policy_id/version")
     relevance = _validate_terms(policy.relevance_terms, "relevance_terms")
     if not relevance:
         raise EditorialRoutingError("relevance_terms must not be empty")
     restricted = _validate_terms(policy.restricted_terms, "restricted_terms")
+    if not restricted:
+        raise EditorialRoutingError("restricted_terms must not be empty")
     priority = _validate_terms(policy.high_priority_terms, "high_priority_terms")
-    return RoutingPolicy(relevance, restricted, priority)
+    feed_keys = _validate_feed_keys(policy.ai_extraction_feed_keys)
+    return RoutingPolicy(policy.policy_id.strip(), relevance, restricted, priority, feed_keys)
 
 
 def _matched_terms(text: str, terms: Sequence[str]) -> list[str]:
@@ -136,6 +161,13 @@ def build_monitoring_observation(
 
     relevant = bool(relevant_terms)
     sensitivity_lane = "RED" if restricted_terms else ("AMBER" if relevant else "GREEN")
+    feed_key = f"{source_id}|{receipt.document_key}"
+    extraction_eligible = (
+        relevant
+        and not restricted_terms
+        and source_class != "E"
+        and feed_key in checked.ai_extraction_feed_keys
+    )
     observation_id = _stable_id(
         "SDA-MON-",
         source_id,
@@ -152,6 +184,7 @@ def build_monitoring_observation(
         "source_id": source_id,
         "source_class": source_class,
         "document_key": receipt.document_key,
+        "routing_policy_id": checked.policy_id,
         "observed_at": observed_at,
         "ingestion_status": ingestion.status,
         "raw_content_sha256": raw_sha.lower(),
@@ -165,6 +198,7 @@ def build_monitoring_observation(
             "lane": sensitivity_lane,
             "rule_ids": [f"restricted:{term}" for term in restricted_terms],
         },
+        "ai_extraction_eligible": extraction_eligible,
         "dedupe_key": f"sha256:{canonical_sha.lower()}",
     }
 
@@ -180,7 +214,7 @@ def _desired_lane(observation: Mapping[str, Any]) -> str | None:
         raise EditorialRoutingError("observation sensitivity is malformed")
     if sensitivity.get("lane") == "RED":
         return "restricted_human"
-    return "discovery_review" if observation.get("source_class") == "E" else "candidate_extraction"
+    return "candidate_extraction" if observation.get("ai_extraction_eligible") is True else "discovery_review"
 
 
 def _lane_rank(lane: str) -> int:
@@ -192,7 +226,11 @@ def _lane_rank(lane: str) -> int:
 
 
 def _reason_codes(observation: Mapping[str, Any], lane: str) -> list[str]:
-    reasons = {f"source_class:{observation['source_class']}", f"lane:{lane}"}
+    reasons = {
+        f"source_class:{observation['source_class']}",
+        f"lane:{lane}",
+        f"policy:{observation['routing_policy_id']}",
+    }
     relevance = observation.get("relevance")
     sensitivity = observation.get("sensitivity")
     if isinstance(relevance, Mapping):
