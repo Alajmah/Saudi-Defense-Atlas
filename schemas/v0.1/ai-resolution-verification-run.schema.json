@@ -110,7 +110,7 @@
       "required": ["candidate_claim_id", "outcome", "canonical_claim_ids"],
       "properties": {
         "candidate_claim_id": { "$ref": "#/$defs/candidate_id" },
-        "outcome": { "type": "string", "enum": ["new", "duplicate", "conflict", "blocked_unresolved", "blocked_ambiguous"] },
+        "outcome": { "type": "string", "enum": ["new", "duplicate", "conflict", "blocked_unresolved", "blocked_ambiguous", "blocked_policy"] },
         "canonical_claim_ids": {
           "type": "array",
           "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
@@ -123,7 +123,7 @@
           "then": { "properties": { "canonical_claim_ids": { "minItems": 1 } } }
         },
         {
-          "if": { "properties": { "outcome": { "enum": ["new", "blocked_unresolved", "blocked_ambiguous"] } }, "required": ["outcome"] },
+          "if": { "properties": { "outcome": { "enum": ["new", "blocked_unresolved", "blocked_ambiguous", "blocked_policy"] } }, "required": ["outcome"] },
           "then": { "properties": { "canonical_claim_ids": { "maxItems": 0 } } }
         }
       ],
