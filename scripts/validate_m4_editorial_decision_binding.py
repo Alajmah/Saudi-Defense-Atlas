@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import sys
 from pathlib import Path
 from typing import Any
@@ -57,6 +59,13 @@ def validate(schema_name: str, value: dict[str, Any], failures: list[str]) -> No
         failures.append(
             f"{schema_name}: " + "; ".join(error.message for error in errors)
         )
+
+
+def canonical_object_sha(value: Any) -> str:
+    encoded = json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
 
 
 class FakeBackend:
@@ -140,6 +149,7 @@ def main() -> int:
     validate("editorial-decision-binding.schema.json", binding, failures)
     expect(
         binding["review_packet_id"] == packet["id"]
+        and binding["review_packet_sha256"] == canonical_object_sha(packet)
         and binding["proposal_id"] == proposal["id"]
         and binding["proposal_sha256"] == canonical_sha256(proposal),
         "binding lost exact review/proposal identity",
@@ -251,7 +261,7 @@ def main() -> int:
     )
 
     tampered_binding = copy.deepcopy(binding)
-    tampered_binding["review_decision_id"] = "SDA-DECISION-OTHER"
+    tampered_binding["review_packet_sha256"] = "0" * 64
     expect_raises(
         "binding record tampered after creation",
         lambda: validate_editorial_decision_binding(
@@ -283,7 +293,7 @@ def main() -> int:
         return 1
 
     print(
-        "Validated M4 editorial decision binding: exact packet/proposal/decision hashes, human-only AMBER review, "
+        "Validated M4 editorial decision binding: full packet/proposal/decision hashes, human-only AMBER review, "
         "temporal ordering, immutable audit binding, reject-no-write behavior, and approved reuse of the existing mutation guard."
     )
     return 0
