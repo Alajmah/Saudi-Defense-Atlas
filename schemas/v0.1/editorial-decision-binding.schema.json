@@ -7,6 +7,7 @@
   "required": [
     "id",
     "review_packet_id",
+    "review_packet_sha256",
     "proposal_id",
     "proposal_sha256",
     "review_decision_id",
@@ -20,6 +21,10 @@
   "properties": {
     "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
     "review_packet_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "review_packet_sha256": {
+      "type": "string",
+      "pattern": "^[A-Fa-f0-9]{64}$"
+    },
     "proposal_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
     "proposal_sha256": {
       "type": "string",
