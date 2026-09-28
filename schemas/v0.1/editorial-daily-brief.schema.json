@@ -66,6 +66,20 @@
           },
           "context": { "type": "object" }
         },
+        "allOf": [
+          {
+            "if": { "properties": { "kind": { "const": "claim_review_required" } }, "required": ["kind"] },
+            "then": { "properties": { "context": { "$ref": "editorial-audit-report.schema.json#/$defs/claim_review_context" } } }
+          },
+          {
+            "if": { "properties": { "kind": { "const": "source_monitoring_required" } }, "required": ["kind"] },
+            "then": { "properties": { "context": { "$ref": "editorial-audit-report.schema.json#/$defs/source_monitoring_context" } } }
+          },
+          {
+            "if": { "properties": { "kind": { "const": "queue_action_required" } }, "required": ["kind"] },
+            "then": { "properties": { "context": { "$ref": "editorial-audit-report.schema.json#/$defs/queue_action_context" } } }
+          }
+        ],
         "additionalProperties": false
       }
     }
