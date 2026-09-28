@@ -9,6 +9,7 @@
     "source_id",
     "source_class",
     "document_key",
+    "routing_policy_id",
     "observed_at",
     "ingestion_status",
     "raw_content_sha256",
@@ -16,6 +17,7 @@
     "document_id",
     "relevance",
     "sensitivity",
+    "ai_extraction_eligible",
     "dedupe_key"
   ],
   "properties": {
@@ -23,6 +25,7 @@
     "source_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
     "source_class": { "type": "string", "enum": ["A", "B", "C", "D", "E"] },
     "document_key": { "type": "string", "minLength": 1, "maxLength": 256 },
+    "routing_policy_id": { "type": "string", "minLength": 1, "maxLength": 128 },
     "observed_at": { "type": "string", "format": "date-time" },
     "ingestion_status": { "type": "string", "enum": ["new", "changed", "unchanged"] },
     "raw_content_sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
@@ -54,10 +57,21 @@
       },
       "additionalProperties": false
     },
+    "ai_extraction_eligible": { "type": "boolean" },
     "dedupe_key": {
       "type": "string",
       "pattern": "^sha256:[A-Fa-f0-9]{64}$"
     }
   },
+  "allOf": [
+    {
+      "if": { "properties": { "source_class": { "const": "E" } }, "required": ["source_class"] },
+      "then": { "properties": { "ai_extraction_eligible": { "const": false } } }
+    },
+    {
+      "if": { "properties": { "sensitivity": { "properties": { "lane": { "const": "RED" } }, "required": ["lane"] } }, "required": ["sensitivity"] },
+      "then": { "properties": { "ai_extraction_eligible": { "const": false } } }
+    }
+  ],
   "additionalProperties": false
 }
