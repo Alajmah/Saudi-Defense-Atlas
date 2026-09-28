@@ -1,14 +1,16 @@
 """Deterministic M4 editorial audit and daily-brief projections.
 
 The auditor consumes already-accepted operational signals: Claim staleness,
-registered-feed acquisition freshness, and EditorialQueueItem state. It does not
-re-evaluate factual truth, approve proposals, mutate canonical knowledge, or publish.
+registered-feed acquisition freshness, and a contemporaneously captured
+EditorialQueueItem snapshot. It does not re-evaluate factual truth, approve
+proposals, mutate canonical knowledge, or publish.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
+import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
 from typing import Any
@@ -16,6 +18,31 @@ from typing import Any
 
 class EditorialAuditError(ValueError):
     """Raised when operational audit inputs are inconsistent or incomplete."""
+
+
+_FINDING_KINDS = {
+    "claim_review_required",
+    "source_monitoring_required",
+    "queue_action_required",
+}
+_PRIORITIES = {"high", "normal"}
+_AUDIT_AUTHORITY = {
+    "mode": "operational_audit_only",
+    "truth_authority": False,
+    "approval_authority": False,
+    "canonical_mutation_authority": False,
+    "publication_authority": False,
+}
+_BRIEF_AUTHORITY = {
+    "mode": "editorial_brief_only",
+    "truth_authority": False,
+    "approval_authority": False,
+    "canonical_mutation_authority": False,
+    "publication_authority": False,
+}
+_AUDIT_REPORT_KEYS = {"id", "as_of", "input_sha256", "summary", "findings", "authority"}
+_FINDING_KEYS = {"id", "kind", "priority", "subject_id", "reason_codes", "context"}
+_SHA256_RE = re.compile(r"^[A-Fa-f0-9]{64}$")
 
 
 def _stable_json(value: Any) -> str:
@@ -79,9 +106,9 @@ def _finding(
     reason_codes: Sequence[str],
     context: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if kind not in {"claim_review_required", "source_monitoring_required", "queue_action_required"}:
+    if kind not in _FINDING_KINDS:
         raise EditorialAuditError("finding kind is invalid")
-    if priority not in {"high", "normal"}:
+    if priority not in _PRIORITIES:
         raise EditorialAuditError("finding priority is invalid")
     if not isinstance(subject_id, str) or not subject_id:
         raise EditorialAuditError("finding subject_id is required")
@@ -114,9 +141,15 @@ def build_editorial_audit_report(
     staleness_report: Mapping[str, Any],
     source_freshness_report: Mapping[str, Any],
     queue_items: Sequence[Mapping[str, Any]],
+    queue_snapshot_as_of: str,
     as_of: str,
 ) -> dict[str, Any]:
-    """Build one deterministic operational attention report."""
+    """Build one deterministic operational attention report.
+
+    `queue_snapshot_as_of` is the capture time of the supplied current queue
+    snapshot. This contract does not reconstruct historical queue state from
+    later mutable records.
+    """
 
     normalized_as_of = _utc(as_of, "as_of")
     for report, label in (
@@ -125,6 +158,10 @@ def build_editorial_audit_report(
     ):
         if _utc(report.get("as_of"), f"{label}.as_of") != normalized_as_of:
             raise EditorialAuditError(f"{label} is not aligned to audit as_of")
+
+    normalized_queue_snapshot_as_of = _utc(queue_snapshot_as_of, "queue_snapshot_as_of")
+    if normalized_queue_snapshot_as_of != normalized_as_of:
+        raise EditorialAuditError("queue snapshot is not aligned to audit as_of")
 
     findings: list[dict[str, Any]] = []
     seen_claim_ids: set[str] = set()
@@ -138,10 +175,18 @@ def build_editorial_audit_report(
         status = item.get("status")
         state = item.get("claim_state")
         confidence = item.get("confidence")
+        subject_id = item.get("subject_id")
+        predicate_id = item.get("predicate_id")
         if status not in {"fresh", "due", "unverified"}:
             raise EditorialAuditError(f"Claim {claim_id} has invalid staleness status")
         if state not in {"active", "disputed"}:
             raise EditorialAuditError(f"Claim {claim_id} has invalid visible state")
+        if confidence not in {"verified", "high", "medium", "low", "unverified"}:
+            raise EditorialAuditError(f"Claim {claim_id} has invalid confidence")
+        if not isinstance(subject_id, str) or not subject_id:
+            raise EditorialAuditError(f"Claim {claim_id} has invalid subject_id")
+        if not isinstance(predicate_id, str) or not predicate_id:
+            raise EditorialAuditError(f"Claim {claim_id} has invalid predicate_id")
 
         reasons: list[str] = []
         if status == "due":
@@ -166,8 +211,8 @@ def build_editorial_audit_report(
                 reason_codes=reasons,
                 context={
                     "claim_id": claim_id,
-                    "subject_id": item.get("subject_id"),
-                    "predicate_id": item.get("predicate_id"),
+                    "subject_id": subject_id,
+                    "predicate_id": predicate_id,
                     "claim_state": state,
                     "confidence": confidence,
                     "staleness_status": status,
@@ -234,8 +279,12 @@ def build_editorial_audit_report(
             raise EditorialAuditError(f"queue item {queue_id} has invalid state")
         if lane not in {"candidate_extraction", "discovery_review", "restricted_human"}:
             raise EditorialAuditError(f"queue item {queue_id} has invalid lane")
-        if item_priority not in {"normal", "high"}:
+        if item_priority not in _PRIORITIES:
             raise EditorialAuditError(f"queue item {queue_id} has invalid priority")
+        if item.get("ai_extraction_allowed") is not (lane == "candidate_extraction"):
+            raise EditorialAuditError(
+                f"queue item {queue_id} extraction authority is inconsistent with lane"
+            )
         if item.get("canonical_mutation_authority") is not False:
             raise EditorialAuditError("editorial queue item cannot have canonical mutation authority")
         created_at = _parse_utc(item.get("created_at"), f"queue item {queue_id} created_at")
@@ -246,6 +295,8 @@ def build_editorial_audit_report(
 
         source_ids = _string_list(item.get("source_ids"), f"queue item {queue_id} source_ids")
         document_ids = _string_list(item.get("document_ids"), f"queue item {queue_id} document_ids")
+        if not source_ids or not document_ids:
+            raise EditorialAuditError(f"queue item {queue_id} requires source/document provenance")
         priority = "high" if item_priority == "high" or lane == "restricted_human" else "normal"
         findings.append(
             _finding(
@@ -277,36 +328,34 @@ def build_editorial_audit_report(
         "as_of": normalized_as_of,
         "staleness_report": staleness_report,
         "source_freshness_report": source_freshness_report,
-        "queue_items": sorted((dict(item) for item in queue_items), key=lambda item: str(item.get("id"))),
+        "queue_snapshot": {
+            "as_of": normalized_queue_snapshot_as_of,
+            "items": sorted((dict(item) for item in queue_items), key=lambda item: str(item.get("id"))),
+        },
     }
     report: dict[str, Any] = {
         "as_of": normalized_as_of,
         "input_sha256": _sha256(input_payload),
         "summary": _summary(findings),
         "findings": findings,
-        "authority": {
-            "mode": "operational_audit_only",
-            "truth_authority": False,
-            "approval_authority": False,
-            "canonical_mutation_authority": False,
-            "publication_authority": False,
-        },
+        "authority": dict(_AUDIT_AUTHORITY),
     }
     report["id"] = _stable_id("SDA-EDITORIAL-AUDIT", report)
     return report
 
 
 def _validate_audit_report_integrity(audit_report: Mapping[str, Any]) -> tuple[str, list[Mapping[str, Any]]]:
+    if set(audit_report) != _AUDIT_REPORT_KEYS:
+        raise EditorialAuditError("audit report fields do not match the contract")
+
     report_id = audit_report.get("id")
     if not isinstance(report_id, str) or not report_id:
         raise EditorialAuditError("audit report requires id")
-    if audit_report.get("authority") != {
-        "mode": "operational_audit_only",
-        "truth_authority": False,
-        "approval_authority": False,
-        "canonical_mutation_authority": False,
-        "publication_authority": False,
-    }:
+    _utc(audit_report.get("as_of"), "audit report as_of")
+    input_sha256 = audit_report.get("input_sha256")
+    if not isinstance(input_sha256, str) or not _SHA256_RE.fullmatch(input_sha256):
+        raise EditorialAuditError("audit report input_sha256 is invalid")
+    if audit_report.get("authority") != _AUDIT_AUTHORITY:
         raise EditorialAuditError("audit report authority boundary is invalid")
 
     findings_raw = audit_report.get("findings")
@@ -321,10 +370,25 @@ def _validate_audit_report_integrity(audit_report: Mapping[str, Any]) -> tuple[s
     for finding in findings_raw:
         if not isinstance(finding, Mapping):
             raise EditorialAuditError("audit findings must contain objects")
+        if set(finding) != _FINDING_KEYS:
+            raise EditorialAuditError("audit finding fields do not match the contract")
         finding_id = finding.get("id")
         if not isinstance(finding_id, str) or not finding_id or finding_id in seen_ids:
             raise EditorialAuditError("audit findings require unique IDs")
         seen_ids.add(finding_id)
+        if finding.get("kind") not in _FINDING_KINDS:
+            raise EditorialAuditError("audit finding kind is invalid")
+        if finding.get("priority") not in _PRIORITIES:
+            raise EditorialAuditError("audit finding priority is invalid")
+        subject_id = finding.get("subject_id")
+        if not isinstance(subject_id, str) or not subject_id:
+            raise EditorialAuditError("audit finding subject_id is invalid")
+        reasons = _string_list(finding.get("reason_codes"), "audit finding reason_codes")
+        if not reasons:
+            raise EditorialAuditError("audit finding requires reason_codes")
+        context = finding.get("context")
+        if not isinstance(context, Mapping):
+            raise EditorialAuditError("audit finding context must be an object")
         body = {key: value for key, value in finding.items() if key != "id"}
         if finding_id != _stable_id("SDA-AUDIT-FINDING", body):
             raise EditorialAuditError("audit finding content does not match its ID")
@@ -341,16 +405,17 @@ def _validate_audit_report_integrity(audit_report: Mapping[str, Any]) -> tuple[s
 
 
 def build_daily_editorial_brief(*, audit_report: Mapping[str, Any]) -> dict[str, Any]:
-    """Project one integrity-checked audit report into editor-facing sections."""
+    """Project one semantically and content-integrity checked audit report."""
 
     report_id, findings = _validate_audit_report_integrity(audit_report)
     refs = [
         {
             "finding_id": str(finding["id"]),
-            "kind": finding.get("kind"),
-            "priority": finding.get("priority"),
-            "subject_id": finding.get("subject_id"),
-            "reason_codes": list(finding.get("reason_codes", [])),
+            "kind": finding["kind"],
+            "priority": finding["priority"],
+            "subject_id": finding["subject_id"],
+            "reason_codes": list(finding["reason_codes"]),
+            "context": dict(finding["context"]),
         }
         for finding in findings
     ]
@@ -376,13 +441,7 @@ def build_daily_editorial_brief(*, audit_report: Mapping[str, Any]) -> dict[str,
             "source_monitoring": [item for item in refs if item["kind"] == "source_monitoring_required"],
             "editorial_queue": [item for item in refs if item["kind"] == "queue_action_required"],
         },
-        "authority": {
-            "mode": "editorial_brief_only",
-            "truth_authority": False,
-            "approval_authority": False,
-            "canonical_mutation_authority": False,
-            "publication_authority": False,
-        },
+        "authority": dict(_BRIEF_AUTHORITY),
     }
     brief["id"] = _stable_id("SDA-EDITORIAL-BRIEF", brief)
     return brief
