@@ -122,6 +122,7 @@ def build_editorial_decision_binding(
 
     binding: dict[str, Any] = {
         "review_packet_id": packet_id,
+        "review_packet_sha256": _sha256(review_packet),
         "proposal_id": proposal_id,
         "proposal_sha256": proposal_digest,
         "review_decision_id": decision_id,
