@@ -135,7 +135,6 @@ def human_decision(proposal: dict[str, Any]) -> dict[str, Any]:
 def main() -> int:
     failures: list[str] = []
 
-    # --- 1. Two authoritative observations converge into one extraction queue item.
     policy = RoutingPolicy(
         policy_id="M4-VERTICAL-v0.1",
         relevance_terms=("falcon x", "training"),
@@ -204,7 +203,6 @@ def main() -> int:
     expect(queue["lane"] == "candidate_extraction", "queue did not enter extraction lane", failures)
     expect(queue["canonical_mutation_authority"] is False, "queue gained mutation authority", failures)
 
-    # --- 2. Accepted candidate-only extraction is bound to the exact queue/document set.
     extraction = extraction_run()
     extraction["queue_item_id"] = queue["id"]
     extraction["source_document_ids"] = sorted(queue["document_ids"])
@@ -215,7 +213,6 @@ def main() -> int:
 
     validate("ai-extraction-run.schema.json", extraction, failures)
 
-    # --- 3. Resolver/verifier preserves ambiguity/conflict and prepares AMBER proposal only.
     resolution, proposal = build_resolution_verification(
         extraction_run=extraction,
         canonical_entities=canonical_entities(),
@@ -229,8 +226,6 @@ def main() -> int:
             print(f"- {failure}")
         return 1
     proposal["source_document_ids"] = sorted(queue["document_ids"])
-    # Proposal identity binds mutations only in the accepted resolver contract; source
-    # document context is checked independently by the review packet boundary.
     validate("change-proposal.schema.json", proposal, failures)
     expect(proposal["risk_class"] == "AMBER", "resolver proposal was not AMBER", failures)
     expect(
@@ -239,7 +234,6 @@ def main() -> int:
         failures,
     )
 
-    # --- 4. Human review packet + exact human ReviewDecision binding.
     packet = build_editorial_review_packet(
         queue_item=queue,
         extraction_run=extraction,
@@ -264,7 +258,6 @@ def main() -> int:
     )
     validate("editorial-decision-binding.schema.json", binding, failures)
 
-    # --- 5. Exact approved proposal converges through the existing mutation guard.
     backend = CanonicalFixtureBackend()
     execution = execute_editorial_authorized_proposal(
         review_packet=packet,
@@ -291,15 +284,11 @@ def main() -> int:
     validate("revision.schema.json", revision, failures)
     expect(
         set(item["record_id"] for item in revision["affected_records"])
-        == {
-            mutation["payload"]["id"]
-            for mutation in proposal["mutations"]
-        },
+        == {mutation["payload"]["id"] for mutation in proposal["mutations"]},
         "Revision does not account for every applied canonical record",
         failures,
     )
 
-    # --- 6. The newly canonical records drive an existing public projection.
     documents = [
         document("SDA-DOC-M4-RV", source_a["id"], title="Official Falcon X update A"),
         document(
@@ -323,8 +312,16 @@ def main() -> int:
         revision_ids=[revision["id"]],
     )
     validate("equipment-view.schema.json", view, failures)
-    expect(revision["id"] in view["provenance"]["revision_ids"], "public view lost Revision provenance", failures)
-    expect(bool(view["facts"] or view["events"]), "canonical mutation produced no visible public fact/event", failures)
+    expect(
+        revision["id"] in view["provenance"]["revision_ids"],
+        "public view lost Revision provenance",
+        failures,
+    )
+    expect(
+        bool(view["facts"] or view["events"]),
+        "canonical mutation produced no visible public fact/event",
+        failures,
+    )
     cited_source_ids = {
         citation["source_id"]
         for fact in view["facts"]
@@ -339,7 +336,14 @@ def main() -> int:
         "public projection citations escaped the multi-source evidence context",
         failures,
     )
-    expect("Q" not in " ".join(view["provenance"]["record_ids"]), "backend identity leaked into public provenance", failures)
+    expect(
+        all(
+            isinstance(record_id, str) and record_id.startswith("SDA-")
+            for record_id in view["provenance"]["record_ids"]
+        ),
+        "backend identity leaked into public provenance",
+        failures,
+    )
 
     if failures:
         print("M4 multi-source vertical slice FAILED:")
