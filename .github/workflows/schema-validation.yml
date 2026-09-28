@@ -125,3 +125,6 @@ jobs:
 
       - name: Validate M4 multi-source editorial vertical slice
         run: python scripts/validate_m4_multi_source_vertical_slice.py
+
+      - name: Validate M4 canonical mutation dispatcher
+        run: python scripts/validate_m4_canonical_mutation_dispatcher.py
