@@ -1,0 +1,231 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/ai-extraction-run.schema.json",
+  "title": "Saudi Defense Atlas AI Extraction Run",
+  "description": "Auditable candidate-only model extraction bundle. Extracted entity mentions use local CAND-* identities; canonical SDA entity resolution is a separate authority step.",
+  "type": "object",
+  "required": [
+    "id",
+    "queue_item_id",
+    "source_document_ids",
+    "started_at",
+    "completed_at",
+    "model_trace",
+    "prompt_trace",
+    "input_sha256",
+    "raw_output_sha256",
+    "authority",
+    "validation",
+    "evaluation_trace",
+    "candidates"
+  ],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "queue_item_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "source_document_ids": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "common.schema.json#/$defs/canonical_id" },
+      "uniqueItems": true
+    },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "model_trace": {
+      "type": "object",
+      "required": ["provider", "model", "model_version", "adapter_version"],
+      "properties": {
+        "provider": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "model": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "model_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "adapter_version": { "type": "string", "minLength": 1, "maxLength": 128 }
+      },
+      "additionalProperties": false
+    },
+    "prompt_trace": {
+      "type": "object",
+      "required": ["template_id", "template_version", "template_sha256"],
+      "properties": {
+        "template_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "template_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "template_sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "input_sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+    "raw_output_sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+    "authority": {
+      "type": "object",
+      "required": ["mode", "canonical_mutation_authority", "publication_authority"],
+      "properties": {
+        "mode": { "const": "candidate_only" },
+        "canonical_mutation_authority": { "const": false },
+        "publication_authority": { "const": false }
+      },
+      "additionalProperties": false
+    },
+    "validation": {
+      "type": "object",
+      "required": ["status", "errors"],
+      "properties": {
+        "status": { "type": "string", "enum": ["accepted_for_candidate_review", "rejected"] },
+        "errors": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      },
+      "additionalProperties": false
+    },
+    "evaluation_trace": {
+      "type": "object",
+      "required": ["validator_version", "checks"],
+      "properties": {
+        "validator_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "checks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["check_id", "status"],
+            "properties": {
+              "check_id": { "type": "string", "minLength": 1, "maxLength": 128 },
+              "status": { "type": "string", "enum": ["pass", "fail"] },
+              "detail": { "type": ["string", "null"], "maxLength": 512 }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "candidates": {
+      "type": "object",
+      "required": ["evidence", "entities", "claims", "events"],
+      "properties": {
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/candidate_evidence" } },
+        "entities": { "type": "array", "items": { "$ref": "#/$defs/candidate_entity" } },
+        "claims": { "type": "array", "items": { "$ref": "#/$defs/candidate_claim" } },
+        "events": { "type": "array", "items": { "$ref": "#/$defs/candidate_event" } }
+      },
+      "additionalProperties": false
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "validation": { "properties": { "status": { "const": "accepted_for_candidate_review" } }, "required": ["status"] } }, "required": ["validation"] },
+      "then": {
+        "properties": { "validation": { "properties": { "errors": { "maxItems": 0 } } } },
+        "anyOf": [
+          { "properties": { "candidates": { "properties": { "entities": { "minItems": 1 } } } } },
+          { "properties": { "candidates": { "properties": { "claims": { "minItems": 1 } } } } },
+          { "properties": { "candidates": { "properties": { "events": { "minItems": 1 } } } } }
+        ]
+      }
+    },
+    {
+      "if": { "properties": { "validation": { "properties": { "status": { "const": "rejected" } }, "required": ["status"] } }, "required": ["validation"] },
+      "then": {
+        "properties": {
+          "validation": { "properties": { "errors": { "minItems": 1 } } },
+          "candidates": {
+            "properties": {
+              "evidence": { "maxItems": 0 },
+              "entities": { "maxItems": 0 },
+              "claims": { "maxItems": 0 },
+              "events": { "maxItems": 0 }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "candidate_id": { "type": "string", "pattern": "^CAND-[A-Z0-9][A-Z0-9._-]{0,63}$" },
+    "candidate_entity_ref": {
+      "type": "object",
+      "required": ["kind", "candidate_id"],
+      "properties": {
+        "kind": { "const": "candidate_entity" },
+        "candidate_id": { "$ref": "#/$defs/candidate_id" }
+      },
+      "additionalProperties": false
+    },
+    "candidate_evidence": {
+      "type": "object",
+      "required": ["candidate_id", "document_id", "locator", "capture_assessment"],
+      "properties": {
+        "candidate_id": { "$ref": "#/$defs/candidate_id" },
+        "document_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+        "locator": { "$ref": "evidence.schema.json#/properties/locator" },
+        "excerpt_sha256": { "type": ["string", "null"], "pattern": "^[A-Fa-f0-9]{64}$" },
+        "capture_assessment": { "type": "string", "enum": ["explicit_text", "ambiguous_text"] }
+      },
+      "additionalProperties": false
+    },
+    "candidate_entity": {
+      "type": "object",
+      "required": ["candidate_id", "entity_type", "names", "evidence_candidate_ids"],
+      "properties": {
+        "candidate_id": { "$ref": "#/$defs/candidate_id" },
+        "entity_type": { "$ref": "entity.schema.json#/properties/entity_type" },
+        "subtype": { "type": ["string", "null"] },
+        "names": { "$ref": "common.schema.json#/$defs/localized_text" },
+        "aliases": { "type": "array", "items": { "$ref": "common.schema.json#/$defs/alias" }, "uniqueItems": true },
+        "evidence_candidate_ids": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/candidate_id" }, "uniqueItems": true }
+      },
+      "additionalProperties": false
+    },
+    "candidate_claim_value": {
+      "oneOf": [
+        { "$ref": "#/$defs/candidate_entity_ref" },
+        { "$ref": "common.schema.json#/$defs/string_value" },
+        { "$ref": "common.schema.json#/$defs/number_value" },
+        { "$ref": "common.schema.json#/$defs/date_value" },
+        { "$ref": "common.schema.json#/$defs/boolean_value" },
+        { "$ref": "common.schema.json#/$defs/null_value" }
+      ]
+    },
+    "candidate_claim": {
+      "type": "object",
+      "required": ["candidate_id", "subject", "predicate_id", "value", "evidence_candidate_ids", "extraction_assessment"],
+      "properties": {
+        "candidate_id": { "$ref": "#/$defs/candidate_id" },
+        "subject": { "$ref": "#/$defs/candidate_entity_ref" },
+        "predicate_id": { "$ref": "claim.schema.json#/properties/predicate_id" },
+        "value": { "$ref": "#/$defs/candidate_claim_value" },
+        "validity": { "$ref": "common.schema.json#/$defs/validity_interval" },
+        "evidence_candidate_ids": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/candidate_id" }, "uniqueItems": true },
+        "extraction_assessment": { "type": "string", "enum": ["explicit_text", "normalized_from_explicit_text", "ambiguous_text"] },
+        "rationale": { "type": ["string", "null"], "maxLength": 1000 }
+      },
+      "additionalProperties": false
+    },
+    "candidate_event": {
+      "type": "object",
+      "required": ["candidate_id", "event_type", "occurred_at", "participants", "related_entities", "evidence_candidate_ids", "extraction_assessment"],
+      "properties": {
+        "candidate_id": { "$ref": "#/$defs/candidate_id" },
+        "event_type": { "$ref": "event.schema.json#/properties/event_type" },
+        "occurred_at": { "$ref": "common.schema.json#/$defs/temporal_value" },
+        "ended_at": { "oneOf": [{ "$ref": "common.schema.json#/$defs/temporal_value" }, { "type": "null" }] },
+        "participants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["entity", "role"],
+            "properties": {
+              "entity": { "$ref": "#/$defs/candidate_entity_ref" },
+              "role": { "type": "string", "minLength": 1, "maxLength": 128 }
+            },
+            "additionalProperties": false
+          }
+        },
+        "related_entities": { "type": "array", "items": { "$ref": "#/$defs/candidate_entity_ref" } },
+        "evidence_candidate_ids": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/candidate_id" }, "uniqueItems": true },
+        "extraction_assessment": { "type": "string", "enum": ["explicit_text", "normalized_from_explicit_text", "ambiguous_text"] },
+        "rationale": { "type": ["string", "null"], "maxLength": 1000 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
