@@ -90,7 +90,7 @@ The daily brief now retains the full bounded finding `context` in each action re
 
 ## M4-AUD-F02 — CONFIRMED / FIXED
 
-The brief boundary now performs semantic validation in addition to content-address integrity. It validates exact field sets, date-time syntax, SHA-256 syntax, finding kind/priority, canonical-ID bounds, reason-code bounds, context shape, summary keys/counts/types, and type-strict zero-authority flags before rendering.
+The brief boundary now performs semantic validation in addition to content-address integrity. It validates exact field sets, date-time syntax, SHA-256 syntax, finding kind/priority, canonical-ID bounds, reason-code bounds, kind-specific context, summary keys/counts/types, and type-strict zero-authority flags before rendering.
 
 Adversarial regressions cover:
 
@@ -99,9 +99,13 @@ Adversarial regressions cover:
 - a re-hashed 129-character `subject_id`;
 - a re-hashed 129-character reason code;
 - a re-hashed numeric `0` substituted for JSON boolean `false` in an authority field;
-- summary tampering.
+- summary tampering;
+- empty claim-review context;
+- empty source-monitoring context;
+- queue action with missing Source provenance;
+- source-monitoring reason/context mismatch.
 
-**Result:** content identity and semantic validity are no longer conflated. A self-consistent malformed report fails closed before a brief is emitted.
+**Result:** content identity and semantic validity are no longer conflated. A self-consistent malformed report fails closed before a brief is emitted, including when its action context can no longer identify what an editor must handle.
 
 ## M4-AUD-F03 — CONFIRMED / FIXED WITH BOUNDED CLAIM CEILING
 
@@ -113,7 +117,7 @@ This deliberately does **not** add queue event sourcing or historical reconstruc
 
 It does not establish that current mutable queue records can reconstruct historical queue state, and it does not qualify queue transition history.
 
-## Codex independent second review
+## Codex independent second review — pass 1
 
 Codex was invoked only after the first-pass baseline was frozen. Its review of remediation head `51f16cfcae` reported one P2 issue: the semantic brief validator still needed to enforce the JSON Schema's 128-character bounds for `subject_id` and reason codes.
 
@@ -126,6 +130,18 @@ Codex was invoked only after the first-pass baseline was frozen. Its review of r
 **RESULT:** CONFIRMED and remediated. Canonical IDs and reason codes now enforce the same 128-character ceiling as the schemas, authority flags are checked with identity semantics (`is False`), summary values reject booleans masquerading as integers, and dedicated regressions cover these cases.
 
 **Provenance:** M4-AUD-F01/F02/F03 were independently discovered in our first pass. The schema-bound subcase of F02 was independently identified during our remediation/adversarial pass and then corroborated by Codex.
+
+## Codex independent second review — pass 2
+
+Codex reviewed head `0ebdbab1fe` after the first remediation and reported one additional P2 hypothesis: a self-consistent re-hashed report could replace kind-specific `context` with a generic or empty object and still pass the semantic boundary, making source and queue actions non-actionable.
+
+### Reconciliation
+
+**CODEX CLAIM:** `source_monitoring_required` could lose `feed_key`, and queue actions could lose provenance, while remaining content-address consistent.
+
+**OUR VERIFICATION:** CONFIRMED. The integrity boundary required only that `context` was a mapping; it did not re-derive the action contract from the finding kind. This is a real semantic-integrity subcase of M4-AUD-F02 and an actionability subcase of M4-AUD-F01.
+
+**RESULT:** CONFIRMED and remediated. The validator now checks exact context fields per finding kind and re-derives identity linkage, reason codes, priority, enumerated state, relevant timestamps, and Source/Document provenance before a brief can be emitted. Re-hashed empty-context and provenance-loss fixtures now fail closed.
 
 ## Final bounded assessment
 
