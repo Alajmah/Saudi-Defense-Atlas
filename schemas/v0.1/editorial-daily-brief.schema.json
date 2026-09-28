@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/editorial-daily-brief.schema.json",
+  "title": "Saudi Defense Atlas Daily Editorial Brief",
+  "description": "Deterministic editor-facing projection of one EditorialAuditReport. It prioritizes operational attention and carries no factual or mutation authority.",
+  "type": "object",
+  "required": ["id", "as_of", "audit_report_id", "audit_report_sha256", "summary", "sections", "authority"],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "as_of": { "type": "string", "format": "date-time" },
+    "audit_report_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "audit_report_sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+    "summary": {
+      "type": "object",
+      "required": ["total_actions", "high_priority_actions"],
+      "properties": {
+        "total_actions": { "type": "integer", "minimum": 0 },
+        "high_priority_actions": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "sections": {
+      "type": "object",
+      "required": ["high_priority", "claim_review", "source_monitoring", "editorial_queue"],
+      "properties": {
+        "high_priority": { "$ref": "#/$defs/finding_refs" },
+        "claim_review": { "$ref": "#/$defs/finding_refs" },
+        "source_monitoring": { "$ref": "#/$defs/finding_refs" },
+        "editorial_queue": { "$ref": "#/$defs/finding_refs" }
+      },
+      "additionalProperties": false
+    },
+    "authority": {
+      "type": "object",
+      "required": ["mode", "truth_authority", "approval_authority", "canonical_mutation_authority", "publication_authority"],
+      "properties": {
+        "mode": { "const": "editorial_brief_only" },
+        "truth_authority": { "const": false },
+        "approval_authority": { "const": false },
+        "canonical_mutation_authority": { "const": false },
+        "publication_authority": { "const": false }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "finding_refs": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "object",
+        "required": ["finding_id", "kind", "priority", "subject_id", "reason_codes"],
+        "properties": {
+          "finding_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "kind": {
+            "type": "string",
+            "enum": ["claim_review_required", "source_monitoring_required", "queue_action_required"]
+          },
+          "priority": { "type": "string", "enum": ["high", "normal"] },
+          "subject_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "reason_codes": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+          }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}
