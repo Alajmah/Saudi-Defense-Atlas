@@ -1,0 +1,69 @@
+name: Temporary PR26 semantic remediation
+
+on:
+  push:
+    branches:
+      - m4/editorial-audit-brief
+
+permissions:
+  contents: write
+
+jobs:
+  remediate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: m4/editorial-audit-brief
+          fetch-depth: 0
+
+      - name: Apply exact-head semantic remediation
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          service_path = Path('services/intelligence/editorial_audit.py')
+          service = service_path.read_text()
+
+          old = '_SHA256_RE = re.compile(r"^[A-Fa-f0-9]{64}$")\n'
+          new = old + '_RFC3339_RE = re.compile(\n    r"^\\d{4}-\\d{2}-\\d{2}[Tt]\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?(?:[Zz]|[+-]\\d{2}:\\d{2})$"\n)\n'
+          assert service.count(old) == 1
+          service = service.replace(old, new, 1)
+
+          old = '''def _parse_utc(value: Any, label: str) -> datetime:\n    if not isinstance(value, str) or not value:\n        raise EditorialAuditError(f"{label} must be a date-time string")\n    try:\n        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))\n    except ValueError as exc:\n        raise EditorialAuditError(f"{label} must be ISO date-time") from exc\n    if parsed.tzinfo is None:\n        raise EditorialAuditError(f"{label} must include timezone")\n    return parsed.astimezone(timezone.utc)\n'''
+          new = '''def _parse_utc(value: Any, label: str) -> datetime:\n    if not isinstance(value, str) or not value:\n        raise EditorialAuditError(f"{label} must be a date-time string")\n    if not _RFC3339_RE.fullmatch(value):\n        raise EditorialAuditError(f"{label} must be an RFC 3339 date-time")\n    normalized = value[:-1] + "+00:00" if value[-1] in {"Z", "z"} else value\n    try:\n        parsed = datetime.fromisoformat(normalized)\n    except ValueError as exc:\n        raise EditorialAuditError(f"{label} must be an RFC 3339 date-time") from exc\n    if parsed.tzinfo is None:\n        raise EditorialAuditError(f"{label} must include timezone")\n    return parsed.astimezone(timezone.utc)\n'''
+          assert service.count(old) == 1
+          service = service.replace(old, new, 1)
+
+          old = '''        if status == "unverified":\n            if verified_at is not None or review_due_at is not None:\n                raise EditorialAuditError("unverified claim-review context has verification dates")\n        elif verified_at is None or review_due_at is None:\n            raise EditorialAuditError("verified claim-review context requires verification dates")\n\n        expected_reasons: list[str] = []\n'''
+          new = '''        if status == "unverified":\n            if verified_at is not None or review_due_at is not None:\n                raise EditorialAuditError("unverified claim-review context has verification dates")\n        elif verified_at is None or review_due_at is None:\n            raise EditorialAuditError("verified claim-review context requires verification dates")\n        elif review_due_at <= verified_at:\n            raise EditorialAuditError("claim-review deadline must follow verified_at")\n        elif status == "due" and review_due_at > as_of_dt:\n            raise EditorialAuditError("due claim-review deadline is later than audit as_of")\n        elif status == "fresh" and review_due_at <= as_of_dt:\n            raise EditorialAuditError("fresh claim-review deadline is not later than audit as_of")\n\n        expected_reasons: list[str] = []\n'''
+          assert service.count(old) == 1
+          service = service.replace(old, new, 1)
+          service_path.write_text(service)
+
+          validator_path = Path('scripts/validate_m4_editorial_audit_brief.py')
+          validator = validator_path.read_text()
+          anchor = '''    if failures:\n        print("M4 editorial audit/brief validation FAILED:")\n'''
+          addition = '''    schema_invalid_timestamp = copy.deepcopy(report)\n    queue_timestamp_finding = next(\n        item for item in schema_invalid_timestamp["findings"]\n        if item["kind"] == "queue_action_required"\n    )\n    queue_timestamp_finding["context"]["created_at"] = "20260115T000000+0000"\n    _rehash_report(schema_invalid_timestamp)\n    expect_raises(\n        "self-consistent schema-invalid basic ISO timestamp",\n        lambda: build_daily_editorial_brief(audit_report=schema_invalid_timestamp),\n        failures,\n    )\n\n    due_after_as_of = copy.deepcopy(report)\n    due_finding = next(\n        item for item in due_after_as_of["findings"]\n        if item["kind"] == "claim_review_required"\n        and item["context"]["staleness_status"] == "due"\n    )\n    due_finding["context"]["review_due_at"] = "2026-02-02T00:00:00Z"\n    _rehash_report(due_after_as_of)\n    expect_raises(\n        "self-consistent due claim with future review deadline",\n        lambda: build_daily_editorial_brief(audit_report=due_after_as_of),\n        failures,\n    )\n\n    fresh_after_deadline = copy.deepcopy(report)\n    fresh_finding = next(\n        item for item in fresh_after_deadline["findings"]\n        if item["kind"] == "claim_review_required"\n        and item["context"]["staleness_status"] == "due"\n    )\n    fresh_finding["context"]["staleness_status"] = "fresh"\n    fresh_finding["context"]["claim_state"] = "disputed"\n    fresh_finding["reason_codes"] = ["claim_state:disputed"]\n    fresh_finding["priority"] = "high"\n    fresh_after_deadline["summary"]["high"] += 1\n    fresh_after_deadline["summary"]["normal"] -= 1\n    _rehash_report(fresh_after_deadline)\n    expect_raises(\n        "self-consistent fresh claim after review deadline",\n        lambda: build_daily_editorial_brief(audit_report=fresh_after_deadline),\n        failures,\n    )\n\n'''
+          assert validator.count(anchor) == 1
+          validator = validator.replace(anchor, addition + anchor, 1)
+          validator_path.write_text(validator)
+
+          review_path = Path('docs/reviews/M4_EDITORIAL_AUDIT_BRIEF_FIRST_PASS.md')
+          review = review_path.read_text()
+          anchor = '''## Final bounded assessment\n'''
+          addition = '''## Codex independent second review — pass 3\n\nCodex reviewed head `e609d9845992d915c1574855fe7131c4e3158a21` and reported two additional P2 semantic-integrity findings.\n\n### Reconciliation\n\n**CODEX CLAIM 1:** Python's permissive `datetime.fromisoformat` accepted basic ISO forms that the JSON Schema `date-time` format rejects, while retained finding context was copied unchanged into the brief.\n\n**OUR VERIFICATION:** CONFIRMED. A self-consistent re-hashed queue finding using `20260115T000000+0000` passed the old runtime parser but would produce a schema-invalid brief.\n\n**RESULT:** CONFIRMED and remediated. Runtime date-time admission now requires the RFC 3339 shape accepted by the public schemas before parsing, while preserving timezone normalization. A dedicated re-hashed basic-ISO regression fails closed.\n\n**CODEX CLAIM 2:** claim-review context validated the presence of `review_due_at` but did not re-derive whether the deadline was actually due or fresh at audit `as_of`.\n\n**OUR VERIFICATION:** CONFIRMED. A self-consistent re-hashed `due` finding with a deadline after `as_of` passed the previous semantic boundary; the inverse `fresh`/past-deadline inconsistency was also constructible.\n\n**RESULT:** CONFIRMED and remediated. The semantic boundary now requires `review_due_at > verified_at`, `review_due_at <= as_of` for `due`, and `review_due_at > as_of` for `fresh`. Dedicated adversarial regressions cover both due/future and fresh/past inconsistencies.\n\n'''
+          assert review.count(anchor) == 1
+          review = review.replace(anchor, addition + anchor, 1)
+          review_path.write_text(review)
+          PY
+
+      - name: Commit remediation
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add services/intelligence/editorial_audit.py scripts/validate_m4_editorial_audit_brief.py docs/reviews/M4_EDITORIAL_AUDIT_BRIEF_FIRST_PASS.md
+          git diff --cached --check
+          git commit -m "M4: harden editorial audit temporal semantics"
+          git push origin HEAD:m4/editorial-audit-brief
