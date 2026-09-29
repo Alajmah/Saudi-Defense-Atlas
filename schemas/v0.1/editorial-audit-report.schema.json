@@ -1,0 +1,131 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/editorial-audit-report.schema.json",
+  "title": "Saudi Defense Atlas Editorial Audit Report",
+  "description": "Operational deterministic audit over accepted staleness, acquisition-freshness, and editorial-queue signals. Findings request editorial attention; they do not alter canonical truth.",
+  "type": "object",
+  "required": ["id", "as_of", "input_sha256", "summary", "findings", "authority"],
+  "properties": {
+    "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+    "as_of": { "type": "string", "format": "date-time" },
+    "input_sha256": { "type": "string", "pattern": "^[A-Fa-f0-9]{64}$" },
+    "summary": {
+      "type": "object",
+      "required": ["total", "high", "normal", "claim_review_required", "source_monitoring_required", "queue_action_required"],
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "high": { "type": "integer", "minimum": 0 },
+        "normal": { "type": "integer", "minimum": 0 },
+        "claim_review_required": { "type": "integer", "minimum": 0 },
+        "source_monitoring_required": { "type": "integer", "minimum": 0 },
+        "queue_action_required": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "kind", "priority", "subject_id", "reason_codes", "context"],
+        "properties": {
+          "id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "kind": {
+            "type": "string",
+            "enum": ["claim_review_required", "source_monitoring_required", "queue_action_required"]
+          },
+          "priority": { "type": "string", "enum": ["high", "normal"] },
+          "subject_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+          "reason_codes": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": { "type": "string", "minLength": 1, "maxLength": 128 }
+          },
+          "context": { "type": "object" }
+        },
+        "allOf": [
+          {
+            "if": { "properties": { "kind": { "const": "claim_review_required" } }, "required": ["kind"] },
+            "then": { "properties": { "context": { "$ref": "#/$defs/claim_review_context" } } }
+          },
+          {
+            "if": { "properties": { "kind": { "const": "source_monitoring_required" } }, "required": ["kind"] },
+            "then": { "properties": { "context": { "$ref": "#/$defs/source_monitoring_context" } } }
+          },
+          {
+            "if": { "properties": { "kind": { "const": "queue_action_required" } }, "required": ["kind"] },
+            "then": { "properties": { "context": { "$ref": "#/$defs/queue_action_context" } } }
+          }
+        ],
+        "additionalProperties": false
+      }
+    },
+    "authority": {
+      "type": "object",
+      "required": ["mode", "truth_authority", "approval_authority", "canonical_mutation_authority", "publication_authority"],
+      "properties": {
+        "mode": { "const": "operational_audit_only" },
+        "truth_authority": { "const": false },
+        "approval_authority": { "const": false },
+        "canonical_mutation_authority": { "const": false },
+        "publication_authority": { "const": false }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "claim_review_context": {
+      "type": "object",
+      "required": ["claim_id", "subject_id", "predicate_id", "claim_state", "confidence", "staleness_status", "verified_at", "review_due_at"],
+      "properties": {
+        "claim_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+        "subject_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+        "predicate_id": { "type": "string", "minLength": 1 },
+        "claim_state": { "type": "string", "enum": ["active", "disputed"] },
+        "confidence": { "type": "string", "enum": ["verified", "high", "medium", "low", "unverified"] },
+        "staleness_status": { "type": "string", "enum": ["fresh", "due", "unverified"] },
+        "verified_at": { "type": ["string", "null"], "format": "date-time" },
+        "review_due_at": { "type": ["string", "null"], "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "source_monitoring_context": {
+      "type": "object",
+      "required": ["source_id", "feed_key", "source_class", "freshness_status", "latest_observed_at", "next_check_due_at"],
+      "properties": {
+        "source_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+        "feed_key": { "type": "string", "minLength": 1 },
+        "source_class": { "type": "string", "enum": ["A", "B", "C", "D", "E"] },
+        "freshness_status": { "type": "string", "enum": ["due", "never_retrieved"] },
+        "latest_observed_at": { "type": ["string", "null"], "format": "date-time" },
+        "next_check_due_at": { "type": ["string", "null"], "format": "date-time" }
+      },
+      "additionalProperties": false
+    },
+    "queue_action_context": {
+      "type": "object",
+      "required": ["queue_item_id", "lane", "state", "priority", "source_ids", "document_ids", "created_at"],
+      "properties": {
+        "queue_item_id": { "$ref": "common.schema.json#/$defs/canonical_id" },
+        "lane": { "type": "string", "enum": ["candidate_extraction", "discovery_review", "restricted_human"] },
+        "state": { "type": "string", "enum": ["queued", "claimed"] },
+        "priority": { "type": "string", "enum": ["high", "normal"] },
+        "source_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/canonical_id" }
+        },
+        "document_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "common.schema.json#/$defs/canonical_id" }
+        },
+        "created_at": { "type": "string", "format": "date-time" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
