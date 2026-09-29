@@ -10,20 +10,26 @@ The review follows the repository rule that discovery and first-pass defect find
 
 Base branch / merge base:
 
-- `main` at `3d95b462e6a5d5c1c74c2a9e5e2f0d21ab55a1e0` ("M4: add bounded real-model extraction trial harness (#28)").
+- `main` at `3d95b461e8c226fdf0eef69dccbd66e4e256c9f1` ("M4: add bounded real-model extraction trial harness (#28)"), verified against `origin/main` before push.
 
-Implementation baseline reviewed before this review record was added:
+Provenance correction: the first version of this record cited the base as `3d95b462e6a5d5c1c74c2a9e5e2f0d21ab55a1e0`. That full SHA was erroneous — only the seven-character prefix `3d95b46` had been obtained from command output and the remaining digits were not verified before writing. The SHA above is the verified value from `git rev-parse main` and `git ls-remote origin main`.
 
-- `m4/zai-model-trial-driver` at `88e3e66c1d03cc8bf0699961af3783a58ef626e8`.
+Branch commit chain on `m4/zai-model-trial-driver` (all versus the base above):
 
-Net implementation/documentation surface at that baseline:
+1. `88e3e66c1d03cc8bf0699961af3783a58ef626e8` — Z.ai provider edge implementation, deterministic validator, CI step, and trial documentation (the originally reviewed implementation baseline);
+2. `31ae08df171e821947aecf6e755df1571914965e` — first version of this review record (superseded by this revision);
+3. `23d6d2f6bc7942479775956444260e079ac9294b` — remediation of FPZ-04 (fail-closed redirect refusal in the transport) with regression tests;
+4. this commit — corrected provenance, FPZ-04 register entry, and the exact-head freeze below.
+
+Net implementation/documentation surface at the frozen tip:
 
 1. `.github/workflows/schema-validation.yml`
 2. `docs/M4_MODEL_EXTRACTION_TRIAL.md`
-3. `scripts/run_m4_model_extraction_trial.py`
-4. `scripts/validate_m4_model_extraction_trial_zai_provider.py`
+3. `docs/reviews/M4_MODEL_EXTRACTION_TRIAL_ZAI_PROVIDER_FIRST_PASS.md`
+4. `scripts/run_m4_model_extraction_trial.py`
+5. `scripts/validate_m4_model_extraction_trial_zai_provider.py`
 
-`services/intelligence/model_extraction_trial.py` and every other validator, service, schema, and fixture are byte-identical to `main`. The increment deliberately touches only the provider edge of the existing trial runner, one new deterministic validator, the CI workflow step that runs it, and the trial document.
+`services/intelligence/model_extraction_trial.py` and every other validator, service, schema, and fixture are byte-identical to `main`. The increment deliberately touches only the provider edge of the existing trial runner, one new deterministic validator, the CI workflow step that runs it, the trial document, and this record.
 
 ## Intent and authority boundary
 
@@ -111,20 +117,24 @@ The `--base-url` + copilot rejection test emitted the argparse usage banner into
 
 The first version of the main()-level test answered `TRIAL-EN-DELIVERY` with the raw shared fake output, which includes a manufacturer-claim validity block that the reconciled gold expectation for that case rejects. The assertion failed, correctly. Remediated: the test applies the same `without_manufacturer_validity` transformation the reconciliation review established, with the rationale documented at the point of use. No production code was affected.
 
+### FPZ-04 — HIGH (severity per independent-review direction) — automatic redirect following could forward the bearer credential
+
+`urllib.request.urlopen` follows 3xx responses automatically and may re-POST the request — including the `Authorization` header — to the redirect target, on any origin. The first version of this record classified that as an accepted limitation because the endpoint is operator-controlled; the independent review direction rejected that classification, since a compromised, hijacked, or misconfigured endpoint could redirect the credentialed request elsewhere.
+
+Remediated in `23d6d2f6bc7942479775956444260e079ac9294b`: the transport now uses a dedicated opener whose redirect handler refuses every redirect (`redirect_request` returns `None`, so urllib raises `HTTPError` with the 3xx status), which the existing fail-closed status handling turns into a trial integrity failure. The credential can therefore never be re-sent to any origin. Regression-tested: the handler is asserted to refuse 301/302/303/307/308, the transport opener is asserted to contain no redirect-following handler, and the fail-closed matrix already covers non-2xx statuses including 300.
+
 ### Documented limitations (accepted, not remediated)
 
 - **Timeout semantics.** The stdlib timeout bounds socket connect/read operations, not total request wall-clock; a slow-drip response could exceed `--timeout-seconds` across reads. The Copilot subprocess timeout is a process wall-clock kill, so the two edges differ here. Accepted for the bounded trial; a wall-clock watchdog is future work if the driver is promoted.
-- **Redirect following.** urllib follows 3xx responses and may re-POST after a redirect. The endpoint is operator-controlled (flag, environment variable, or the documented default), never model-controlled, so this is accepted; a redirecting endpoint is an operator misconfiguration.
 - **Envelope parser leniency.** The transport envelope is parsed with plain `json.loads`, tolerating non-finite constants and duplicate keys at the envelope level. Only the assistant content string becomes data, and it passes through the strict finite/duplicate-key boundary unchanged, so envelope leniency cannot produce candidate records.
 - **Verbatim credential.** `ZAI_API_KEY` is used exactly as provided, including surrounding whitespace; a mis-scoped value fails closed as HTTP 401 at the provider.
 - **Base URL in the report.** `provider_edge.base_url` records operator configuration. It is not a credential, but a proxy URL could reveal internal topology; this is the operator's disclosure decision.
 
 ## Deterministic validation evidence
 
-At implementation head `88e3e66c1d03cc8bf0699961af3783a58ef626e8`:
-
-- complete repository suite: all 38 `scripts/validate_*.py` validators — **PASS** (37 baseline validators unchanged-green plus the new Z.ai provider-edge validator);
-- the new validator exercises: request fidelity and tool-free payload; environment-only credential with redaction including the truncation-straddle case; endpoint resolution precedence and URL validation; a fifteen-case fail-closed matrix; identical strict JSON/candidate boundary outcomes; Copilot backward compatibility including credential gating; main()-level report trace, key non-leakage, and unchanged qualification flags; absence of governance imports in the runner.
+- The complete repository suite (all 38 `scripts/validate_*.py` validators: 37 baseline validators unchanged-green plus the Z.ai provider-edge validator) passed locally at implementation head `88e3e66c1d03cc8bf0699961af3783a58ef626e8`, again after the FPZ-04 remediation at `23d6d2f6bc7942479775956444260e079ac9294b`, and is re-run at the exact frozen tip (this record's commit) immediately before push, per the exact-head freeze protocol below.
+- The `schema-validation` workflow triggers on every push to `m4/**`; the push of this exact tip therefore provides independent exact-head CI evidence on GitHub Actions.
+- The new validator exercises: request fidelity and tool-free payload; environment-only credential with redaction including the truncation-straddle case; endpoint resolution precedence and URL validation; refusal of all redirect classes at the transport handler; a fifteen-case fail-closed matrix; identical strict JSON/candidate boundary outcomes; Copilot backward compatibility including credential gating; main()-level report trace, key non-leakage, and unchanged qualification flags; absence of governance imports in the runner.
 
 No network call, no Z.ai request, and no model credit was consumed by any validation run.
 
@@ -138,4 +148,6 @@ No network call, no Z.ai request, and no model credit was consumed by any valida
 
 ## Frozen maintainer baseline
 
-Implementation head `88e3e66c1d03cc8bf0699961af3783a58ef626e8` plus this review record constitute the frozen maintainer first-pass baseline for independent review. The live Z.ai trial must not be executed before that independent review completes.
+Exact-head freeze protocol: a record cannot contain its own commit SHA, so the frozen baseline is defined structurally. The frozen tip is the branch tip containing this record — implementation commits `88e3e66c1d03cc8bf0699961af3783a58ef626e8` (edge) and `23d6d2f6bc7942479775956444260e079ac9294b` (FPZ-04 remediation), plus this record commit as the tip. The complete 38-validator suite is executed locally at that exact tip immediately before push, and the push itself triggers the `schema-validation` workflow on the same exact tip; both results constitute the exact-head evidence for the independent reviewer. The post-record tip SHA is reported out-of-band with the push and recorded in the eventual merge/second-review documentation.
+
+This frozen baseline is the maintainer first pass for independent review. The live Z.ai trial must not be executed before that independent review completes.
