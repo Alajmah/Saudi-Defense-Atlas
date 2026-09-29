@@ -63,6 +63,8 @@ The M1 web shell is intentionally framework-neutral. Selection of a production f
 
 ## Qualification boundary
 
-M0 and the bounded M1 vertical slice establish the canonical knowledge, governed mutation, canonical readback, and bilingual cited public-projection mechanics. M1-F15—concurrent-writer canonical-ID uniqueness—remains unresolved; production automated canonical mutation workers stay disabled until that coordination mechanism is designed and independently verified.
+M0–M3 and the bounded M4 editorial-control increments establish the canonical knowledge model, governed mutation/readback path, cited bilingual public projections, deterministic monitoring/extraction/review contracts, and a logical global single-writer mutation-dispatch boundary. The M4 dispatcher verifies fail-closed single-writer behavior and replay safety with a project-owned in-memory coordination fixture; it does **not** qualify a shared atomic lock/queue/lease mechanism across multiple processes or hosts. Multiple production automated canonical writers remain disabled until such a coordinator is selected and independently verified.
+
+The M4 editorial auditor and daily brief are operational metadata projections only. They add no truth, approval, canonical-mutation, publication, scheduler, or autonomous-remediation authority.
 
 See `docs/ROADMAP.md` and `docs/M1_PUBLIC_PROJECTION.md` for milestone scope and qualification boundaries.

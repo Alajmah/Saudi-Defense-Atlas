@@ -263,24 +263,38 @@ The OpenSearch and MapLibre adoption evidence remains recorded in ADR-0004/ADR-0
 
 ---
 
-## M4 — AI Editorial Operations — NEXT
+## M4 — AI Editorial Operations — IN PROGRESS
 
 ### Goal
 
 Scale the proven deterministic/source-backed pipeline into an AI-assisted editorial operating system without allowing models to bypass evidence, review, sensitivity, or canonical-mutation authority.
 
-Planned outcomes:
+### Delivered
 
-- multi-source monitoring
-- automated relevance classification
-- claim extraction at scale
-- contradiction detection
-- stale-record auditor
-- bilingual drafting
-- daily editorial brief
-- model/prompt observability and evaluation dashboards
+- deterministic multi-source monitoring observations and editorial-queue routing;
+- canonical-content deduplication that preserves distinct Source / Document provenance;
+- deterministic relevance, deduplication, policy routing, and AI-extraction allowlisting before generative processing;
+- a typed AI-extraction run/trace contract with provider/model/version/adapter, prompt-template version/hash, exact input/output hashes, evaluator checks, and candidate-only authority; the accepted boundary itself does not invoke or select a real model;
+- deterministic entity/claim/event resolution and verification with explicit new / duplicate / conflict / blocked outcomes and distinct ambiguous / unresolved states;
+- human editorial review packets bound to the exact queue item, accepted extraction, resolution result, and AMBER ChangeProposal;
+- human ReviewDecision binding into the canonical mutation guard with tamper rejection and reject-no-write behavior;
+- a multi-source editorial vertical slice through discovery -> extraction -> verification -> review -> canonical Revision -> public projection while retaining both source provenances;
+- a project-owned logical `canonical-global-single-writer` dispatch contract with fail-closed busy-lane behavior, exact-proposal replay protection, and zero backend activity when coordination is unavailable;
+- deterministic Claim/source/queue auditing and a content-addressed daily editorial brief with zero truth, approval, canonical-mutation, or publication authority;
+- adversarial semantic-integrity checks for bounded IDs, kind-specific context, RFC 3339 timestamps, review/acquisition deadline ordering, provenance retention, and duplicate semantic action rejection.
 
-M4 must preserve the existing proposal/review/revision boundary. Model output remains candidate/proposal data until policy and review authorize canonical effects.
+### Remaining / Not Yet Qualified
+
+- operating model-backed claim extraction remains unimplemented: no real model adapter/provider has been selected or invoked through the accepted extraction boundary, and extraction quality/performance/scale claims remain unqualified;
+- before M4 closure, a bounded real-model extraction trial must demonstrate the existing candidate-only, provenance, rejection-isolation, resolver, human-review, and authority boundaries against an explicit evaluation dataset and metrics, including representative batch-volume/throughput evidence sufficient to support any claim of extraction “at scale”;
+- bilingual AI drafting grounded in approved Claim/Evidence records remains unimplemented;
+- model/prompt/version/evaluator metadata exists as part of the extraction contract, but an observability/evaluation dashboard framework has not been selected or qualified;
+- no production scheduler, orchestrator, alerting channel, or autonomous remediation mechanism has been selected;
+- the logical single-writer dispatcher is verified only with the project-owned in-memory coordination fixture; a shared atomic cross-process/cross-host coordinator remains unselected and unverified;
+- multiple production automated canonical writers therefore remain disabled;
+- production security, HA/failover, backup/recovery, capacity, and deployment topology remain outside the current qualification evidence.
+
+M4 continues to preserve the proposal/review/revision boundary. Model output remains candidate/proposal data until policy and human review authorize canonical effects.
 
 ---
 
@@ -299,13 +313,14 @@ The assistant must answer from approved data/evidence rather than treat web sear
 
 ## Immediate Next Sequence
 
-After M3 closure:
+After the merged M4 editorial-control increments:
 
-1. define the M4 source-monitoring and editorial-queue contracts before selecting a scheduler/orchestrator;
-2. define a typed AI extraction boundary that emits candidate Entity/Claim/Event/Evidence records only;
-3. build deterministic relevance/deduplication/source-routing before invoking generative models;
-4. add model/prompt/version/evaluation metadata to every AI-produced proposal artifact;
-5. keep AMBER/RED review and operational-sensitivity gates intact;
-6. resolve the outstanding concurrent-writer coordination requirement before enabling multiple automated canonical mutation workers;
-7. prove one multi-source editorial vertical slice through discovery -> extraction -> verification -> review -> canonical Revision -> public projection;
-8. run exhaustive first-pass and exact-head CI gates before promoting any orchestration or model-dependent mechanism.
+1. define a bounded real-model extraction trial over claimed `candidate_extraction` queue items using the accepted `AIExtractionRun` contract, with provider/model choice treated as a scoped implementation decision rather than new authority;
+2. define the extraction evaluation dataset and metrics for candidate Claim/Event/Evidence quality, rejection behavior, provenance closure, latency/cost, and representative batch throughput, and verify the trial before making any model-quality or “at scale” claim;
+3. define a bounded bilingual drafting projection over approved Claim/Evidence records, with no truth, canonical-mutation, or publication authority;
+4. define model/prompt/evaluator observability and evaluation projections over the metadata already captured by AI extraction artifacts before selecting any dashboard framework;
+5. keep scheduler/orchestrator and alerting-channel selection deferred until a concrete forcing function exists;
+6. select and independently verify a shared atomic coordinator only when multi-process or multi-host automated canonical writers have a concrete operational requirement;
+7. keep AMBER/RED review, operational-sensitivity gates, exact human decision binding, and the logical global single-writer dispatch boundary intact;
+8. close M4 only after model-backed extraction, extraction quality/scale evaluation, bilingual drafting, and evaluation/observability outcomes are verified without broadening authority;
+9. begin M5 grounded Research Assistant work from approved knowledge/evidence, with semantic/vector retrieval admitted only after an explicit retrieval evaluation proves improvement without bypassing citations or canonical evidence.
