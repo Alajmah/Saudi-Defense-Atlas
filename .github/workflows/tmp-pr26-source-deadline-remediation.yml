@@ -1,0 +1,60 @@
+name: Temporary PR26 source deadline remediation
+
+on:
+  push:
+    branches:
+      - m4/editorial-audit-brief
+
+permissions:
+  contents: write
+
+jobs:
+  remediate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: m4/editorial-audit-brief
+          fetch-depth: 0
+
+      - name: Apply exact-head source deadline remediation
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          service = Path('services/intelligence/editorial_audit.py')
+          text = service.read_text()
+          old = '''        elif latest is None or next_due is None or next_due > as_of_dt:\n            raise EditorialAuditError("due source-monitoring context requires due acquisition dates")\n'''
+          new = '''        elif latest is None or next_due is None:\n            raise EditorialAuditError("due source-monitoring context requires acquisition dates")\n        elif next_due <= latest:\n            raise EditorialAuditError("source-monitoring deadline must follow latest observation")\n        elif next_due > as_of_dt:\n            raise EditorialAuditError("due source-monitoring deadline is later than audit as_of")\n'''
+          if text.count(old) != 1:
+              raise SystemExit('service replacement target mismatch')
+          service.write_text(text.replace(old, new, 1))
+
+          validator = Path('scripts/validate_m4_editorial_audit_brief.py')
+          text = validator.read_text()
+          anchor = '''    schema_invalid_timestamp = copy.deepcopy(report)\n'''
+          insertion = '''    source_deadline_not_after_observation = copy.deepcopy(report)\n    source_deadline_finding = next(\n        item for item in source_deadline_not_after_observation["findings"]\n        if item["kind"] == "source_monitoring_required"\n        and item["context"]["freshness_status"] == "due"\n    )\n    source_deadline_finding["context"]["next_check_due_at"] = (\n        source_deadline_finding["context"]["latest_observed_at"]\n    )\n    _rehash_report(source_deadline_not_after_observation)\n    expect_raises(\n        "self-consistent source deadline not after latest observation",\n        lambda: build_daily_editorial_brief(\n            audit_report=source_deadline_not_after_observation\n        ),\n        failures,\n    )\n\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit('validator insertion anchor mismatch')
+          validator.write_text(text.replace(anchor, insertion + anchor, 1))
+
+          review = Path('docs/reviews/M4_EDITORIAL_AUDIT_BRIEF_FIRST_PASS.md')
+          text = review.read_text()
+          anchor = '''## Final bounded assessment\n'''
+          insertion = '''## Codex independent second review — pass 4\n\nCodex reviewed head `829bec06ee75048a82e9fcccea7c0bf4d78e0a3b` and reported one additional P2 semantic-integrity finding: a `due` source-monitoring context could carry `next_check_due_at <= latest_observed_at` while still satisfying the existing `next_check_due_at <= as_of` check.\n\n### Reconciliation\n\n**CODEX CLAIM:** a self-consistent re-hashed source-monitoring finding could present a polling deadline at or before the observation it supposedly follows.\n\n**OUR VERIFICATION:** CONFIRMED independently against the upstream M2 source-freshness contract. `build_source_freshness_report` derives `next_check_due_at = latest_observed_at + timedelta(days=poll_days)`, and polling windows are constrained to positive integer days, so a valid deadline must be strictly later than the latest successful observation.\n\n**RESULT:** CONFIRMED and remediated. The semantic brief boundary now requires `next_check_due_at > latest_observed_at` for `due` source-monitoring findings in addition to requiring the deadline to be at or before audit `as_of`. A self-consistent re-hashed equality fixture now fails closed.\n\n'''
+          if text.count(anchor) != 1:
+              raise SystemExit('review insertion anchor mismatch')
+          review.write_text(text.replace(anchor, insertion + anchor, 1))
+          PY
+
+      - name: Commit remediation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add services/intelligence/editorial_audit.py scripts/validate_m4_editorial_audit_brief.py docs/reviews/M4_EDITORIAL_AUDIT_BRIEF_FIRST_PASS.md
+          git diff --cached --check
+          git commit -m "fix: enforce source monitoring deadline ordering"
+          git push origin HEAD:m4/editorial-audit-brief
