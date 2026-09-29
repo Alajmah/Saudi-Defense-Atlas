@@ -275,7 +275,8 @@ Scale the proven deterministic/source-backed pipeline into an AI-assisted editor
 - canonical-content deduplication that preserves distinct Source / Document provenance;
 - deterministic relevance, deduplication, policy routing, and AI-extraction allowlisting before generative processing;
 - a typed AI-extraction run/trace contract with provider/model/version/adapter, prompt-template version/hash, exact input/output hashes, evaluator checks, and candidate-only authority;
-- a bounded provider-independent real-model extraction trial harness over synthetic public/non-operational fixtures, with a manual pinned Copilot CLI driver, exact rendered-prompt/raw-response hashing, pre-invocation restricted-case blocking, and zero canonical-mutation/publication authority; live model evidence remains unqualified until the manual trial is executed and reviewed;
+- a bounded provider-independent real-model extraction trial harness over synthetic public/non-operational fixtures, with two reviewed provider edges (a manual pinned Copilot CLI driver and a local Z.ai OpenAI-compatible HTTP driver), exact rendered-prompt/raw-response hashing, pre-invocation restricted-case blocking, and zero canonical-mutation/publication authority;
+- a first bounded live Z.ai extraction trial executed from clean `main` and reviewed (first-pass and second-review records; report and SHA-256 sidecar preserved as immutable evidence under `docs/evidence/m4/2026-09-29/`): five invocations, five schema/boundary-valid runs, the restricted case blocked before invocation, zero integrity failures — live provider mechanics and sensitivity gating are evidenced, extraction quality remains unqualified;
 - deterministic entity/claim/event resolution and verification with explicit new / duplicate / conflict / blocked outcomes and distinct ambiguous / unresolved states;
 - human editorial review packets bound to the exact queue item, accepted extraction, resolution result, and AMBER ChangeProposal;
 - human ReviewDecision binding into the canonical mutation guard with tamper rejection and reject-no-write behavior;
@@ -286,8 +287,8 @@ Scale the proven deterministic/source-backed pipeline into an AI-assisted editor
 
 ### Remaining / Not Yet Qualified
 
-- the bounded trial driver is selected and implemented for trial use only, but no live real-model trial report has yet been reviewed; extraction quality, performance, and scale therefore remain unqualified, and the driver is not a production provider/platform adoption;
-- before M4 closure, execute and review the bounded live synthetic trial, then demonstrate that real-model candidates preserve provenance, rejection isolation, the Resolver/Verifier boundary, human review, and authority constraints against explicit evaluation metrics; representative batch-volume/throughput evidence is still required before any extraction “at scale” claim;
+- the first live-trial evidence qualifies provider-edge mechanics and pre-invocation sensitivity gating only: extraction quality remains unqualified (invoked-model exact-gold 0/5, with evaluator-contract ambiguity recorded in the live-trial review records), downstream Resolver/Verifier preservation is currently not demonstrated because three accepted candidates carry participant roles outside the canonical Event vocabulary, the served model checkpoint is unknown (only the requested model `glm-5.3` is traceable), and the trial driver is not a production provider/platform adoption;
+- before M4 closure: revise the candidate/prompt/evaluator contract from existing SDA ontology (canonical participant-role vocabulary, exact-numeric-bound convention, equipment-versus-variant typing rule, document-level Evidence cardinality) without fitting gold to observed model output; rerun the synthetic corpus under the revised contract; then demonstrate that real-model candidates preserve provenance, rejection isolation, the Resolver/Verifier boundary, human review, and authority constraints against explicit evaluation metrics; representative batch-volume/throughput evidence is still required before any extraction “at scale” claim;
 - bilingual AI drafting grounded in approved Claim/Evidence records remains unimplemented;
 - model/prompt/version/evaluator metadata exists as part of the extraction contract, but an observability/evaluation dashboard framework has not been selected or qualified;
 - no production scheduler, orchestrator, alerting channel, or autonomous remediation mechanism has been selected;
@@ -316,12 +317,13 @@ The assistant must answer from approved data/evidence rather than treat web sear
 
 After the merged M4 editorial-control increments:
 
-1. execute and review the bounded real-model extraction trial harness over the synthetic evaluation corpus; treat the pinned Copilot CLI driver as a scoped trial implementation, not production model-platform adoption;
-2. evaluate real-model candidate Claim/Event/Evidence quality, rejection behavior, provenance closure, latency/cost observability, downstream Resolver/Verifier and human-review preservation, and representative batch throughput before making any model-quality or “at scale” claim;
-3. define a bounded bilingual drafting projection over approved Claim/Evidence records, with no truth, canonical-mutation, or publication authority;
-4. define model/prompt/evaluator observability and evaluation projections over the metadata already captured by AI extraction artifacts before selecting any dashboard framework;
-5. keep scheduler/orchestrator and alerting-channel selection deferred until a concrete forcing function exists;
-6. select and independently verify a shared atomic coordinator only when multi-process or multi-host automated canonical writers have a concrete operational requirement;
-7. keep AMBER/RED review, operational-sensitivity gates, exact human decision binding, and the logical global single-writer dispatch boundary intact;
-8. close M4 only after model-backed extraction, extraction quality/scale evaluation, bilingual drafting, and evaluation/observability outcomes are verified without broadening authority;
-9. begin M5 grounded Research Assistant work from approved knowledge/evidence, with semantic/vector retrieval admitted only after an explicit retrieval evaluation proves improvement without bypassing citations or canonical evidence.
+1. merge the preserved Z.ai live-trial evidence and its review records (PR #30) after a fresh Codex re-review of the documentation-only second-review reconciliation;
+2. revise the candidate/prompt/evaluator contract from existing SDA ontology — expose and enforce the canonical participant-role vocabulary, define the exact-numeric-bound convention, the equipment-versus-equipment_variant typing rule, and document-level Evidence cardinality — bump the prompt/adapter/corpus versions, and rerun the same synthetic scenarios without fitting gold to observed model output;
+3. evaluate real-model candidate Claim/Event/Evidence quality, rejection behavior, provenance closure, latency/cost observability, downstream Resolver/Verifier and human-review preservation, and representative batch throughput before making any model-quality or “at scale” claim;
+4. define a bounded bilingual drafting projection over approved Claim/Evidence records, with no truth, canonical-mutation, or publication authority;
+5. define model/prompt/evaluator observability and evaluation projections over the metadata already captured by AI extraction artifacts before selecting any dashboard framework;
+6. keep scheduler/orchestrator and alerting-channel selection deferred until a concrete forcing function exists;
+7. select and independently verify a shared atomic coordinator only when multi-process or multi-host automated canonical writers have a concrete operational requirement;
+8. keep AMBER/RED review, operational-sensitivity gates, exact human decision binding, and the logical global single-writer dispatch boundary intact;
+9. close M4 only after model-backed extraction, extraction quality/scale evaluation, bilingual drafting, and evaluation/observability outcomes are verified without broadening authority;
+10. begin M5 grounded Research Assistant work from approved knowledge/evidence, with semantic/vector retrieval admitted only after an explicit retrieval evaluation proves improvement without bypassing citations or canonical evidence.
