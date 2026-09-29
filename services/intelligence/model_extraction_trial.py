@@ -82,6 +82,8 @@ class ModelTrace:
         for key, value in values.items():
             if not isinstance(value, str) or not value.strip():
                 raise ModelExtractionTrialError(f"model trace {key} must be non-empty")
+            if len(value) > 128:
+                raise ModelExtractionTrialError(f"model trace {key} exceeds schema maximum length")
         return values
 
 
@@ -206,8 +208,7 @@ def _candidate_envelope(raw_output: str) -> tuple[dict[str, Any] | None, list[st
             errors.append(f"model output contains unsupported keys: {', '.join(extra)}")
 
     for key in sorted(expected):
-        value = payload.get(key)
-        if not isinstance(value, list):
+        if not isinstance(payload.get(key), list):
             errors.append(f"model output {key} must be an array")
 
     if errors:
@@ -217,8 +218,12 @@ def _candidate_envelope(raw_output: str) -> tuple[dict[str, Any] | None, list[st
 
 def _enforce_case_allowlist(case: Mapping[str, Any], candidates: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
-    allowed_predicates = set(_string_list(case.get("allowed_predicates"), "allowed_predicates", allow_empty=True))
-    allowed_event_types = set(_string_list(case.get("allowed_event_types"), "allowed_event_types", allow_empty=True))
+    allowed_predicates = set(
+        _string_list(case.get("allowed_predicates"), "allowed_predicates", allow_empty=True)
+    )
+    allowed_event_types = set(
+        _string_list(case.get("allowed_event_types"), "allowed_event_types", allow_empty=True)
+    )
     source_document_id = case["source_document_id"]
 
     for item in candidates.get("evidence", []):
@@ -251,22 +256,16 @@ def _base_run(
     started_at: str,
     completed_at: str,
 ) -> dict[str, Any]:
+    input_sha256 = _sha256_text(prompt)
+    raw_output_sha256 = _sha256_text(raw_output)
     seed = {
         "case_id": case["id"],
         "queue_item_id": case["queue_item"]["id"],
         "model": model_trace.as_dict(),
-        "prompt_sha256": _sha256_text(prompt),
-        "input_sha256": _sha256_bytes(
-            _canonical_json_bytes(
-                {
-                    "source_document_id": case["source_document_id"],
-                    "source_text": case["source_text"],
-                    "allowed_predicates": case.get("allowed_predicates", []),
-                    "allowed_event_types": case.get("allowed_event_types", []),
-                }
-            )
-        ),
-        "raw_output_sha256": _sha256_text(raw_output),
+        "input_sha256": input_sha256,
+        "raw_output_sha256": raw_output_sha256,
+        "started_at": started_at,
+        "completed_at": completed_at,
     }
     return {
         "id": f"SDA-AIRUN-TRIAL-{_sha256_bytes(_canonical_json_bytes(seed))[:20].upper()}",
@@ -280,8 +279,8 @@ def _base_run(
             "template_version": PROMPT_TEMPLATE_VERSION,
             "template_sha256": prompt_template_sha256(),
         },
-        "input_sha256": seed["input_sha256"],
-        "raw_output_sha256": seed["raw_output_sha256"],
+        "input_sha256": input_sha256,
+        "raw_output_sha256": raw_output_sha256,
         "authority": {
             "mode": "candidate_only",
             "canonical_mutation_authority": False,
@@ -303,11 +302,7 @@ def _rejected_run(
         "evaluation_trace": {
             "validator_version": ADAPTER_VERSION,
             "checks": [
-                {
-                    "check_id": check_id,
-                    "status": "fail",
-                    "detail": rendered[0],
-                }
+                {"check_id": check_id, "status": "fail", "detail": rendered[0]}
             ],
         },
         "candidates": {"evidence": [], "entities": [], "claims": [], "events": []},
@@ -323,14 +318,21 @@ def build_extraction_run_from_model_output(
     started_at: str,
     completed_at: str,
 ) -> dict[str, Any]:
-    """Convert untrusted model text into an accepted or rejected AIExtractionRun.
+    """Convert exact model response text into an accepted or rejected AIExtractionRun.
 
-    Structural JSON-Schema validation remains the caller's responsibility, exactly
-    as it is for the existing M4 extraction contract. Semantic authority and
-    reference closure are checked here through ``validate_ai_extraction_run``.
+    ``input_sha256`` hashes the exact rendered prompt supplied to the invoker and
+    ``raw_output_sha256`` hashes the exact response string returned by the invoker.
+    Structural JSON-Schema validation remains the caller's responsibility; the
+    existing M4 extraction boundary owns semantic authority/reference closure.
     """
 
     validate_trial_case(case)
+    expected_prompt = build_trial_prompt(case)
+    if prompt != expected_prompt:
+        raise ModelExtractionTrialError("prompt does not match the approved trial template")
+    if not isinstance(raw_output, str):
+        raise ModelExtractionTrialError("raw model output must be text")
+
     base = _base_run(
         case=case,
         model_trace=model_trace,
