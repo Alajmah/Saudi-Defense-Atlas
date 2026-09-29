@@ -455,6 +455,52 @@ def main() -> int:
         failures,
     )
 
+    schema_invalid_timestamp = copy.deepcopy(report)
+    queue_timestamp_finding = next(
+        item for item in schema_invalid_timestamp["findings"]
+        if item["kind"] == "queue_action_required"
+    )
+    queue_timestamp_finding["context"]["created_at"] = "20260115T000000+0000"
+    _rehash_report(schema_invalid_timestamp)
+    expect_raises(
+        "self-consistent schema-invalid basic ISO timestamp",
+        lambda: build_daily_editorial_brief(audit_report=schema_invalid_timestamp),
+        failures,
+    )
+
+    due_after_as_of = copy.deepcopy(report)
+    due_finding = next(
+        item for item in due_after_as_of["findings"]
+        if item["kind"] == "claim_review_required"
+        and item["context"]["staleness_status"] == "due"
+    )
+    due_finding["context"]["review_due_at"] = "2026-02-02T00:00:00Z"
+    _rehash_report(due_after_as_of)
+    expect_raises(
+        "self-consistent due claim with future review deadline",
+        lambda: build_daily_editorial_brief(audit_report=due_after_as_of),
+        failures,
+    )
+
+    fresh_after_deadline = copy.deepcopy(report)
+    fresh_finding = next(
+        item for item in fresh_after_deadline["findings"]
+        if item["kind"] == "claim_review_required"
+        and item["context"]["staleness_status"] == "due"
+    )
+    fresh_finding["context"]["staleness_status"] = "fresh"
+    fresh_finding["context"]["claim_state"] = "disputed"
+    fresh_finding["reason_codes"] = ["claim_state:disputed"]
+    fresh_finding["priority"] = "high"
+    fresh_after_deadline["summary"]["high"] += 1
+    fresh_after_deadline["summary"]["normal"] -= 1
+    _rehash_report(fresh_after_deadline)
+    expect_raises(
+        "self-consistent fresh claim after review deadline",
+        lambda: build_daily_editorial_brief(audit_report=fresh_after_deadline),
+        failures,
+    )
+
     if failures:
         print("M4 editorial audit/brief validation FAILED:")
         for failure in failures:

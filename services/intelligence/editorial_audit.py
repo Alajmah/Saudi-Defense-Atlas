@@ -77,6 +77,9 @@ _QUEUE_CONTEXT_KEYS = {
     "created_at",
 }
 _SHA256_RE = re.compile(r"^[A-Fa-f0-9]{64}$")
+_RFC3339_RE = re.compile(
+    r"^\d{4}-\d{2}-\d{2}[Tt]\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[Zz]|[+-]\d{2}:\d{2})$"
+)
 
 
 def _stable_json(value: Any) -> str:
@@ -100,10 +103,13 @@ def _canonical_id(value: Any, label: str) -> str:
 def _parse_utc(value: Any, label: str) -> datetime:
     if not isinstance(value, str) or not value:
         raise EditorialAuditError(f"{label} must be a date-time string")
+    if not _RFC3339_RE.fullmatch(value):
+        raise EditorialAuditError(f"{label} must be an RFC 3339 date-time")
+    normalized = value[:-1] + "+00:00" if value[-1] in {"Z", "z"} else value
     try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        parsed = datetime.fromisoformat(normalized)
     except ValueError as exc:
-        raise EditorialAuditError(f"{label} must be ISO date-time") from exc
+        raise EditorialAuditError(f"{label} must be an RFC 3339 date-time") from exc
     if parsed.tzinfo is None:
         raise EditorialAuditError(f"{label} must include timezone")
     return parsed.astimezone(timezone.utc)
@@ -200,6 +206,12 @@ def _validate_finding_context(
                 raise EditorialAuditError("unverified claim-review context has verification dates")
         elif verified_at is None or review_due_at is None:
             raise EditorialAuditError("verified claim-review context requires verification dates")
+        elif review_due_at <= verified_at:
+            raise EditorialAuditError("claim-review deadline must follow verified_at")
+        elif status == "due" and review_due_at > as_of_dt:
+            raise EditorialAuditError("due claim-review deadline is later than audit as_of")
+        elif status == "fresh" and review_due_at <= as_of_dt:
+            raise EditorialAuditError("fresh claim-review deadline is not later than audit as_of")
 
         expected_reasons: list[str] = []
         if status == "due":

@@ -143,6 +143,24 @@ Codex reviewed head `0ebdbab1fe` after the first remediation and reported one ad
 
 **RESULT:** CONFIRMED and remediated. The validator now checks exact context fields per finding kind and re-derives identity linkage, reason codes, priority, enumerated state, relevant timestamps, and Source/Document provenance before a brief can be emitted. Re-hashed empty-context and provenance-loss fixtures now fail closed.
 
+## Codex independent second review — pass 3
+
+Codex reviewed head `e609d9845992d915c1574855fe7131c4e3158a21` and reported two additional P2 semantic-integrity findings.
+
+### Reconciliation
+
+**CODEX CLAIM 1:** Python's permissive `datetime.fromisoformat` accepted basic ISO forms that the JSON Schema `date-time` format rejects, while retained finding context was copied unchanged into the brief.
+
+**OUR VERIFICATION:** CONFIRMED. A self-consistent re-hashed queue finding using `20260115T000000+0000` passed the old runtime parser but would produce a schema-invalid brief.
+
+**RESULT:** CONFIRMED and remediated. Runtime date-time admission now requires the RFC 3339 shape accepted by the public schemas before parsing, while preserving timezone normalization. A dedicated re-hashed basic-ISO regression fails closed.
+
+**CODEX CLAIM 2:** claim-review context validated the presence of `review_due_at` but did not re-derive whether the deadline was actually due or fresh at audit `as_of`.
+
+**OUR VERIFICATION:** CONFIRMED. A self-consistent re-hashed `due` finding with a deadline after `as_of` passed the previous semantic boundary; the inverse `fresh`/past-deadline inconsistency was also constructible.
+
+**RESULT:** CONFIRMED and remediated. The semantic boundary now requires `review_due_at > verified_at`, `review_due_at <= as_of` for `due`, and `review_due_at > as_of` for `fresh`. Dedicated adversarial regressions cover both due/future and fresh/past inconsistencies.
+
 ## Final bounded assessment
 
 No architectural scope was expanded while closing these findings. This increment still:
