@@ -1,22 +1,42 @@
 #!/usr/bin/env python3
-"""Run the bounded M4 real-model extraction trial through GitHub Copilot CLI.
+"""Run the bounded M4 real-model extraction trial through a provider edge.
+
+Supported trial providers:
+
+- ``copilot``: GitHub Copilot CLI subprocess (the original trial driver);
+- ``zai``: Z.ai OpenAI-compatible HTTP API using only the Python standard
+  library, with the credential read solely from the ``ZAI_API_KEY``
+  environment variable.
 
 The runner uses only the synthetic evaluation corpus. It captures AIExtractionRun
 artifacts and aggregate quality/latency evidence; it does not read or write the
 canonical knowledge backend and does not publish anything.
+
+Both provider edges return only the exact assistant response text to the
+provider-independent extraction boundary in
+``services/intelligence/model_extraction_trial.py``. Neither edge adds tools,
+function calling, repository/file/shell access, retrieval, MCPs, or autonomous
+actions, and neither holds canonical mutation, publication, Resolver/Verifier,
+or human-review authority.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import math
 import os
+import platform
 import statistics
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from jsonschema import Draft202012Validator, FormatChecker
 
@@ -39,16 +59,82 @@ from services.intelligence.model_extraction_trial import (  # noqa: E402
 
 DEFAULT_FIXTURE = ROOT / "tests" / "fixtures" / "m4-model-extraction-eval.json"
 
+PROVIDER_COPILOT = "copilot"
+PROVIDER_ZAI = "zai"
+COPILOT_PROVIDER_NAME = "github-copilot-cli"
+ZAI_PROVIDER_NAME = "zai-openai-compatible-api"
+DEFAULT_MODELS = {PROVIDER_COPILOT: "gpt-5.4", PROVIDER_ZAI: "glm-5.3"}
+# Z.ai documents separate OpenAI-compatible endpoints per account type and they
+# are not interchangeable: the Coding Plan route serves coding scenarios, the
+# prepaid/resource-package route serves general API usage. There is no silent
+# default (IRZ-02): the operator must select a route explicitly, and the
+# credential is only ever sent to the official api.z.ai host.
+ZAI_ENDPOINT_URLS = {
+    "coding-plan": "https://api.z.ai/api/coding/paas/v4",
+    "prepaid": "https://api.z.ai/api/paas/v4",
+}
+ZAI_ALLOWED_HOST = "api.z.ai"
+ZAI_CREDENTIAL_ENV = "ZAI_API_KEY"
+ZAI_BASE_URL_ENV = "ZAI_BASE_URL"
+# Any single provider response above this bound fails closed (IRZ-06). Expected
+# assistant JSON is small; provider diagnostic bodies do not need more than this.
+MAX_RESPONSE_BYTES = 1_048_576
+# GLM-5.3 reasoning is pinned explicitly (IRZ-04) so the effective inference
+# configuration is recorded in the report trace rather than left to a provider
+# default: thinking is enabled and reasoning_effort defaults to max per current
+# Z.ai documentation, so this pin preserves today's effective behavior.
+ZAI_REASONING_CONFIGURATION = {"thinking_type": "enabled", "reasoning_effort": "max"}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
-    parser.add_argument("--model", default="gpt-5.4")
+    parser.add_argument(
+        "--provider",
+        choices=(PROVIDER_COPILOT, PROVIDER_ZAI),
+        default=PROVIDER_COPILOT,
+        help="trial provider edge (default: copilot)",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "requested model "
+            f"(default: {DEFAULT_MODELS[PROVIDER_COPILOT]} for copilot, "
+            f"{DEFAULT_MODELS[PROVIDER_ZAI]} for zai)"
+        ),
+    )
     parser.add_argument("--copilot-command", default="copilot")
+    parser.add_argument(
+        "--zai-endpoint",
+        choices=tuple(ZAI_ENDPOINT_URLS),
+        default=None,
+        help=(
+            "required Z.ai route selection unless --base-url/ZAI_BASE_URL is "
+            f"given: coding-plan={ZAI_ENDPOINT_URLS['coding-plan']} (Coding Plan "
+            f"keys, coding scenarios), prepaid={ZAI_ENDPOINT_URLS['prepaid']} "
+            "(resource packages / prepaid balance, general API usage)"
+        ),
+    )
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help=(
+            "explicit Z.ai base URL; accepted only as one of the two exact "
+            "documented official routes, resolved from this flag then the "
+            f"{ZAI_BASE_URL_ENV} environment variable"
+        ),
+    )
     parser.add_argument("--timeout-seconds", type=int, default=120)
     parser.add_argument("--max-cases", type=int, default=0, help="0 means all fixture cases")
     parser.add_argument("--output", type=Path, required=True)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.provider != PROVIDER_ZAI:
+        if args.base_url is not None:
+            parser.error("--base-url applies only to --provider zai")
+        if args.zai_endpoint is not None:
+            parser.error("--zai-endpoint applies only to --provider zai")
+    return args
 
 
 def load_cases(path: Path) -> tuple[str, list[dict[str, Any]]]:
@@ -127,8 +213,391 @@ def copilot_invoker(command: str, model: str, timeout_seconds: int) -> Callable[
     return invoke
 
 
+def resolve_requested_model(provider: str, model: str | None) -> str:
+    if model is not None and model.strip():
+        return model
+    return DEFAULT_MODELS[provider]
+
+
+def require_zai_api_key(env: Mapping[str, str] | None = None) -> str:
+    """Read the credential from the environment only; never a CLI argument.
+
+    The credential is sent verbatim in the Authorization header and redacted
+    from diagnostics by exact substring replacement. Characters that HTTP
+    rejects or that exception repr() would escape (control characters,
+    whitespace at the edges, quotes, backslashes) could defeat that redaction
+    (IRZ-01), so any such credential is rejected before a request exists.
+    """
+
+    source = os.environ if env is None else env
+    api_key = source.get(ZAI_CREDENTIAL_ENV, "")
+    if not api_key or not api_key.strip():
+        raise SystemExit(
+            "Z.ai credential missing; set the ZAI_API_KEY environment variable "
+            "(credentials are never accepted as command-line arguments)"
+        )
+    if api_key != api_key.strip():
+        raise SystemExit(
+            "ZAI_API_KEY has leading or trailing whitespace; fix the "
+            "environment variable rather than the runner"
+        )
+    rejected = [
+        char
+        for char in api_key
+        if not 0x20 <= ord(char) <= 0x7E or char in "\"'\\"
+    ]
+    if rejected:
+        raise SystemExit(
+            "ZAI_API_KEY contains whitespace, control, non-ASCII, quote, or "
+            f"backslash characters ({len(rejected)} found); fix the environment "
+            "variable before running the trial"
+        )
+    return api_key
+
+
+def validate_zai_base_url(base_url: str) -> None:
+    """Fail closed on anything but an official api.z.ai HTTPS route (IRZ-02).
+
+    Overrides are accepted only as the two exact documented Z.ai base routes;
+    no arbitrary paths on the official host are credential destinations.
+    """
+
+    parsed = urllib.parse.urlsplit(base_url)
+    if parsed.scheme != "https":
+        raise SystemExit("Z.ai base URL must use https")
+    if parsed.username or parsed.password or "@" in (parsed.netloc or ""):
+        raise SystemExit("Z.ai base URL must not embed credentials")
+    if parsed.hostname != ZAI_ALLOWED_HOST:
+        raise SystemExit(
+            f"Z.ai base URL host must be the official {ZAI_ALLOWED_HOST} service; "
+            "custom endpoints require a separate reviewed forcing function"
+        )
+    if parsed.port is not None:
+        raise SystemExit("Z.ai base URL must use the default HTTPS port")
+    if parsed.query or parsed.fragment:
+        raise SystemExit("Z.ai base URL must not include a query or fragment")
+    if base_url not in ZAI_ENDPOINT_URLS.values():
+        documented = "; ".join(f"{mode}={url}" for mode, url in ZAI_ENDPOINT_URLS.items())
+        raise SystemExit(
+            "Z.ai base URL must be exactly one of the two documented official "
+            f"routes: {documented}"
+        )
+
+
+def resolve_zai_base_url(
+    base_url_arg: str | None,
+    endpoint_mode: str | None,
+    env: Mapping[str, str] | None = None,
+) -> tuple[str, str]:
+    """Resolve the endpoint as (url, source) with no silent default (IRZ-02).
+
+    Precedence: ``--base-url`` flag, then the ``ZAI_BASE_URL`` environment
+    variable, then the explicit ``--zai-endpoint`` route selection. Reaching
+    none of them fails closed: the documented Coding Plan and prepaid routes
+    are not interchangeable and the account type is the operator's fact to
+    state, not the runner's to assume.
+    """
+
+    source = os.environ if env is None else env
+    if base_url_arg:
+        return base_url_arg, "flag"
+    from_env = source.get(ZAI_BASE_URL_ENV, "").strip()
+    if from_env:
+        return from_env, "env"
+    if endpoint_mode:
+        return ZAI_ENDPOINT_URLS[endpoint_mode], f"endpoint:{endpoint_mode}"
+    raise SystemExit(
+        "Z.ai endpoint must be explicit; pass --zai-endpoint coding-plan|prepaid "
+        "or set --base-url / ZAI_BASE_URL to an official https://api.z.ai/ route "
+        "(the two documented routes are not interchangeable and there is no default)"
+    )
+
+
+def redact_secret(text: str, secret: str | None) -> str:
+    rendered = str(text)
+    if secret:
+        rendered = rendered.replace(secret, "***REDACTED***")
+    return rendered
+
+
+class _RefuseRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect so the bearer credential is never re-sent anywhere."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+        return None
+
+
+_ZAI_OPENER = urllib.request.build_opener(_RefuseRedirectHandler)
+
+
+def zai_request_payload(model: str, prompt: str) -> bytes:
+    """Encode the exact rendered trial prompt as one user message with no tool surface.
+
+    The GLM-5.3 reasoning configuration is pinned explicitly (IRZ-04): thinking
+    enabled with reasoning_effort max matches the documented provider default,
+    so the pin records the effective behavior rather than changing it.
+    """
+
+    return json.dumps(
+        {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "thinking": {"type": ZAI_REASONING_CONFIGURATION["thinking_type"]},
+            "reasoning_effort": ZAI_REASONING_CONFIGURATION["reasoning_effort"],
+        },
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def _capped_read(fp: Any, limit: int = MAX_RESPONSE_BYTES) -> bytes:
+    """Read at most ``limit`` bytes and fail closed above the bound (IRZ-06)."""
+
+    data = fp.read(limit + 1)
+    if data is None:
+        data = b""
+    if len(data) > limit:
+        raise RuntimeError(f"Z.ai response exceeded the {limit}-byte bound")
+    return data
+
+
+def zai_http_post_json(
+    url: str, payload: bytes, headers: dict[str, str], timeout_seconds: int
+) -> tuple[int, bytes]:
+    """Stdlib HTTPS POST returning (status, body) even for non-2xx statuses.
+
+    Redirects are refused rather than followed: the request carries a bearer
+    credential, so no 3xx may ever cause a re-POST to another origin. A refused
+    redirect surfaces here as its 3xx status, which the caller fails closed on.
+    Response bodies are read under the bounded-response limit (IRZ-06).
+    """
+
+    request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with _ZAI_OPENER.open(request, timeout=timeout_seconds) as response:
+            return int(response.status), _capped_read(response)
+    except urllib.error.HTTPError as exc:
+        try:
+            body = _capped_read(exc)
+        except RuntimeError:
+            body = b"<response exceeded bound>"
+        except Exception:  # noqa: BLE001 - body is best-effort diagnostic context
+            body = b""
+        return int(exc.code), body
+
+
+def _envelope_reject_constant(value: str) -> Any:
+    raise ValueError(f"non-finite JSON constant is not allowed: {value}")
+
+
+def _envelope_finite_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError(f"non-finite JSON number is not allowed: {value}")
+    return parsed
+
+
+def _envelope_object_pairs(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    rendered: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in rendered:
+            raise ValueError(f"duplicate JSON object key is not allowed: {key}")
+        rendered[key] = value
+    return rendered
+
+
+def zai_response_content(status: int, body: bytes) -> str:
+    """Return the exact assistant text or fail closed with a specific reason.
+
+    The provider envelope is parsed with the same strict semantics as the
+    candidate boundary (IRZ-03): duplicate object keys and non-finite numbers
+    are rejected so the selected assistant content is never ambiguous. The
+    response size bound is enforced here as well, so injected transports cannot
+    bypass it.
+    """
+
+    if len(body) > MAX_RESPONSE_BYTES:
+        raise RuntimeError(f"Z.ai response exceeded the {MAX_RESPONSE_BYTES}-byte bound")
+    if not 200 <= status < 300:
+        excerpt = body[:4096].decode("utf-8", "replace")
+        raise RuntimeError(
+            f"Z.ai API returned HTTP {status}: {excerpt or 'empty body'}"
+        )
+    try:
+        envelope = json.loads(
+            body.decode("utf-8"),
+            parse_constant=_envelope_reject_constant,
+            parse_float=_envelope_finite_float,
+            object_pairs_hook=_envelope_object_pairs,
+        )
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise RuntimeError(f"Z.ai response is not valid strict JSON: {exc}") from exc
+    choices = envelope.get("choices") if isinstance(envelope, dict) else None
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError("Z.ai response contains no choices")
+    first = choices[0]
+    message = first.get("message") if isinstance(first, dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if content is None:
+        raise RuntimeError("Z.ai response has no assistant content")
+    if not isinstance(content, str):
+        raise RuntimeError(
+            f"Z.ai assistant content has unexpected type {type(content).__name__}"
+        )
+    return content
+
+
+def zai_invoker(
+    *,
+    model: str,
+    api_key: str,
+    base_url: str,
+    timeout_seconds: int,
+    transport: Callable[[str, bytes, dict[str, str], int], tuple[int, bytes]] | None = None,
+) -> Callable[[str], str]:
+    """Build a prompt invoker for the Z.ai OpenAI-compatible chat-completions endpoint.
+
+    The invoker sends only the rendered trial prompt as model input, carries no
+    tools, function calling, repository/file/shell access, retrieval, MCP, or
+    autonomous-action surface, and fails closed on every transport, HTTP,
+    parsing, and response-shape error. The credential appears only in the
+    Authorization header and is redacted from every raised message.
+    """
+
+    resolved_transport = zai_http_post_json if transport is None else transport
+    url = base_url.rstrip("/") + "/chat/completions"
+
+    def invoke(prompt: str) -> str:
+        payload = zai_request_payload(model, prompt)
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        try:
+            status, body = resolved_transport(url, payload, headers, timeout_seconds)
+            return zai_response_content(status, body)
+        except RuntimeError as exc:
+            # Redact the full message before bounding it, so a credential echoed
+            # across a truncation boundary cannot survive partially.
+            redacted = redact_secret(str(exc), api_key)
+            raise RuntimeError(redacted[:512]) from exc
+        except Exception as exc:  # noqa: BLE001 - provider edge fails closed on anything
+            redacted = redact_secret(f"Z.ai transport failure: {exc!r}", api_key)
+            raise RuntimeError(redacted[:512]) from exc
+
+    return invoke
+
+
 def normalize_name(value: str) -> str:
     return " ".join(value.casefold().split())
+
+
+_HEX = "0123456789abcdef"
+
+
+def _valid_commit_sha(value: str) -> bool:
+    return len(value) in (40, 64) and all(char in _HEX for char in value.lower())
+
+
+def read_git_head(root: Path) -> tuple[str, str]:
+    """Resolve (head_sha, ref) from .git plumbing without a subprocess (IRZ-05).
+
+    Follows ``commondir`` so linked worktrees resolve their refs against the
+    shared common directory, where branch refs actually live.
+    """
+
+    git_path = root / ".git"
+    if git_path.is_file():
+        marker = git_path.read_text(encoding="utf-8").strip()
+        if not marker.startswith("gitdir:"):
+            raise RuntimeError("unsupported .git file layout")
+        git_dir = Path(marker[len("gitdir:"):].strip())
+        if not git_dir.is_absolute():
+            git_dir = root / git_dir
+    elif git_path.is_dir():
+        git_dir = git_path
+    else:
+        raise RuntimeError("no .git directory at the repository root")
+
+    common_dir = git_dir
+    commondir_file = git_dir / "commondir"
+    if commondir_file.is_file():
+        candidate = Path(commondir_file.read_text(encoding="utf-8").strip())
+        if not candidate.is_absolute():
+            candidate = git_dir / candidate
+        common_dir = candidate
+
+    head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
+    if head.startswith("ref: "):
+        ref = head[len("ref: "):].strip()
+        sha = ""
+        for base in (git_dir, common_dir):
+            ref_file = base / ref
+            if ref_file.is_file():
+                sha = ref_file.read_text(encoding="utf-8").strip()
+                break
+        if not _valid_commit_sha(sha):
+            for base in (common_dir, git_dir):
+                packed = base / "packed-refs"
+                if not packed.is_file():
+                    continue
+                for line in packed.read_text(encoding="utf-8").splitlines():
+                    parts = line.split()
+                    if len(parts) == 2 and parts[1] == ref:
+                        sha = parts[0]
+                        break
+                if _valid_commit_sha(sha):
+                    break
+        if not _valid_commit_sha(sha):
+            raise RuntimeError(f"git ref {ref} did not resolve to a commit SHA")
+        return sha, ref
+    if _valid_commit_sha(head):
+        return head, "detached"
+    raise RuntimeError("git HEAD is neither a ref nor a commit SHA")
+
+
+def tracked_worktree_clean(root: Path) -> bool | None:
+    """Report tracked-worktree cleanliness, or None when git is unavailable."""
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return not result.stdout.strip()
+
+
+def _file_sha256(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def build_trial_context(root: Path, fixture: Path) -> dict[str, Any]:
+    """Bind the report to the exact source revision and runtime (IRZ-05)."""
+
+    sha, ref = read_git_head(root)
+    clean = tracked_worktree_clean(root)
+    return {
+        "git_head": sha,
+        "git_ref": ref,
+        "tracked_worktree_clean": clean,
+        "tracked_worktree_clean_source": (
+            "git-status-porcelain-tracked-only" if clean is not None else "git-unavailable"
+        ),
+        "python_version": platform.python_version(),
+        "platform": platform.platform(terse=True),
+        "runner_sha256": _file_sha256(Path(__file__).resolve()),
+        "boundary_sha256": _file_sha256(
+            root / "services" / "intelligence" / "model_extraction_trial.py"
+        ),
+        "corpus_sha256": _file_sha256(fixture),
+    }
 
 
 def _entity_names_by_id(run: dict[str, Any]) -> dict[str, set[str]]:
@@ -448,28 +917,94 @@ def main() -> int:
     if args.max_cases:
         cases = cases[: args.max_cases]
 
-    if not any(
-        os.environ.get(name)
-        for name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
-    ):
+    try:
+        trial_context = build_trial_context(ROOT, args.fixture)
+    except (OSError, RuntimeError) as exc:
         raise SystemExit(
-            "Copilot CLI credential missing; set COPILOT_GITHUB_TOKEN "
-            "(preferred for this personal-repository trial), GH_TOKEN, or GITHUB_TOKEN"
+            f"unable to bind trial report to the source revision (IRZ-05): {exc}"
+        ) from exc
+    if trial_context["tracked_worktree_clean"] is False:
+        print(
+            "WARNING: tracked worktree is dirty; live evidence must come from a "
+            "clean checkout of the independently reviewed tip",
+            file=sys.stderr,
         )
 
-    version = cli_version(args.copilot_command)
-    trace = ModelTrace(
-        provider="github-copilot-cli",
-        model=args.model,
-        model_version="provider-managed-unknown",
-        adapter_version=ADAPTER_VERSION,
-    )
+    requested_model = resolve_requested_model(args.provider, args.model)
+
+    if args.provider == PROVIDER_ZAI:
+        api_key = require_zai_api_key()
+        base_url, base_url_source = resolve_zai_base_url(args.base_url, args.zai_endpoint)
+        validate_zai_base_url(base_url)
+        endpoint_mode = next(
+            (mode for mode, url in ZAI_ENDPOINT_URLS.items() if url == base_url), None
+        )
+        if args.zai_endpoint and endpoint_mode != args.zai_endpoint:
+            raise SystemExit(
+                f"conflicting Z.ai endpoint selection: --zai-endpoint "
+                f"{args.zai_endpoint} does not match the resolved route {base_url}"
+            )
+        version = None
+        trace = ModelTrace(
+            provider=ZAI_PROVIDER_NAME,
+            model=requested_model,
+            model_version="provider-managed-unknown",
+            adapter_version=ADAPTER_VERSION,
+        )
+        invoke = zai_invoker(
+            model=requested_model,
+            api_key=api_key,
+            base_url=base_url,
+            timeout_seconds=args.timeout_seconds,
+        )
+        provider_edge = {
+            "driver": "zai-openai-compatible-http",
+            "base_url": base_url,
+            "base_url_source": base_url_source,
+            "endpoint_mode": endpoint_mode,
+            "credential_source": f"{ZAI_CREDENTIAL_ENV} environment variable",
+            "transport": "python-stdlib-urllib",
+            "tools": "none",
+            "max_response_bytes": MAX_RESPONSE_BYTES,
+            "reasoning_configuration": {
+                **ZAI_REASONING_CONFIGURATION,
+                "explicitly_pinned": True,
+            },
+        }
+    else:
+        if not any(
+            os.environ.get(name)
+            for name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
+        ):
+            raise SystemExit(
+                "Copilot CLI credential missing; set COPILOT_GITHUB_TOKEN "
+                "(preferred for this personal-repository trial), GH_TOKEN, or GITHUB_TOKEN"
+            )
+
+        version = cli_version(args.copilot_command)
+        trace = ModelTrace(
+            provider=COPILOT_PROVIDER_NAME,
+            model=requested_model,
+            model_version="provider-managed-unknown",
+            adapter_version=ADAPTER_VERSION,
+        )
+        invoke = copilot_invoker(args.copilot_command, requested_model, args.timeout_seconds)
+        provider_edge = {
+            "driver": "github-copilot-cli-subprocess",
+            "base_url": None,
+            "base_url_source": None,
+            "endpoint_mode": None,
+            "credential_source": (
+                "COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN environment"
+            ),
+            "transport": "copilot-cli-subprocess",
+            "tools": "ask_user only and disabled; read/write/shell/url/memory denied",
+        }
     try:
         trace.as_dict()
     except ModelExtractionTrialError as exc:
         raise SystemExit(f"invalid model trace: {exc}") from exc
 
-    invoke = copilot_invoker(args.copilot_command, args.model, args.timeout_seconds)
     validator = build_schema_validator()
 
     results: list[dict[str, Any]] = []
@@ -565,12 +1100,14 @@ def main() -> int:
     throughput = invocation_count / total_seconds if total_seconds > 0 else None
 
     report = {
-        "report_version": "m4-model-extraction-live-trial-v0.3",
+        "report_version": "m4-model-extraction-live-trial-v0.5",
         "corpus_version": corpus_version,
-        "provider": "github-copilot-cli",
-        "requested_model": args.model,
+        "provider": trace.provider,
+        "requested_model": requested_model,
         "provider_checkpoint_version": None,
         "copilot_cli_version": version,
+        "provider_edge": provider_edge,
+        "trial_context": trial_context,
         "adapter_version": ADAPTER_VERSION,
         "case_count": len(cases),
         "invocation_count": invocation_count,
@@ -593,6 +1130,11 @@ def main() -> int:
             "reason": (
                 "Copilot CLI trial runner does not expose a stable per-invocation "
                 "monetary-cost field; no cost claim is made."
+            )
+            if args.provider == PROVIDER_COPILOT
+            else (
+                "Z.ai trial driver does not expose a stable per-invocation "
+                "monetary-cost field; no cost claim is made."
             ),
         },
         "qualification": {
@@ -610,15 +1152,23 @@ def main() -> int:
     }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
-        encoding="utf-8",
-    )
+    report_bytes = (
+        json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+    ).encode("utf-8")
+    # Write bytes, not text: text mode would translate LF to the platform line
+    # ending on Windows while the digest below must hash the exact on-disk bytes.
+    args.output.write_bytes(report_bytes)
+    report_sha256 = hashlib.sha256(args.output.read_bytes()).hexdigest()
+    sidecar_path = args.output.with_name(args.output.name + ".sha256")
+    sidecar_path.write_bytes(f"{report_sha256}  {args.output.name}\n".encode("utf-8"))
 
     print(
         json.dumps(
             {
                 "case_count": report["case_count"],
+                "provider": report["provider"],
+                "git_head": trial_context["git_head"],
+                "report_sha256": report_sha256,
                 "invocation_count": invocation_count,
                 "validated_runs": validated_run_count,
                 "accepted": accepted,
