@@ -1,0 +1,106 @@
+from pathlib import Path
+
+roadmap = Path("docs/ROADMAP.md")
+text = roadmap.read_text()
+old = """## M4 — AI Editorial Operations — NEXT
+
+### Goal
+
+Scale the proven deterministic/source-backed pipeline into an AI-assisted editorial operating system without allowing models to bypass evidence, review, sensitivity, or canonical-mutation authority.
+
+Planned outcomes:
+
+- multi-source monitoring
+- automated relevance classification
+- claim extraction at scale
+- contradiction detection
+- stale-record auditor
+- bilingual drafting
+- daily editorial brief
+- model/prompt observability and evaluation dashboards
+
+M4 must preserve the existing proposal/review/revision boundary. Model output remains candidate/proposal data until policy and review authorize canonical effects.
+"""
+new = """## M4 — AI Editorial Operations — IN PROGRESS
+
+### Goal
+
+Scale the proven deterministic/source-backed pipeline into an AI-assisted editorial operating system without allowing models to bypass evidence, review, sensitivity, or canonical-mutation authority.
+
+### Delivered
+
+- deterministic multi-source monitoring observations and editorial-queue routing;
+- canonical-content deduplication that preserves distinct Source / Document provenance;
+- deterministic relevance, deduplication, policy routing, and AI-extraction allowlisting before generative processing;
+- typed AI extraction traces with provider/model/version/adapter, prompt-template version/hash, exact input/output hashes, evaluator checks, and candidate-only authority;
+- deterministic entity/claim/event resolution and verification with explicit new / duplicate / conflict / blocked outcomes and distinct ambiguous / unresolved states;
+- human editorial review packets bound to the exact queue item, accepted extraction, resolution result, and AMBER ChangeProposal;
+- human ReviewDecision binding into the canonical mutation guard with tamper rejection and reject-no-write behavior;
+- a multi-source editorial vertical slice through discovery -> extraction -> verification -> review -> canonical Revision -> public projection while retaining both source provenances;
+- a project-owned logical `canonical-global-single-writer` dispatch contract with fail-closed busy-lane behavior, exact-proposal replay protection, and zero backend activity when coordination is unavailable;
+- deterministic Claim/source/queue auditing and a content-addressed daily editorial brief with zero truth, approval, canonical-mutation, or publication authority;
+- adversarial semantic-integrity checks for bounded IDs, kind-specific context, RFC 3339 timestamps, review/acquisition deadline ordering, provenance retention, and duplicate semantic action rejection.
+
+### Remaining / Not Yet Qualified
+
+- bilingual AI drafting grounded in approved Claim/Evidence records remains unimplemented;
+- model/prompt/version/evaluator metadata exists, but an observability/evaluation dashboard framework has not been selected or qualified;
+- no production scheduler, orchestrator, alerting channel, or autonomous remediation mechanism has been selected;
+- the logical single-writer dispatcher is verified only with the project-owned in-memory coordination fixture; a shared atomic cross-process/cross-host coordinator remains unselected and unverified;
+- multiple production automated canonical writers therefore remain disabled;
+- production security, HA/failover, backup/recovery, capacity, and deployment topology remain outside the current qualification evidence.
+
+M4 continues to preserve the proposal/review/revision boundary. Model output remains candidate/proposal data until policy and human review authorize canonical effects.
+"""
+if text.count(old) != 1:
+    raise SystemExit("M4 roadmap replacement target mismatch")
+text = text.replace(old, new, 1)
+
+old = """## Immediate Next Sequence
+
+After M3 closure:
+
+1. define the M4 source-monitoring and editorial-queue contracts before selecting a scheduler/orchestrator;
+2. define a typed AI extraction boundary that emits candidate Entity/Claim/Event/Evidence records only;
+3. build deterministic relevance/deduplication/source-routing before invoking generative models;
+4. add model/prompt/version/evaluation metadata to every AI-produced proposal artifact;
+5. keep AMBER/RED review and operational-sensitivity gates intact;
+6. resolve the outstanding concurrent-writer coordination requirement before enabling multiple automated canonical mutation workers;
+7. prove one multi-source editorial vertical slice through discovery -> extraction -> verification -> review -> canonical Revision -> public projection;
+8. run exhaustive first-pass and exact-head CI gates before promoting any orchestration or model-dependent mechanism.
+"""
+new = """## Immediate Next Sequence
+
+After the merged M4 editorial-control increments:
+
+1. define a bounded bilingual drafting projection over approved Claim/Evidence records, with no truth, canonical-mutation, or publication authority;
+2. define model/prompt/evaluator observability and evaluation projections over the metadata already captured by AI extraction artifacts before selecting any dashboard framework;
+3. keep scheduler/orchestrator and alerting-channel selection deferred until a concrete forcing function exists;
+4. select and independently verify a shared atomic coordinator only when multi-process or multi-host automated canonical writers have a concrete operational requirement;
+5. keep AMBER/RED review, operational-sensitivity gates, exact human decision binding, and the logical global single-writer dispatch boundary intact;
+6. close M4 only after the remaining drafting/evaluation outcomes are verified without broadening authority;
+7. begin M5 grounded Research Assistant work from approved knowledge/evidence, with semantic/vector retrieval admitted only after an explicit retrieval evaluation proves improvement without bypassing citations or canonical evidence.
+"""
+if text.count(old) != 1:
+    raise SystemExit("Immediate Next Sequence replacement target mismatch")
+roadmap.write_text(text.replace(old, new, 1))
+
+readme = Path("README.md")
+text = readme.read_text()
+old = """## Qualification boundary
+
+M0 and the bounded M1 vertical slice establish the canonical knowledge, governed mutation, canonical readback, and bilingual cited public-projection mechanics. M1-F15—concurrent-writer canonical-ID uniqueness—remains unresolved; production automated canonical mutation workers stay disabled until that coordination mechanism is designed and independently verified.
+
+See `docs/ROADMAP.md` and `docs/M1_PUBLIC_PROJECTION.md` for milestone scope and qualification boundaries.
+"""
+new = """## Qualification boundary
+
+M0–M3 and the bounded M4 editorial-control increments establish the canonical knowledge model, governed mutation/readback path, cited bilingual public projections, deterministic monitoring/extraction/review contracts, and a logical global single-writer mutation-dispatch boundary. The M4 dispatcher verifies fail-closed single-writer behavior and replay safety with a project-owned in-memory coordination fixture; it does **not** qualify a shared atomic lock/queue/lease mechanism across multiple processes or hosts. Multiple production automated canonical writers remain disabled until such a coordinator is selected and independently verified.
+
+The M4 editorial auditor and daily brief are operational metadata projections only. They add no truth, approval, canonical-mutation, publication, scheduler, or autonomous-remediation authority.
+
+See `docs/ROADMAP.md` and `docs/M1_PUBLIC_PROJECTION.md` for milestone scope and qualification boundaries.
+"""
+if text.count(old) != 1:
+    raise SystemExit("README qualification replacement target mismatch")
+readme.write_text(text.replace(old, new, 1))
