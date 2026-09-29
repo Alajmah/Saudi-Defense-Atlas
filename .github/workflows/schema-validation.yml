@@ -108,6 +108,15 @@ jobs:
       - name: Validate M4 typed AI extraction boundary
         run: python scripts/validate_m4_ai_extraction_boundary.py
 
+      - name: Validate M4 bounded model extraction trial harness
+        run: python scripts/validate_m4_model_extraction_trial.py
+
+      - name: Validate M4 model extraction trial Codex reconciliation
+        run: python scripts/validate_m4_model_extraction_trial_reconciliation.py
+
+      - name: Validate M4 model extraction trial fallback second review
+        run: python scripts/validate_m4_model_extraction_trial_fallback_review.py
+
       - name: Validate M4 resolver verifier boundary
         run: python scripts/validate_m4_resolver_verifier.py
 

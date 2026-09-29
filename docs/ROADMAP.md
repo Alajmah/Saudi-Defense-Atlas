@@ -230,7 +230,7 @@ Add public discovery/navigation over approved SDA projections without allowing s
 - bilingual resolution for entity-backed service/manufacturer/country filter values
 - deterministic public counts over indexed SearchDocuments
 - timeline navigation derived only from `RelationshipGraphView.timeline`
-- supporting/contradicting/contextual Evidence retained with timeline events
+- supporting/contradicting/contextualizing Evidence retained with timeline events
 - root/domain context preserved when duplicate Event IDs are merged
 - unknown temporal precision remains explicit and sorts after known dates
 - no inferred lifecycle/current-state conclusion from event ordering
@@ -274,7 +274,8 @@ Scale the proven deterministic/source-backed pipeline into an AI-assisted editor
 - deterministic multi-source monitoring observations and editorial-queue routing;
 - canonical-content deduplication that preserves distinct Source / Document provenance;
 - deterministic relevance, deduplication, policy routing, and AI-extraction allowlisting before generative processing;
-- a typed AI-extraction run/trace contract with provider/model/version/adapter, prompt-template version/hash, exact input/output hashes, evaluator checks, and candidate-only authority; the accepted boundary itself does not invoke or select a real model;
+- a typed AI-extraction run/trace contract with provider/model/version/adapter, prompt-template version/hash, exact input/output hashes, evaluator checks, and candidate-only authority;
+- a bounded provider-independent real-model extraction trial harness over synthetic public/non-operational fixtures, with a manual pinned Copilot CLI driver, exact rendered-prompt/raw-response hashing, pre-invocation restricted-case blocking, and zero canonical-mutation/publication authority; live model evidence remains unqualified until the manual trial is executed and reviewed;
 - deterministic entity/claim/event resolution and verification with explicit new / duplicate / conflict / blocked outcomes and distinct ambiguous / unresolved states;
 - human editorial review packets bound to the exact queue item, accepted extraction, resolution result, and AMBER ChangeProposal;
 - human ReviewDecision binding into the canonical mutation guard with tamper rejection and reject-no-write behavior;
@@ -285,8 +286,8 @@ Scale the proven deterministic/source-backed pipeline into an AI-assisted editor
 
 ### Remaining / Not Yet Qualified
 
-- operating model-backed claim extraction remains unimplemented: no real model adapter/provider has been selected or invoked through the accepted extraction boundary, and extraction quality/performance/scale claims remain unqualified;
-- before M4 closure, a bounded real-model extraction trial must demonstrate the existing candidate-only, provenance, rejection-isolation, resolver, human-review, and authority boundaries against an explicit evaluation dataset and metrics, including representative batch-volume/throughput evidence sufficient to support any claim of extraction “at scale”;
+- the bounded trial driver is selected and implemented for trial use only, but no live real-model trial report has yet been reviewed; extraction quality, performance, and scale therefore remain unqualified, and the driver is not a production provider/platform adoption;
+- before M4 closure, execute and review the bounded live synthetic trial, then demonstrate that real-model candidates preserve provenance, rejection isolation, the Resolver/Verifier boundary, human review, and authority constraints against explicit evaluation metrics; representative batch-volume/throughput evidence is still required before any extraction “at scale” claim;
 - bilingual AI drafting grounded in approved Claim/Evidence records remains unimplemented;
 - model/prompt/version/evaluator metadata exists as part of the extraction contract, but an observability/evaluation dashboard framework has not been selected or qualified;
 - no production scheduler, orchestrator, alerting channel, or autonomous remediation mechanism has been selected;
@@ -315,8 +316,8 @@ The assistant must answer from approved data/evidence rather than treat web sear
 
 After the merged M4 editorial-control increments:
 
-1. define a bounded real-model extraction trial over claimed `candidate_extraction` queue items using the accepted `AIExtractionRun` contract, with provider/model choice treated as a scoped implementation decision rather than new authority;
-2. define the extraction evaluation dataset and metrics for candidate Claim/Event/Evidence quality, rejection behavior, provenance closure, latency/cost, and representative batch throughput, and verify the trial before making any model-quality or “at scale” claim;
+1. execute and review the bounded real-model extraction trial harness over the synthetic evaluation corpus; treat the pinned Copilot CLI driver as a scoped trial implementation, not production model-platform adoption;
+2. evaluate real-model candidate Claim/Event/Evidence quality, rejection behavior, provenance closure, latency/cost observability, downstream Resolver/Verifier and human-review preservation, and representative batch throughput before making any model-quality or “at scale” claim;
 3. define a bounded bilingual drafting projection over approved Claim/Evidence records, with no truth, canonical-mutation, or publication authority;
 4. define model/prompt/evaluator observability and evaluation projections over the metadata already captured by AI extraction artifacts before selecting any dashboard framework;
 5. keep scheduler/orchestrator and alerting-channel selection deferred until a concrete forcing function exists;
