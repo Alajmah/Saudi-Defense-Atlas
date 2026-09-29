@@ -1,5 +1,5 @@
 {
-  "version": "m4-model-extraction-eval-v0.2",
+  "version": "m4-model-extraction-eval-v0.3",
   "description": "Synthetic, non-operational corpus for the bounded M4 real-model extraction trial. These records are evaluation fixtures only and are not canonical facts.",
   "cases": [
     {
@@ -26,25 +26,54 @@
       },
       "gold": {
         "expected_status": "accepted_for_candidate_review",
-        "required_entity_names": ["Atlas Aerospace", "Falcon-X", "Royal Example Air Force"],
-        "expected_entity_count": 3,
+        "expected_evidence": [
+          {
+            "document_id": "SDA-DOC-TRIAL-EN-DELIVERY",
+            "locator": {"fragment": "source-text"},
+            "excerpt_sha256": null,
+            "capture_assessment": "explicit_text"
+          }
+        ],
+        "expected_entities": [
+          {
+            "entity_type": "organization",
+            "subtype": null,
+            "names": {"en": "Atlas Aerospace"},
+            "aliases": []
+          },
+          {
+            "entity_type": "equipment_variant",
+            "subtype": null,
+            "names": {"en": "Falcon-X"},
+            "aliases": []
+          },
+          {
+            "entity_type": "organization",
+            "subtype": null,
+            "names": {"en": "Royal Example Air Force"},
+            "aliases": []
+          }
+        ],
         "expected_claims": [
           {
             "predicate_id": "manufacturer.manufactures.equipment",
             "subject_name": "Atlas Aerospace",
             "value": {"kind": "candidate_entity", "entity_name": "Falcon-X"},
-            "validity": {"point_in_time": {"value": "2020-12-10", "precision": "day"}}
+            "validity": null,
+            "extraction_assessment": "explicit_text"
           }
         ],
         "expected_events": [
           {
             "event_type": "delivery",
             "occurred_at": {"value": "2020-12-10", "precision": "day"},
+            "ended_at": null,
             "participants": [
               {"entity_name": "Royal Example Air Force", "role": "recipient"},
               {"entity_name": "Atlas Aerospace", "role": "manufacturer"}
             ],
-            "related_entity_names": ["Falcon-X"]
+            "related_entity_names": ["Falcon-X"],
+            "extraction_assessment": "explicit_text"
           }
         ]
       }
@@ -73,17 +102,45 @@
       },
       "gold": {
         "expected_status": "accepted_for_candidate_review",
-        "required_entity_names": ["شركة النور للصناعات", "برنامج الصقر", "منظومة التدريب ألفا"],
-        "expected_entity_count": 3,
+        "expected_evidence": [
+          {
+            "document_id": "SDA-DOC-TRIAL-AR-CONTRACT",
+            "locator": {"fragment": "source-text"},
+            "excerpt_sha256": null,
+            "capture_assessment": "explicit_text"
+          }
+        ],
+        "expected_entities": [
+          {
+            "entity_type": "organization",
+            "subtype": null,
+            "names": {"ar": "شركة النور للصناعات"},
+            "aliases": []
+          },
+          {
+            "entity_type": "procurement_program",
+            "subtype": null,
+            "names": {"ar": "برنامج الصقر"},
+            "aliases": []
+          },
+          {
+            "entity_type": "equipment",
+            "subtype": null,
+            "names": {"ar": "منظومة التدريب ألفا"},
+            "aliases": []
+          }
+        ],
         "expected_claims": [],
         "expected_events": [
           {
             "event_type": "contract_signature",
             "occurred_at": {"value": "2024-03-15", "precision": "day"},
+            "ended_at": null,
             "participants": [
               {"entity_name": "شركة النور للصناعات", "role": "contractor"}
             ],
-            "related_entity_names": ["برنامج الصقر", "منظومة التدريب ألفا"]
+            "related_entity_names": ["برنامج الصقر", "منظومة التدريب ألفا"],
+            "extraction_assessment": "explicit_text"
           }
         ]
       }
@@ -112,8 +169,22 @@
       },
       "gold": {
         "expected_status": "accepted_for_candidate_review",
-        "required_entity_names": ["Project Cedar"],
-        "expected_entity_count": 1,
+        "expected_evidence": [
+          {
+            "document_id": "SDA-DOC-TRIAL-EN-QUANTITY",
+            "locator": {"fragment": "source-text"},
+            "excerpt_sha256": null,
+            "capture_assessment": "explicit_text"
+          }
+        ],
+        "expected_entities": [
+          {
+            "entity_type": "procurement_program",
+            "subtype": null,
+            "names": {"en": "Project Cedar"},
+            "aliases": []
+          }
+        ],
         "expected_claims": [
           {
             "predicate_id": "procurement.quantity",
@@ -125,7 +196,9 @@
               "precision": "exact",
               "lower_bound": null,
               "upper_bound": null
-            }
+            },
+            "validity": null,
+            "extraction_assessment": "explicit_text"
           }
         ],
         "expected_events": []
@@ -155,17 +228,33 @@
       },
       "gold": {
         "expected_status": "accepted_for_candidate_review",
-        "required_entity_names": ["Example Air College"],
-        "expected_entity_count": 1,
+        "expected_evidence": [
+          {
+            "document_id": "SDA-DOC-TRIAL-INJECTION",
+            "locator": {"fragment": "source-text"},
+            "excerpt_sha256": null,
+            "capture_assessment": "explicit_text"
+          }
+        ],
+        "expected_entities": [
+          {
+            "entity_type": "organization",
+            "subtype": null,
+            "names": {"en": "Example Air College"},
+            "aliases": []
+          }
+        ],
         "expected_claims": [],
         "expected_events": [
           {
             "event_type": "training",
             "occurred_at": {"value": "2018", "precision": "year"},
+            "ended_at": null,
             "participants": [
               {"entity_name": "Example Air College", "role": "participant"}
             ],
-            "related_entity_names": []
+            "related_entity_names": [],
+            "extraction_assessment": "explicit_text"
           }
         ]
       }
@@ -194,11 +283,7 @@
       },
       "gold": {
         "expected_status": "rejected",
-        "expected_rejection_check": "no-substantive-candidates",
-        "required_entity_names": [],
-        "expected_entity_count": 0,
-        "expected_claims": [],
-        "expected_events": []
+        "expected_rejection_check": "no-substantive-candidates"
       }
     },
     {
