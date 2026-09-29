@@ -288,6 +288,8 @@ def main() -> int:
         ("control character", "k\x00k"),
         ("embedded quote", 'k"k'),
         ("embedded backslash", "k\\k"),
+        ("non-ASCII latin", "k\xc3\xa9k"),
+        ("non-ASCII cyrillic", "kключ"),
     ):
         try:
             require_zai_api_key(env={ZAI_CREDENTIAL_ENV: bad_key})
@@ -465,6 +467,12 @@ def main() -> int:
         "https://api.z.ai/not-api",
         "https://api.z.ai/api/paas/v4?token=x",
         "https://api.z.ai/api/paas/v4#fragment",
+        # H1: only the two exact documented routes are credential destinations;
+        # near-miss paths on the official host are rejected.
+        "https://api.z.ai/api/paas/v4/",
+        "https://api.z.ai/api/paas/v5",
+        "https://api.z.ai/api/coding/paas/v4/extra",
+        "https://api.z.ai/api",
         "not-a-url",
         "",
     ):
@@ -477,6 +485,36 @@ def main() -> int:
     expect(resolve_requested_model(PROVIDER_ZAI, None) == "glm-5.3", "zai default model is not glm-5.3", failures)
     expect(resolve_requested_model(PROVIDER_COPILOT, None) == "gpt-5.4", "copilot default model changed", failures)
     expect(resolve_requested_model(PROVIDER_ZAI, "glm-4.7") == "glm-4.7", "explicit model override ignored", failures)
+
+    # ZP-4b: git provenance plumbing resolves linked worktrees through commondir
+    # (C1) and falls back to packed-refs in the common directory.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        base = Path(tmpdir)
+        main_git = base / "main" / ".git"
+        (main_git / "refs" / "heads").mkdir(parents=True)
+        feature_sha = "f" * 40
+        (main_git / "refs" / "heads" / "feature").write_text(feature_sha + "\n", encoding="utf-8")
+        packed_sha = "c" * 40
+        (main_git / "packed-refs").write_text(f"{packed_sha} refs/heads/packed\n", encoding="utf-8")
+        worktree_admin = main_git / "worktrees" / "wt"
+        worktree_admin.mkdir(parents=True)
+        (worktree_admin / "commondir").write_text("../../\n", encoding="utf-8")
+        (worktree_admin / "HEAD").write_text("ref: refs/heads/feature\n", encoding="utf-8")
+        worktree = base / "wt"
+        worktree.mkdir()
+        (worktree / ".git").write_text(f"gitdir: {worktree_admin}\n", encoding="utf-8")
+
+        expect(
+            read_git_head(worktree) == (feature_sha, "refs/heads/feature"),
+            "read_git_head did not resolve a linked worktree ref through commondir",
+            failures,
+        )
+        (worktree_admin / "HEAD").write_text("ref: refs/heads/packed\n", encoding="utf-8")
+        expect(
+            read_git_head(worktree) == (packed_sha, "refs/heads/packed"),
+            "read_git_head did not fall back to packed-refs in the common dir",
+            failures,
+        )
 
     # ZP-5: the Z.ai edge feeds the same strict JSON/candidate boundary.
     zai_trace = ModelTrace(
@@ -594,7 +632,9 @@ def main() -> int:
         ):
             exit_code = trial_runner.main()
         expect(exit_code == 0, f"zai main() reported integrity failures (exit {exit_code})", failures)
-        report_text = report_path.read_text(encoding="utf-8")
+        report_bytes = report_path.read_bytes()
+        expect(b"\r\n" not in report_bytes, "report bytes were newline-translated on write (C3)", failures)
+        report_text = report_bytes.decode("utf-8")
         expect(SENTINEL_KEY not in report_text, "credential leaked into the trial report", failures)
         expect(SENTINEL_KEY not in captured.getvalue(), "credential leaked into runner stdout", failures)
         report = json.loads(report_text)
@@ -661,14 +701,14 @@ def main() -> int:
             "report corpus_sha256 does not match the fixture file",
             failures,
         )
-        sidecar_text = report_path.with_name(report_path.name + ".sha256").read_text(encoding="utf-8")
-        report_digest = hashlib.sha256(report_text.encode("utf-8")).hexdigest()
+        sidecar_bytes = report_path.with_name(report_path.name + ".sha256").read_bytes()
+        report_digest = hashlib.sha256(report_path.read_bytes()).hexdigest()
         expect(
-            sidecar_text == f"{report_digest}  {report_path.name}\n",
-            "report SHA-256 sidecar does not match the final report bytes",
+            sidecar_bytes == f"{report_digest}  {report_path.name}\n".encode("utf-8"),
+            "report SHA-256 sidecar does not match the exact bytes on disk (C3)",
             failures,
         )
-        expect(SENTINEL_KEY not in sidecar_text, "credential leaked into the SHA-256 sidecar", failures)
+        expect(SENTINEL_KEY not in sidecar_bytes.decode("utf-8"), "credential leaked into the SHA-256 sidecar", failures)
         summary = json.loads(captured.getvalue())
         expect(summary.get("report_sha256") == report_digest, "stdout summary lost the report SHA-256", failures)
         expect(summary.get("git_head") == expected_head, "stdout summary lost the git head", failures)
@@ -722,8 +762,8 @@ def main() -> int:
             failures,
         )
         expect(
-            prepaid_report["provider_edge"]["endpoint_mode"] is None,
-            "endpoint_mode should be None when an explicit URL override is used",
+            prepaid_report["provider_edge"]["endpoint_mode"] == "prepaid",
+            "endpoint_mode is not derived from the actually resolved route (C2)",
             failures,
         )
         expect(
@@ -731,6 +771,30 @@ def main() -> int:
             "request did not target the environment-provided endpoint",
             failures,
         )
+
+        # ZP-8b: an explicit endpoint mode that contradicts the resolved URL
+        # fails closed instead of recording a losing mode (C2).
+        contradicting_transport = CorpusTransport(responses)
+        try:
+            with (
+                patch.dict(
+                    os.environ,
+                    minimal_provider_env(
+                        {
+                            ZAI_CREDENTIAL_ENV: SENTINEL_KEY,
+                            ZAI_BASE_URL_ENV: ZAI_ENDPOINT_URLS["coding-plan"],
+                        }
+                    ),
+                    clear=True,
+                ),
+                argv("--provider", PROVIDER_ZAI, "--zai-endpoint", "prepaid", "--output", str(report_path)),
+                patch.object(trial_runner, "zai_http_post_json", contradicting_transport),
+                redirect_stdout(io.StringIO()),
+            ):
+                trial_runner.main()
+            failures.append("contradictory endpoint selection did not fail closed")
+        except SystemExit:
+            expect(not contradicting_transport.calls, "contradictory selection reached the transport", failures)
 
     # ZP-9: main() fails closed without ZAI_API_KEY even when Copilot tokens are
     # also absent, and without requiring any Copilot credential.

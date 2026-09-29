@@ -120,8 +120,9 @@ def parse_args() -> argparse.Namespace:
         "--base-url",
         default=None,
         help=(
-            "explicit Z.ai base URL restricted to https://api.z.ai/ routes; "
-            "resolved from this flag, then the ZAI_BASE_URL environment variable"
+            "explicit Z.ai base URL; accepted only as one of the two exact "
+            "documented official routes, resolved from this flag then the "
+            f"{ZAI_BASE_URL_ENV} environment variable"
         ),
     )
     parser.add_argument("--timeout-seconds", type=int, default=120)
@@ -243,19 +244,23 @@ def require_zai_api_key(env: Mapping[str, str] | None = None) -> str:
     rejected = [
         char
         for char in api_key
-        if ord(char) < 0x20 or ord(char) == 0x7F or char in "\"'\\"
+        if not 0x20 <= ord(char) <= 0x7E or char in "\"'\\"
     ]
     if rejected:
         raise SystemExit(
-            "ZAI_API_KEY contains control, quote, or backslash characters "
-            f"({len(rejected)} found); fix the environment variable before "
-            "running the trial"
+            "ZAI_API_KEY contains whitespace, control, non-ASCII, quote, or "
+            f"backslash characters ({len(rejected)} found); fix the environment "
+            "variable before running the trial"
         )
     return api_key
 
 
 def validate_zai_base_url(base_url: str) -> None:
-    """Fail closed on anything but an official api.z.ai HTTPS route (IRZ-02)."""
+    """Fail closed on anything but an official api.z.ai HTTPS route (IRZ-02).
+
+    Overrides are accepted only as the two exact documented Z.ai base routes;
+    no arbitrary paths on the official host are credential destinations.
+    """
 
     parsed = urllib.parse.urlsplit(base_url)
     if parsed.scheme != "https":
@@ -269,10 +274,14 @@ def validate_zai_base_url(base_url: str) -> None:
         )
     if parsed.port is not None:
         raise SystemExit("Z.ai base URL must use the default HTTPS port")
-    if not (parsed.path or "").startswith("/api/"):
-        raise SystemExit("Z.ai base URL path must be an /api/ route")
     if parsed.query or parsed.fragment:
         raise SystemExit("Z.ai base URL must not include a query or fragment")
+    if base_url not in ZAI_ENDPOINT_URLS.values():
+        documented = "; ".join(f"{mode}={url}" for mode, url in ZAI_ENDPOINT_URLS.items())
+        raise SystemExit(
+            "Z.ai base URL must be exactly one of the two documented official "
+            f"routes: {documented}"
+        )
 
 
 def resolve_zai_base_url(
@@ -493,7 +502,11 @@ def _valid_commit_sha(value: str) -> bool:
 
 
 def read_git_head(root: Path) -> tuple[str, str]:
-    """Resolve (head_sha, ref) from .git plumbing without a subprocess (IRZ-05)."""
+    """Resolve (head_sha, ref) from .git plumbing without a subprocess (IRZ-05).
+
+    Follows ``commondir`` so linked worktrees resolve their refs against the
+    shared common directory, where branch refs actually live.
+    """
 
     git_path = root / ".git"
     if git_path.is_file():
@@ -508,21 +521,35 @@ def read_git_head(root: Path) -> tuple[str, str]:
     else:
         raise RuntimeError("no .git directory at the repository root")
 
+    common_dir = git_dir
+    commondir_file = git_dir / "commondir"
+    if commondir_file.is_file():
+        candidate = Path(commondir_file.read_text(encoding="utf-8").strip())
+        if not candidate.is_absolute():
+            candidate = git_dir / candidate
+        common_dir = candidate
+
     head = (git_dir / "HEAD").read_text(encoding="utf-8").strip()
     if head.startswith("ref: "):
         ref = head[len("ref: "):].strip()
-        ref_file = git_dir / ref
         sha = ""
-        if ref_file.is_file():
-            sha = ref_file.read_text(encoding="utf-8").strip()
-        else:
-            packed = git_dir / "packed-refs"
-            if packed.is_file():
+        for base in (git_dir, common_dir):
+            ref_file = base / ref
+            if ref_file.is_file():
+                sha = ref_file.read_text(encoding="utf-8").strip()
+                break
+        if not _valid_commit_sha(sha):
+            for base in (common_dir, git_dir):
+                packed = base / "packed-refs"
+                if not packed.is_file():
+                    continue
                 for line in packed.read_text(encoding="utf-8").splitlines():
                     parts = line.split()
                     if len(parts) == 2 and parts[1] == ref:
                         sha = parts[0]
                         break
+                if _valid_commit_sha(sha):
+                    break
         if not _valid_commit_sha(sha):
             raise RuntimeError(f"git ref {ref} did not resolve to a commit SHA")
         return sha, ref
@@ -909,6 +936,14 @@ def main() -> int:
         api_key = require_zai_api_key()
         base_url, base_url_source = resolve_zai_base_url(args.base_url, args.zai_endpoint)
         validate_zai_base_url(base_url)
+        endpoint_mode = next(
+            (mode for mode, url in ZAI_ENDPOINT_URLS.items() if url == base_url), None
+        )
+        if args.zai_endpoint and endpoint_mode != args.zai_endpoint:
+            raise SystemExit(
+                f"conflicting Z.ai endpoint selection: --zai-endpoint "
+                f"{args.zai_endpoint} does not match the resolved route {base_url}"
+            )
         version = None
         trace = ModelTrace(
             provider=ZAI_PROVIDER_NAME,
@@ -926,7 +961,7 @@ def main() -> int:
             "driver": "zai-openai-compatible-http",
             "base_url": base_url,
             "base_url_source": base_url_source,
-            "endpoint_mode": args.zai_endpoint,
+            "endpoint_mode": endpoint_mode,
             "credential_source": f"{ZAI_CREDENTIAL_ENV} environment variable",
             "transport": "python-stdlib-urllib",
             "tools": "none",
@@ -1117,11 +1152,15 @@ def main() -> int:
     }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    report_text = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
-    args.output.write_text(report_text, encoding="utf-8")
-    report_sha256 = hashlib.sha256(report_text.encode("utf-8")).hexdigest()
+    report_bytes = (
+        json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+    ).encode("utf-8")
+    # Write bytes, not text: text mode would translate LF to the platform line
+    # ending on Windows while the digest below must hash the exact on-disk bytes.
+    args.output.write_bytes(report_bytes)
+    report_sha256 = hashlib.sha256(args.output.read_bytes()).hexdigest()
     sidecar_path = args.output.with_name(args.output.name + ".sha256")
-    sidecar_path.write_text(f"{report_sha256}  {args.output.name}\n", encoding="utf-8")
+    sidecar_path.write_bytes(f"{report_sha256}  {args.output.name}\n".encode("utf-8"))
 
     print(
         json.dumps(
