@@ -455,6 +455,24 @@ def main() -> int:
         failures,
     )
 
+    source_deadline_not_after_observation = copy.deepcopy(report)
+    source_deadline_finding = next(
+        item for item in source_deadline_not_after_observation["findings"]
+        if item["kind"] == "source_monitoring_required"
+        and item["context"]["freshness_status"] == "due"
+    )
+    source_deadline_finding["context"]["next_check_due_at"] = (
+        source_deadline_finding["context"]["latest_observed_at"]
+    )
+    _rehash_report(source_deadline_not_after_observation)
+    expect_raises(
+        "self-consistent source deadline not after latest observation",
+        lambda: build_daily_editorial_brief(
+            audit_report=source_deadline_not_after_observation
+        ),
+        failures,
+    )
+
     schema_invalid_timestamp = copy.deepcopy(report)
     queue_timestamp_finding = next(
         item for item in schema_invalid_timestamp["findings"]

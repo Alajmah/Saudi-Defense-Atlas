@@ -259,8 +259,12 @@ def _validate_finding_context(
         if status == "never_retrieved":
             if latest is not None or next_due is not None:
                 raise EditorialAuditError("never-retrieved source context has acquisition dates")
-        elif latest is None or next_due is None or next_due > as_of_dt:
-            raise EditorialAuditError("due source-monitoring context requires due acquisition dates")
+        elif latest is None or next_due is None:
+            raise EditorialAuditError("due source-monitoring context requires acquisition dates")
+        elif next_due <= latest:
+            raise EditorialAuditError("source-monitoring deadline must follow latest observation")
+        elif next_due > as_of_dt:
+            raise EditorialAuditError("due source-monitoring deadline is later than audit as_of")
 
         acquisition_reason = (
             "acquisition:never_retrieved" if status == "never_retrieved" else "acquisition:poll_due"

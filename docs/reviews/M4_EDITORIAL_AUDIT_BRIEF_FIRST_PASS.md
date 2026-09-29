@@ -161,6 +161,18 @@ Codex reviewed head `e609d9845992d915c1574855fe7131c4e3158a21` and reported two 
 
 **RESULT:** CONFIRMED and remediated. The semantic boundary now requires `review_due_at > verified_at`, `review_due_at <= as_of` for `due`, and `review_due_at > as_of` for `fresh`. Dedicated adversarial regressions cover both due/future and fresh/past inconsistencies.
 
+## Codex independent second review — pass 4
+
+Codex reviewed head `829bec06ee75048a82e9fcccea7c0bf4d78e0a3b` and reported one additional P2 semantic-integrity finding: a `due` source-monitoring context could carry `next_check_due_at <= latest_observed_at` while still satisfying the existing `next_check_due_at <= as_of` check.
+
+### Reconciliation
+
+**CODEX CLAIM:** a self-consistent re-hashed source-monitoring finding could present a polling deadline at or before the observation it supposedly follows.
+
+**OUR VERIFICATION:** CONFIRMED independently against the upstream M2 source-freshness contract. `build_source_freshness_report` derives `next_check_due_at = latest_observed_at + timedelta(days=poll_days)`, and polling windows are constrained to positive integer days, so a valid deadline must be strictly later than the latest successful observation.
+
+**RESULT:** CONFIRMED and remediated. The semantic brief boundary now requires `next_check_due_at > latest_observed_at` for `due` source-monitoring findings in addition to requiring the deadline to be at or before audit `as_of`. A self-consistent re-hashed equality fixture now fails closed.
+
 ## Final bounded assessment
 
 No architectural scope was expanded while closing these findings. This increment still:
