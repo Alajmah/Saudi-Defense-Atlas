@@ -32,8 +32,10 @@ The first live driver is GitHub Copilot CLI because the repository already uses 
 The manual workflow pins:
 
 - Copilot CLI package: `@github/copilot@1.0.88`;
-- default model: `gpt-5.4` (overrideable at workflow dispatch);
+- default requested model: `gpt-5.4` (overrideable at workflow dispatch);
 - automatic CLI updates: disabled for the run.
+
+Copilot exposes the requested model identifier to this harness, but not a stable provider checkpoint identifier. The `AIExtractionRun.model_version` field therefore records `provider-managed-unknown`; the report separately records the requested model and CLI version. Unknown provider checkpoint identity is not invented.
 
 A future model/provider may replace this edge without changing SDA domain schemas or authority semantics.
 
@@ -45,19 +47,21 @@ The credential is used only by the Copilot CLI process. The workflow has reposit
 
 ## Model isolation
 
-The programmatic Copilot invocation uses:
+The programmatic Copilot invocation is deliberately narrower than a normal CLI session:
 
-- non-interactive prompt mode;
-- silent output capture;
-- `--no-ask-user`;
-- `--no-custom-instructions`;
-- `--disable-builtin-mcps`;
-- explicit denial of `read`, `write`, `shell`, `url`, and `memory` tools;
-- an explicit model identifier.
+- non-interactive prompt mode with captured stdout;
+- `--available-tools=ask_user` limits the model-visible tool set to one non-data/action tool;
+- `--no-ask-user` simultaneously disables that remaining tool;
+- `read`, `write`, `shell`, `url`, and `memory` permission kinds are denied as defense in depth;
+- built-in MCP servers are disabled;
+- custom instructions are disabled;
+- remote control and remote export are disabled;
+- experimental features and automatic CLI updates are disabled;
+- an explicit model identifier is supplied.
 
-The model therefore receives only the trial prompt text supplied by the runner. It is not authorized to inspect the repository, call the network, mutate files, invoke GitHub tools, or take canonical actions.
+On the pinned trial command surface, no repository-read, file-write, shell, URL, memory, delegation, or MCP tool is available for the model to use. The intended model input is therefore the runner-supplied trial prompt only. The workflow still depends on GitHub-hosted runner and Copilot service behavior and does not claim a hardware or network air gap.
 
-## Prompt contract
+## Prompt and trace contract
 
 The prompt treats source text as untrusted data and explicitly instructs the model to ignore instructions embedded inside the source. It requires one strict JSON object with exactly:
 
@@ -67,6 +71,15 @@ The prompt treats source text as untrusted data and explicitly instructs the mod
 - `events`.
 
 The prompt also supplies a case-specific allowlist for Claim predicates and Event types. Output outside those allowlists is rejected before candidate review.
+
+Trace semantics are exact at the adapter boundary:
+
+- `prompt_trace.template_sha256` hashes the immutable prompt template;
+- `input_sha256` hashes the exact rendered prompt string passed to Copilot CLI;
+- `raw_output_sha256` hashes the exact stdout string captured from the CLI, including surrounding whitespace;
+- the run identity includes invocation timestamps so separate invocations do not collapse merely because their input and output hashes match.
+
+Raw model output is not persisted in the report; only its hash and the validated/rejected typed candidate projection are retained.
 
 ## Evaluation corpus
 
@@ -87,31 +100,36 @@ The fixtures exist only to evaluate extraction mechanics and do not assert facts
 
 1. restricted or non-candidate work never reaches the invoker;
 2. prompt framing preserves the source while treating it as untrusted data;
-3. strict JSON envelope is required;
-4. case predicate/Event allowlists are enforced;
-5. out-of-scope Document provenance is rejected;
-6. model-produced canonical entity references are rejected;
-7. existing `AIExtractionRun` candidate/reference closure remains authoritative;
-8. downstream JSON-Schema failure is isolated into a rejected run with zero candidate leakage;
-9. accepted and rejected runs retain zero canonical-mutation and publication authority.
+3. exact prompt and raw-response hashes are retained;
+4. distinct invocations receive distinct run identities;
+5. the live CLI command exposes no usable data/action tool and grants no broad tool authority;
+6. strict JSON envelope is required;
+7. case predicate/Event allowlists are enforced;
+8. out-of-scope Document provenance is rejected;
+9. model-produced canonical entity references are rejected;
+10. existing `AIExtractionRun` candidate/reference closure remains authoritative;
+11. downstream JSON-Schema failure is isolated into a rejected run with zero candidate leakage;
+12. accepted and rejected runs retain zero canonical-mutation and publication authority.
 
 ## Live trial report
 
 `scripts/run_m4_model_extraction_trial.py` writes one JSON report containing:
 
-- corpus/provider/model/CLI/adapter trace;
-- accepted/rejected/blocked counts;
+- corpus/provider/requested-model/CLI/adapter trace;
+- explicit unknown provider checkpoint version;
+- invocation and schema/boundary-validated-run counts;
+- accepted/rejected/blocked counts only for integrity-valid typed runs;
 - per-case `AIExtractionRun` artifacts or preflight block reasons;
 - deterministic quality checks against the synthetic gold expectations;
 - observed per-case latency and aggregate throughput for the bounded run;
 - integrity failure count;
 - explicit qualification flags.
 
+`candidate_only_boundary_exercised` becomes true only after at least one run actually passes JSON Schema plus the semantic candidate boundary; mere invocation is insufficient. `trial_integrity_clean` is reported separately.
+
 The report does **not** claim representative production scale. `representative_batch_scale_qualified` remains `false`.
 
-The runner also records cost as unmeasured/unknown because the CLI does not provide a stable per-invocation monetary-cost field to this harness. No cost claim is inferred.
-
-Raw model output is not persisted in the report; the `AIExtractionRun` retains its SHA-256 hash as required by the existing contract.
+The runner records cost as unmeasured/unknown because the CLI does not provide a stable per-invocation monetary-cost field to this harness. No cost claim is inferred.
 
 ## Manual execution
 
@@ -121,15 +139,17 @@ The workflow:
 
 1. runs the deterministic harness validator first;
 2. verifies the dedicated credential exists;
-3. invokes the synthetic corpus through Copilot CLI;
+3. invokes the synthetic corpus through the pinned Copilot CLI;
 4. uploads the JSON report as a 30-day workflow artifact;
 5. propagates any integrity failure after artifact upload.
 
-A model-quality miss may be recorded as evaluation evidence without becoming a canonical change. Any integrity failure is a workflow failure.
+A model-quality miss may be recorded as evaluation evidence without becoming a canonical change. Any harness/schema/boundary integrity failure is a workflow failure.
 
 ## Claim ceiling
 
-This increment can establish only that a real model can be exercised through the existing candidate-only extraction boundary on a bounded synthetic corpus.
+This increment can establish only that a real model **can be exercised** through the existing candidate-only extraction boundary on a bounded synthetic corpus once a live workflow report exists and is reviewed.
+
+Until that report exists, this PR establishes only the trial harness and deterministic boundary validation.
 
 It does **not** by itself establish:
 
@@ -140,6 +160,7 @@ It does **not** by itself establish:
 - multi-process writer coordination;
 - truth, approval, canonical-mutation, or publication authority;
 - safe processing of RED/restricted material;
-- automatic progression from model output to canonical knowledge.
+- automatic progression from model output to canonical knowledge;
+- end-to-end real-model passage through Resolver/Verifier and human review.
 
-M4 closure still requires review of live trial evidence, explicit quality/performance evaluation, representative batch-volume/throughput evidence for any scale claim, bilingual drafting, and evaluation/observability outcomes.
+M4 closure still requires execution and review of live trial evidence, explicit quality/performance evaluation, evidence that real-model candidates preserve the downstream Resolver/Verifier and human-review boundaries, representative batch-volume/throughput evidence for any scale claim, bilingual drafting, and evaluation/observability outcomes.
