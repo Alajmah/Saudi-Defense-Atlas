@@ -41,10 +41,11 @@ A second local provider edge, `--provider zai`, drives Z.ai's OpenAI-compatible 
 
 - default requested model: `glm-5.3` (overrideable with `--model`; the model remains explicit in the report trace);
 - the exact rendered SDA trial prompt is sent as one user message and only the exact assistant response text returns to the extraction boundary;
-- the request carries `model`, `messages`, and `stream: false` only — no tools, function calling, repository/file/shell access, retrieval, MCPs, or autonomous actions;
+- the request carries `model`, `messages`, `stream: false`, and an explicitly pinned reasoning configuration — thinking enabled, `reasoning_effort` `max`, matching the documented GLM-5.3 default so the effective inference setting is recorded rather than assumed — and nothing else: no tools, function calling, repository/file/shell access, retrieval, MCPs, or autonomous actions;
 - the HTTPS call uses the Python standard library; no SDK dependency is added;
-- the base URL resolves from `--base-url`, then the `ZAI_BASE_URL` environment variable, then the Coding Plan endpoint `https://api.z.ai/api/coding/paas/v4`; prepaid/resource-package keys use `https://api.z.ai/api/paas/v4`, and the two routes are not interchangeable;
-- the driver fails closed on a missing `ZAI_API_KEY`, non-2xx responses, timeouts, malformed API responses, missing or non-text assistant content, and any transport/provider exception; provider failures become trial integrity failures and never leak candidates or mutate canonical state.
+- the endpoint must be selected explicitly: `--zai-endpoint coding-plan` (`https://api.z.ai/api/coding/paas/v4`, Coding Plan keys, coding scenarios) or `--zai-endpoint prepaid` (`https://api.z.ai/api/paas/v4`, resource packages / prepaid balance, general API usage), or an explicit `--base-url` / `ZAI_BASE_URL` restricted to official `https://api.z.ai/` routes; there is no silent default because the two documented routes are not interchangeable and the account type is the operator's fact to state;
+- any single response is bounded to 1 MiB and fails closed above the bound;
+- the driver fails closed on a missing `ZAI_API_KEY`, non-2xx responses, timeouts, malformed or ambiguous API responses (duplicate JSON keys and non-finite numbers are rejected at the envelope level too), missing or non-text assistant content, and any transport/provider exception; provider failures become trial integrity failures and never leak candidates or mutate canonical state.
 
 Like the Copilot edge, the Z.ai driver is a **trial provider option**, not a production model-platform adoption. It introduces no second extraction pipeline: prompts, strict JSON parsing, duplicate-key rejection, candidate-only `AIExtractionRun` construction, quality scoring, latency/throughput reporting, and the report format are shared with the Copilot path through the provider-independent boundary.
 
@@ -56,7 +57,7 @@ The manual workflow expects repository secret `COPILOT_GITHUB_TOKEN` containing 
 
 The credential is used only by the Copilot CLI process. The workflow has repository `contents: read` permission and no canonical backend credentials.
 
-The Z.ai edge reads its credential only from the `ZAI_API_KEY` environment variable. The key is never accepted as a command-line argument, never logged, never serialized into the report, and never committed; every error message raised by the driver is redacted against the live key value before surfacing.
+The Z.ai edge reads its credential only from the `ZAI_API_KEY` environment variable. The key is never accepted as a command-line argument, never logged, never serialized into the report, and never committed. A credential containing leading/trailing whitespace, control characters, quotes, or backslashes is rejected before any request exists, because exception formatting could render such characters in an escaped form that defeats exact-substring redaction; every error message raised by the driver is redacted against the live key value before it is bounded.
 
 ## Model isolation
 
@@ -88,8 +89,8 @@ The prompt also supplies a case-specific allowlist for Claim predicates and Even
 Trace semantics are exact at the adapter boundary:
 
 - `prompt_trace.template_sha256` hashes the immutable prompt template;
-- `input_sha256` hashes the exact rendered prompt string passed to Copilot CLI;
-- `raw_output_sha256` hashes the exact stdout string captured from the CLI, including surrounding whitespace;
+- `input_sha256` hashes the exact rendered prompt string passed to the selected provider edge (the Copilot CLI process input or the Z.ai HTTP request body);
+- `raw_output_sha256` hashes the exact assistant response text returned by the selected provider edge (captured CLI stdout or HTTP response content), including surrounding whitespace;
 - the run identity includes invocation timestamps so separate invocations do not collapse merely because their input and output hashes match.
 
 Raw model output is not persisted in the report; only its hash and the validated/rejected typed candidate projection are retained.
@@ -124,14 +125,16 @@ The fixtures exist only to evaluate extraction mechanics and do not assert facts
 11. downstream JSON-Schema failure is isolated into a rejected run with zero candidate leakage;
 12. accepted and rejected runs retain zero canonical-mutation and publication authority.
 
-`scripts/validate_m4_model_extraction_trial_zai_provider.py` adds deterministic coverage for the Z.ai provider edge, again with no network access and no model-credit consumption. It injects a fake HTTP transport and verifies: the exact rendered prompt is the request payload input and the request carries no tool surface; the environment-only credential is redacted from errors, stdout, and the report; Coding Plan versus prepaid endpoint resolution and base-URL validation; fail-closed HTTP/timeout/malformed-response behavior; the identical strict JSON/candidate boundary as the Copilot path; backward compatibility of the Copilot path; and the absence of any governance/mutation import in the runner.
+`scripts/validate_m4_model_extraction_trial_zai_provider.py` adds deterministic coverage for the Z.ai provider edge, again with no network access and no model-credit consumption. It injects a fake HTTP transport and verifies: the exact rendered prompt is the request payload input; the request carries no tool surface and pins the reasoning configuration; the environment-only credential is character-rejected and redacted from errors, stdout, report, and sidecar; explicit coding-plan/prepaid endpoint selection with no silent default and base-URL validation restricted to official `api.z.ai` routes; strict duplicate-key/non-finite provider-envelope parsing; the bounded response size; git-bound report provenance with a matching SHA-256 sidecar; fail-closed HTTP/timeout/malformed-response behavior; the identical strict JSON/candidate boundary as the Copilot path; backward compatibility of the Copilot path; and the absence of any governance/mutation import in the runner.
 
 ## Live trial report
 
 `scripts/run_m4_model_extraction_trial.py` writes one JSON report containing:
 
 - corpus/provider/requested-model/CLI/adapter trace;
-- a `provider_edge` trace recording the driver, resolved base URL and its source (`flag` / `env` / `default`), credential source, transport, and tool exposure for the selected provider;
+- a `provider_edge` trace recording the driver, resolved base URL and its source (`flag` / `env` / `endpoint:coding-plan` / `endpoint:prepaid`), endpoint mode, credential source, transport, tool exposure, response-size bound, and pinned reasoning configuration for the selected provider;
+- a `trial_context` object binding the report to the exact source revision: git HEAD SHA and ref, tracked-worktree cleanliness, Python/platform versions, and SHA-256 hashes of the runner, the provider-independent boundary module, and the evaluation corpus;
+- a `<report>.sha256` sidecar with the final report's SHA-256 digest, also printed in the stdout summary;
 - explicit unknown provider checkpoint version;
 - invocation and schema/boundary-validated-run counts;
 - accepted/rejected/blocked counts only for integrity-valid typed runs;
@@ -145,7 +148,7 @@ The fixtures exist only to evaluate extraction mechanics and do not assert facts
 
 The report does **not** claim representative production scale. `representative_batch_scale_qualified` remains `false`.
 
-The runner records cost as unmeasured/unknown because the CLI does not provide a stable per-invocation monetary-cost field to this harness. No cost claim is inferred.
+Cost is recorded as unmeasured/unknown per provider (each report carries its own rationale) because neither exposed edge provides a stable per-invocation monetary-cost field to this harness. No cost claim is inferred.
 
 ## Manual execution
 
@@ -163,12 +166,12 @@ A model-quality miss may be recorded as evaluation evidence without becoming a c
 
 ### Local Z.ai execution
 
-The Z.ai edge is driven locally, after the deterministic suite is green and the implementation first-pass review is complete:
+The Z.ai edge is driven locally, after the deterministic suite is green and the independent reviews are complete:
 
 1. set the credential outside any tracked file: `export ZAI_API_KEY=...` (PowerShell: `$env:ZAI_API_KEY = "..."`);
-2. for a Coding Plan key the default endpoint `https://api.z.ai/api/coding/paas/v4` applies; for a prepaid/resource-package key also set `ZAI_BASE_URL=https://api.z.ai/api/paas/v4` or pass `--base-url` explicitly — the two routes are not interchangeable;
-3. run `python scripts/run_m4_model_extraction_trial.py --provider zai --output <report.json>` (with the usual `--model`, `--max-cases`, and `--timeout-seconds` controls available);
-4. review the JSON report before drawing any model-quality or scale conclusion.
+2. select the endpoint explicitly — Coding Plan key: `--zai-endpoint coding-plan`; prepaid/resource-package key: `--zai-endpoint prepaid`; the two routes are not interchangeable, and the account type is the operator's responsibility to state. An explicit `ZAI_BASE_URL` / `--base-url` is accepted only for official `https://api.z.ai/` routes;
+3. run from a clean checkout of the independently reviewed tip, e.g. `python scripts/run_m4_model_extraction_trial.py --provider zai --zai-endpoint coding-plan --output <report.json>` (with the usual `--model`, `--max-cases`, and `--timeout-seconds` controls available); the report records the exact git HEAD and tracked-worktree cleanliness, and a `<report>.json.sha256` sidecar pins the final report bytes — live evidence is accepted only with `tracked_worktree_clean: true` at the reviewed tip;
+4. review the JSON report and its sidecar before drawing any model-quality or scale conclusion.
 
 No GitHub Actions workflow is provided for the Z.ai edge: CI must never call Z.ai or consume model credits.
 

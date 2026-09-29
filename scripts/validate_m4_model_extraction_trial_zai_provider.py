@@ -15,6 +15,7 @@ import hashlib
 import io
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import urllib.error
@@ -29,14 +30,16 @@ if str(ROOT) not in sys.path:
 
 import scripts.run_m4_model_extraction_trial as trial_runner  # noqa: E402
 from scripts.run_m4_model_extraction_trial import (  # noqa: E402
+    MAX_RESPONSE_BYTES,
     PROVIDER_COPILOT,
     PROVIDER_ZAI,
     ZAI_BASE_URL_ENV,
     ZAI_CREDENTIAL_ENV,
-    ZAI_DEFAULT_BASE_URL,
-    ZAI_PREPAID_BASE_URL,
+    ZAI_ENDPOINT_URLS,
     ZAI_PROVIDER_NAME,
+    _capped_read,
     parse_args,
+    read_git_head,
     redact_secret,
     require_zai_api_key,
     resolve_requested_model,
@@ -171,14 +174,25 @@ def expect_runtime_error(
         failures.append(f"{label} did not fail closed")
 
 
-def build_invoker(transport: Any, *, model: str = "glm-5.3", base_url: str = ZAI_DEFAULT_BASE_URL):
+def build_invoker(transport: Any, *, model: str = "glm-5.3", base_url: str | None = None):
     return zai_invoker(
         model=model,
         api_key=SENTINEL_KEY,
-        base_url=base_url,
+        base_url=base_url or ZAI_ENDPOINT_URLS["coding-plan"],
         timeout_seconds=30,
         transport=transport,
     )
+
+
+def minimal_provider_env(extra: dict[str, str]) -> dict[str, str]:
+    """Test environment with only the credential plus process-lookup basics."""
+
+    passthrough = {
+        name: value
+        for name, value in os.environ.items()
+        if name in ("PATH", "PATHEXT", "SYSTEMROOT", "SYSTEMDRIVE", "COMSPEC", "WINDIR")
+    }
+    return {**passthrough, **extra}
 
 
 def main() -> int:
@@ -199,14 +213,14 @@ def main() -> int:
     if transport.calls:
         url, payload, headers, timeout = transport.calls[0]
         expect(
-            url == ZAI_DEFAULT_BASE_URL.rstrip("/") + "/chat/completions",
+            url == ZAI_ENDPOINT_URLS["coding-plan"].rstrip("/") + "/chat/completions",
             f"request URL is not the documented chat-completions endpoint: {url}",
             failures,
         )
         request = json.loads(payload.decode("utf-8"))
         expect(
-            set(request) == {"model", "messages", "stream"},
-            f"request payload carries keys beyond model/messages/stream: {sorted(request)}",
+            set(request) == {"model", "messages", "stream", "thinking", "reasoning_effort"},
+            f"request payload carries unexpected keys: {sorted(request)}",
             failures,
         )
         expect(request["model"] == "glm-5.3", "request payload lost the requested model", failures)
@@ -216,6 +230,16 @@ def main() -> int:
             failures,
         )
         expect(request["stream"] is False, "request payload did not disable streaming", failures)
+        expect(
+            request["thinking"] == {"type": "enabled"},
+            "request payload does not pin enabled thinking (IRZ-04)",
+            failures,
+        )
+        expect(
+            request["reasoning_effort"] == "max",
+            "request payload does not pin reasoning_effort max (IRZ-04)",
+            failures,
+        )
         for forbidden in ("tools", "functions", "tool_choice", "mcp_servers"):
             expect(forbidden not in request, f"request payload exposes {forbidden}", failures)
         expect(
@@ -232,8 +256,8 @@ def main() -> int:
 
     encoded = json.loads(zai_request_payload("glm-5.3", "p").decode("utf-8"))
     expect(
-        set(encoded) == {"model", "messages", "stream"},
-        "zai_request_payload emits keys beyond model/messages/stream",
+        set(encoded) == {"model", "messages", "stream", "thinking", "reasoning_effort"},
+        "zai_request_payload emits unexpected keys",
         failures,
     )
 
@@ -251,6 +275,28 @@ def main() -> int:
     expect(
         require_zai_api_key(env={ZAI_CREDENTIAL_ENV: "k"}) == "k",
         "present environment credential was not accepted",
+        failures,
+    )
+    # IRZ-01: characters that HTTP rejects or that repr() escaping could alter
+    # must never become the sent credential, because exact-substring redaction
+    # would then miss the escaped form in diagnostics.
+    for label, bad_key in (
+        ("trailing newline", "k\n"),
+        ("leading space", " k"),
+        ("trailing space", "k "),
+        ("embedded tab", "k\tk"),
+        ("control character", "k\x00k"),
+        ("embedded quote", 'k"k'),
+        ("embedded backslash", "k\\k"),
+    ):
+        try:
+            require_zai_api_key(env={ZAI_CREDENTIAL_ENV: bad_key})
+            failures.append(f"credential containing {label} was accepted")
+        except SystemExit:
+            pass
+    expect(
+        require_zai_api_key(env={ZAI_CREDENTIAL_ENV: "clean-key"}) == "clean-key",
+        "clean credential was rejected by the IRZ-01 guard",
         failures,
     )
     expect(
@@ -296,9 +342,53 @@ def main() -> int:
         ("message-missing", FakeTransport(body=b'{"choices":[{}]}'), None),
         ("content-null", FakeTransport(body=b'{"choices":[{"message":{"content":null}}]}'), None),
         ("content-not-text", FakeTransport(body=b'{"choices":[{"message":{"content":[1,2]}}]}'), None),
+        # IRZ-03: the provider envelope must reject duplicate keys (no
+        # last-key-wins selection) and non-finite JSON numbers/constants.
+        (
+            "duplicate-choices-keys",
+            FakeTransport(
+                body=b'{"choices":[{"message":{"content":"{}"}}],"choices":[]}'
+            ),
+            None,
+        ),
+        (
+            "duplicate-message-keys",
+            FakeTransport(
+                body=b'{"choices":[{"message":{"content":"{}","content":null}}]}'
+            ),
+            None,
+        ),
+        (
+            "envelope-nan-constant",
+            FakeTransport(body=b'{"choices":[{"message":{"content":NaN}}]}'),
+            None,
+        ),
+        (
+            "envelope-nonfinite-float",
+            FakeTransport(body=b'{"choices":[{"message":{"content":1e999}}]}'),
+            None,
+        ),
+        # IRZ-06: responses above the byte bound fail closed.
+        (
+            "oversize-body",
+            FakeTransport(body=b"x" * (MAX_RESPONSE_BYTES + 1)),
+            None,
+        ),
     ]
     for label, transport_case, must_contain in failure_matrix:
         expect_runtime_error(label, build_invoker(transport_case), failures, must_contain=must_contain)
+
+    # IRZ-06: the shared capped-read helper enforces the bound at the transport layer.
+    expect(
+        _capped_read(io.BytesIO(b"abc"), 10) == b"abc",
+        "capped read altered an in-bound response body",
+        failures,
+    )
+    try:
+        _capped_read(io.BytesIO(b"a" * 11), 10)
+        failures.append("capped read did not enforce the byte bound")
+    except RuntimeError:
+        pass
 
     # ZP-3b: the real transport refuses redirects rather than following them,
     # so the bearer credential can never be re-sent to another origin. A refused
@@ -321,28 +411,58 @@ def main() -> int:
         failures,
     )
 
-    # ZP-4: endpoint resolution and validation.
-    expect(ZAI_DEFAULT_BASE_URL != ZAI_PREPAID_BASE_URL, "Coding Plan and prepaid endpoints collapsed", failures)
+    # ZP-4: endpoint resolution and validation (IRZ-02).
     expect(
-        resolve_zai_base_url(None, env={}) == (ZAI_DEFAULT_BASE_URL, "default"),
-        "base-URL default is not the Coding Plan endpoint",
+        ZAI_ENDPOINT_URLS["coding-plan"] != ZAI_ENDPOINT_URLS["prepaid"],
+        "documented Coding Plan and prepaid endpoints collapsed",
         failures,
     )
     expect(
-        resolve_zai_base_url(None, env={ZAI_BASE_URL_ENV: ZAI_PREPAID_BASE_URL})
-        == (ZAI_PREPAID_BASE_URL, "env"),
+        resolve_zai_base_url(None, "coding-plan", env={})
+        == (ZAI_ENDPOINT_URLS["coding-plan"], "endpoint:coding-plan"),
+        "explicit coding-plan endpoint selection failed",
+        failures,
+    )
+    expect(
+        resolve_zai_base_url(None, "prepaid", env={})
+        == (ZAI_ENDPOINT_URLS["prepaid"], "endpoint:prepaid"),
+        "explicit prepaid endpoint selection failed",
+        failures,
+    )
+    expect(
+        resolve_zai_base_url(None, None, env={ZAI_BASE_URL_ENV: ZAI_ENDPOINT_URLS["prepaid"]})
+        == (ZAI_ENDPOINT_URLS["prepaid"], "env"),
         "ZAI_BASE_URL environment override was ignored",
         failures,
     )
     expect(
-        resolve_zai_base_url("https://proxy.invalid/v4", env={ZAI_BASE_URL_ENV: ZAI_PREPAID_BASE_URL})
-        == ("https://proxy.invalid/v4", "flag"),
+        resolve_zai_base_url(
+            ZAI_ENDPOINT_URLS["coding-plan"],
+            "prepaid",
+            env={ZAI_BASE_URL_ENV: ZAI_ENDPOINT_URLS["prepaid"]},
+        )
+        == (ZAI_ENDPOINT_URLS["coding-plan"], "flag"),
         "--base-url flag did not take precedence",
         failures,
     )
+    try:
+        resolve_zai_base_url(None, None, env={})
+        failures.append("missing endpoint selection silently defaulted instead of failing closed")
+    except SystemExit:
+        pass
+
+    for official in (ZAI_ENDPOINT_URLS["coding-plan"], ZAI_ENDPOINT_URLS["prepaid"]):
+        try:
+            validate_zai_base_url(official)
+        except SystemExit:
+            failures.append(f"official Z.ai route was rejected: {official}")
     for bad_url in (
         "http://api.z.ai/api/paas/v4",
         "https://user:pass@api.z.ai/api/paas/v4",
+        "https://api.z.ai:8443/api/paas/v4",
+        "https://proxy.invalid/api/paas/v4",
+        "https://evil.example/api/coding/paas/v4",
+        "https://api.z.ai/not-api",
         "https://api.z.ai/api/paas/v4?token=x",
         "https://api.z.ai/api/paas/v4#fragment",
         "not-a-url",
@@ -353,10 +473,6 @@ def main() -> int:
             failures.append(f"invalid base URL was accepted: {bad_url!r}")
         except SystemExit:
             pass
-    try:
-        validate_zai_base_url(ZAI_PREPAID_BASE_URL)
-    except SystemExit:
-        failures.append("valid prepaid base URL was rejected", )
 
     expect(resolve_requested_model(PROVIDER_ZAI, None) == "glm-5.3", "zai default model is not glm-5.3", failures)
     expect(resolve_requested_model(PROVIDER_COPILOT, None) == "gpt-5.4", "copilot default model changed", failures)
@@ -436,6 +552,15 @@ def main() -> int:
     except SystemExit:
         pass
     try:
+        with (
+            redirect_stderr(io.StringIO()),
+            argv("--provider", PROVIDER_COPILOT, "--zai-endpoint", "prepaid", "--output", "x"),
+        ):
+            parse_args()
+        failures.append("--zai-endpoint was accepted for the copilot provider")
+    except SystemExit:
+        pass
+    try:
         with patch.dict(os.environ, {}, clear=True), argv("--provider", PROVIDER_COPILOT, "--output", "x"):
             trial_runner.main()
         failures.append("copilot path ran without Copilot credentials")
@@ -454,8 +579,16 @@ def main() -> int:
         report_path = Path(tmpdir) / "zai-report.json"
         captured = io.StringIO()
         with (
-            patch.dict(os.environ, {ZAI_CREDENTIAL_ENV: SENTINEL_KEY}, clear=True),
-            argv("--provider", PROVIDER_ZAI, "--output", str(report_path)),
+            patch.dict(
+                os.environ,
+                minimal_provider_env({ZAI_CREDENTIAL_ENV: SENTINEL_KEY}),
+                clear=True,
+            ),
+            argv(
+                "--provider", PROVIDER_ZAI,
+                "--zai-endpoint", "coding-plan",
+                "--output", str(report_path),
+            ),
             patch.object(trial_runner, "zai_http_post_json", corpus_transport),
             redirect_stdout(captured),
         ):
@@ -468,12 +601,29 @@ def main() -> int:
         expect(report["provider"] == ZAI_PROVIDER_NAME, "report provider trace is wrong", failures)
         expect(report["requested_model"] == "glm-5.3", "report requested model is not the zai default", failures)
         expect(report["copilot_cli_version"] is None, "zai report invented a Copilot CLI version", failures)
+        expect(
+            report["report_version"] == "m4-model-extraction-live-trial-v0.5",
+            "report version was not bumped for the IRZ remediation surface",
+            failures,
+        )
         edge = report.get("provider_edge", {})
         expect(edge.get("driver") == "zai-openai-compatible-http", "report driver trace is wrong", failures)
-        expect(edge.get("base_url") == ZAI_DEFAULT_BASE_URL, "report base URL is not the resolved endpoint", failures)
-        expect(edge.get("base_url_source") == "default", "report base-URL source is wrong", failures)
+        expect(
+            edge.get("base_url") == ZAI_ENDPOINT_URLS["coding-plan"],
+            "report base URL is not the selected official route",
+            failures,
+        )
+        expect(edge.get("base_url_source") == "endpoint:coding-plan", "report base-URL source is wrong", failures)
+        expect(edge.get("endpoint_mode") == "coding-plan", "report endpoint mode is wrong", failures)
         expect(edge.get("transport") == "python-stdlib-urllib", "report transport trace is wrong", failures)
         expect(edge.get("tools") == "none", "report tool trace is wrong", failures)
+        expect(edge.get("max_response_bytes") == MAX_RESPONSE_BYTES, "report response bound is missing", failures)
+        expect(
+            edge.get("reasoning_configuration")
+            == {"thinking_type": "enabled", "reasoning_effort": "max", "explicitly_pinned": True},
+            "report reasoning configuration is not the pinned IRZ-04 setting",
+            failures,
+        )
         expect(
             ZAI_CREDENTIAL_ENV in str(edge.get("credential_source", "")),
             "report credential source is not the environment variable",
@@ -484,6 +634,44 @@ def main() -> int:
             "credential leaked into provider_edge trace",
             failures,
         )
+        # IRZ-05: the report is bound to the exact source revision and runtime,
+        # and a SHA-256 sidecar pins the final report bytes.
+        context = report.get("trial_context", {})
+        expected_head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True, capture_output=True, text=True
+        ).stdout.strip()
+        expect(context.get("git_head") == expected_head, "report git_head does not match rev-parse HEAD", failures)
+        expect(
+            read_git_head(ROOT)[0] == expected_head,
+            "plumbing-based git reader diverges from git rev-parse",
+            failures,
+        )
+        expect(
+            isinstance(context.get("tracked_worktree_clean"), bool),
+            "report did not record a boolean tracked-worktree cleanliness state",
+            failures,
+        )
+        expect(
+            context.get("runner_sha256") == hashlib.sha256(Path(trial_runner.__file__).read_bytes()).hexdigest(),
+            "report runner_sha256 does not match the executing runner file",
+            failures,
+        )
+        expect(
+            context.get("corpus_sha256") == hashlib.sha256(FIXTURE.read_bytes()).hexdigest(),
+            "report corpus_sha256 does not match the fixture file",
+            failures,
+        )
+        sidecar_text = report_path.with_name(report_path.name + ".sha256").read_text(encoding="utf-8")
+        report_digest = hashlib.sha256(report_text.encode("utf-8")).hexdigest()
+        expect(
+            sidecar_text == f"{report_digest}  {report_path.name}\n",
+            "report SHA-256 sidecar does not match the final report bytes",
+            failures,
+        )
+        expect(SENTINEL_KEY not in sidecar_text, "credential leaked into the SHA-256 sidecar", failures)
+        summary = json.loads(captured.getvalue())
+        expect(summary.get("report_sha256") == report_digest, "stdout summary lost the report SHA-256", failures)
+        expect(summary.get("git_head") == expected_head, "stdout summary lost the git head", failures)
         expect(report["integrity_failure_count"] == 0, "fake zai transport run had integrity failures", failures)
         expect(report["invocation_count"] == len(cases) - 1, "zai run invocation count is wrong", failures)
         expect(report["blocked_before_invocation_count"] == 1, "restricted case was not blocked", failures)
@@ -507,7 +695,12 @@ def main() -> int:
         with (
             patch.dict(
                 os.environ,
-                {ZAI_CREDENTIAL_ENV: SENTINEL_KEY, ZAI_BASE_URL_ENV: ZAI_PREPAID_BASE_URL},
+                minimal_provider_env(
+                    {
+                        ZAI_CREDENTIAL_ENV: SENTINEL_KEY,
+                        ZAI_BASE_URL_ENV: ZAI_ENDPOINT_URLS["prepaid"],
+                    }
+                ),
                 clear=True,
             ),
             argv("--provider", PROVIDER_ZAI, "--model", "glm-4.7", "--max-cases", "1", "--output", str(report_path)),
@@ -519,7 +712,7 @@ def main() -> int:
         prepaid_report = json.loads(report_path.read_text(encoding="utf-8"))
         expect(prepaid_report["requested_model"] == "glm-4.7", "explicit --model was ignored", failures)
         expect(
-            prepaid_report["provider_edge"]["base_url"] == ZAI_PREPAID_BASE_URL,
+            prepaid_report["provider_edge"]["base_url"] == ZAI_ENDPOINT_URLS["prepaid"],
             "ZAI_BASE_URL prepaid endpoint was ignored",
             failures,
         )
@@ -529,7 +722,12 @@ def main() -> int:
             failures,
         )
         expect(
-            prepaid_transport.calls[0][0] == ZAI_PREPAID_BASE_URL.rstrip("/") + "/chat/completions",
+            prepaid_report["provider_edge"]["endpoint_mode"] is None,
+            "endpoint_mode should be None when an explicit URL override is used",
+            failures,
+        )
+        expect(
+            prepaid_transport.calls[0][0] == ZAI_ENDPOINT_URLS["prepaid"].rstrip("/") + "/chat/completions",
             "request did not target the environment-provided endpoint",
             failures,
         )
@@ -542,6 +740,21 @@ def main() -> int:
         failures.append("zai main() ran without ZAI_API_KEY")
     except SystemExit:
         pass
+
+    # ZP-9b: main() fails closed when no endpoint route is selected (IRZ-02).
+    try:
+        with (
+            patch.dict(os.environ, minimal_provider_env({ZAI_CREDENTIAL_ENV: SENTINEL_KEY}), clear=True),
+            argv("--provider", PROVIDER_ZAI, "--output", "x"),
+        ):
+            trial_runner.main()
+        failures.append("zai main() ran without any endpoint selection")
+    except SystemExit as exc:
+        expect(
+            "--zai-endpoint" in str(exc) or ZAI_BASE_URL_ENV in str(exc),
+            "missing-endpoint failure does not explain the required selection",
+            failures,
+        )
 
     # ZP-10: the provider edge adds no governance/mutation imports to the runner.
     runner_source = Path(trial_runner.__file__).read_text(encoding="utf-8")
@@ -560,11 +773,14 @@ def main() -> int:
 
     print(
         "Validated the Z.ai provider edge: exact rendered prompt as sole model input with no "
-        "tool surface; environment-only credential with redaction from errors, stdout, and "
-        "report; Coding Plan vs prepaid endpoint resolution; fail-closed HTTP/timeout/"
-        "malformed-response behavior; identical strict JSON/candidate boundary as Copilot; "
-        "backward-compatible copilot path; no canonical mutation, publication, "
-        "Resolver/Verifier, or human-review authority."
+        "tool surface and pinned reasoning configuration; environment-only credential with "
+        "character rejection and redaction from errors, stdout, report, and sidecar; explicit "
+        "coding-plan/prepaid endpoint selection restricted to official api.z.ai routes; strict "
+        "duplicate-key/non-finite provider-envelope parsing; bounded response size; git-bound "
+        "report provenance with SHA-256 sidecar; fail-closed HTTP/timeout/malformed-response "
+        "behavior; identical strict JSON/candidate boundary as Copilot; backward-compatible "
+        "copilot path; no canonical mutation, publication, Resolver/Verifier, or human-review "
+        "authority."
     )
     return 0
 
