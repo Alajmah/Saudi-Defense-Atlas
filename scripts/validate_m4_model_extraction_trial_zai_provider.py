@@ -300,6 +300,27 @@ def main() -> int:
     for label, transport_case, must_contain in failure_matrix:
         expect_runtime_error(label, build_invoker(transport_case), failures, must_contain=must_contain)
 
+    # ZP-3b: the real transport refuses redirects rather than following them,
+    # so the bearer credential can never be re-sent to another origin. A refused
+    # redirect surfaces as its 3xx status, which the matrix above fails closed on.
+    refuse_handler = trial_runner._RefuseRedirectHandler()
+    for code in (301, 302, 303, 307, 308):
+        expect(
+            refuse_handler.redirect_request(None, None, code, "Moved", {}, "https://other.invalid/x") is None,
+            f"redirect handler did not refuse HTTP {code}",
+            failures,
+        )
+    redirect_handlers = [
+        handler
+        for handler in trial_runner._ZAI_OPENER.handlers
+        if isinstance(handler, urllib.request.HTTPRedirectHandler)
+    ]
+    expect(
+        len(redirect_handlers) == 1 and isinstance(redirect_handlers[0], trial_runner._RefuseRedirectHandler),
+        "transport opener retained a redirect-following handler",
+        failures,
+    )
+
     # ZP-4: endpoint resolution and validation.
     expect(ZAI_DEFAULT_BASE_URL != ZAI_PREPAID_BASE_URL, "Coding Plan and prepaid endpoints collapsed", failures)
     expect(

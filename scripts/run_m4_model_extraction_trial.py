@@ -238,6 +238,16 @@ def redact_secret(text: str, secret: str | None) -> str:
     return rendered
 
 
+class _RefuseRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Refuse every redirect so the bearer credential is never re-sent anywhere."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+        return None
+
+
+_ZAI_OPENER = urllib.request.build_opener(_RefuseRedirectHandler)
+
+
 def zai_request_payload(model: str, prompt: str) -> bytes:
     """Encode the exact rendered trial prompt as one user message with no tool surface."""
 
@@ -255,11 +265,16 @@ def zai_request_payload(model: str, prompt: str) -> bytes:
 def zai_http_post_json(
     url: str, payload: bytes, headers: dict[str, str], timeout_seconds: int
 ) -> tuple[int, bytes]:
-    """Stdlib HTTPS POST returning (status, body) even for non-2xx statuses."""
+    """Stdlib HTTPS POST returning (status, body) even for non-2xx statuses.
+
+    Redirects are refused rather than followed: the request carries a bearer
+    credential, so no 3xx may ever cause a re-POST to another origin. A refused
+    redirect surfaces here as its 3xx status, which the caller fails closed on.
+    """
 
     request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+        with _ZAI_OPENER.open(request, timeout=timeout_seconds) as response:
             return int(response.status), response.read()
     except urllib.error.HTTPError as exc:
         try:
