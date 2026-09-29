@@ -16,7 +16,7 @@ import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from jsonschema import Draft202012Validator, FormatChecker
 
@@ -107,7 +107,7 @@ def copilot_command_args(command: str, model: str, prompt: str) -> list[str]:
     ]
 
 
-def copilot_invoker(command: str, model: str, timeout_seconds: int):
+def copilot_invoker(command: str, model: str, timeout_seconds: int) -> Callable[[str], str]:
     def invoke(prompt: str) -> str:
         result = subprocess.run(
             copilot_command_args(command, model, prompt),
@@ -140,36 +140,58 @@ def _entity_names_by_id(run: dict[str, Any]) -> dict[str, set[str]]:
         names = entity.get("names")
         if not isinstance(candidate_id, str) or not isinstance(names, dict):
             continue
-        normalized = {
+        result[candidate_id] = {
             normalize_name(value)
             for value in names.values()
             if isinstance(value, str) and value.strip()
         }
-        result[candidate_id] = normalized
     return result
-
-
-def observed_entity_names(run: dict[str, Any]) -> set[str]:
-    names: set[str] = set()
-    for values in _entity_names_by_id(run).values():
-        names.update(values)
-    return names
 
 
 def _ref_has_name(ref: Any, expected_name: str, names_by_id: dict[str, set[str]]) -> bool:
     if not isinstance(ref, dict) or ref.get("kind") != "candidate_entity":
         return False
     candidate_id = ref.get("candidate_id")
-    if not isinstance(candidate_id, str):
+    return (
+        isinstance(candidate_id, str)
+        and normalize_name(expected_name) in names_by_id.get(candidate_id, set())
+    )
+
+
+def _localized_names_match(actual: Any, expected: Any) -> bool:
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
         return False
-    return normalize_name(expected_name) in names_by_id.get(candidate_id, set())
+    if set(actual) != set(expected):
+        return False
+    return all(
+        isinstance(actual.get(locale), str)
+        and isinstance(value, str)
+        and normalize_name(actual[locale]) == normalize_name(value)
+        for locale, value in expected.items()
+    )
 
 
-def _value_matches(
-    actual: Any,
-    expected: Any,
-    names_by_id: dict[str, set[str]],
-) -> bool:
+def _evidence_matches(actual: Any, expected: Any, _: dict[str, set[str]]) -> bool:
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
+        return False
+    for key in ("document_id", "locator", "excerpt_sha256", "capture_assessment"):
+        if actual.get(key) != expected.get(key):
+            return False
+    return True
+
+
+def _entity_matches(actual: Any, expected: Any, _: dict[str, set[str]]) -> bool:
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
+        return False
+    return (
+        actual.get("entity_type") == expected.get("entity_type")
+        and actual.get("subtype") == expected.get("subtype")
+        and _localized_names_match(actual.get("names"), expected.get("names"))
+        and actual.get("aliases", []) == expected.get("aliases", [])
+    )
+
+
+def _value_matches(actual: Any, expected: Any, names_by_id: dict[str, set[str]]) -> bool:
     if not isinstance(actual, dict) or not isinstance(expected, dict):
         return False
     expected_kind = expected.get("kind")
@@ -178,43 +200,52 @@ def _value_matches(
     if expected_kind == "candidate_entity":
         entity_name = expected.get("entity_name")
         return isinstance(entity_name, str) and _ref_has_name(actual, entity_name, names_by_id)
-    return all(actual.get(key) == value for key, value in expected.items())
+    return actual == expected
 
 
-def _claim_matches(
-    claim: Any,
-    expected: Any,
-    names_by_id: dict[str, set[str]],
-) -> bool:
-    if not isinstance(claim, dict) or not isinstance(expected, dict):
+def _claim_matches(actual: Any, expected: Any, names_by_id: dict[str, set[str]]) -> bool:
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
         return False
-    if claim.get("predicate_id") != expected.get("predicate_id"):
+    if actual.get("predicate_id") != expected.get("predicate_id"):
         return False
     subject_name = expected.get("subject_name")
     if not isinstance(subject_name, str) or not _ref_has_name(
-        claim.get("subject"), subject_name, names_by_id
+        actual.get("subject"), subject_name, names_by_id
     ):
         return False
-    if not _value_matches(claim.get("value"), expected.get("value"), names_by_id):
+    if not _value_matches(actual.get("value"), expected.get("value"), names_by_id):
         return False
-    if "validity" in expected and claim.get("validity") != expected.get("validity"):
+
+    if "validity" in expected:
+        expected_validity = expected.get("validity")
+        if expected_validity is None:
+            if "validity" in actual:
+                return False
+        elif actual.get("validity") != expected_validity:
+            return False
+
+    if "extraction_assessment" in expected and (
+        actual.get("extraction_assessment") != expected.get("extraction_assessment")
+    ):
         return False
     return True
 
 
-def _event_matches(
-    event: Any,
-    expected: Any,
-    names_by_id: dict[str, set[str]],
-) -> bool:
-    if not isinstance(event, dict) or not isinstance(expected, dict):
+def _event_matches(actual: Any, expected: Any, names_by_id: dict[str, set[str]]) -> bool:
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
         return False
-    if event.get("event_type") != expected.get("event_type"):
+    if actual.get("event_type") != expected.get("event_type"):
         return False
-    if event.get("occurred_at") != expected.get("occurred_at"):
+    if actual.get("occurred_at") != expected.get("occurred_at"):
+        return False
+    if "ended_at" in expected and actual.get("ended_at") != expected.get("ended_at"):
+        return False
+    if "extraction_assessment" in expected and (
+        actual.get("extraction_assessment") != expected.get("extraction_assessment")
+    ):
         return False
 
-    actual_participants = event.get("participants")
+    actual_participants = actual.get("participants")
     expected_participants = expected.get("participants", [])
     if not isinstance(actual_participants, list) or not isinstance(expected_participants, list):
         return False
@@ -234,9 +265,7 @@ def _event_matches(
                 and actual_participants[index].get("role") == wanted_role
                 and isinstance(wanted_name, str)
                 and _ref_has_name(
-                    actual_participants[index].get("entity"),
-                    wanted_name,
-                    names_by_id,
+                    actual_participants[index].get("entity"), wanted_name, names_by_id
                 )
             ),
             None,
@@ -245,7 +274,7 @@ def _event_matches(
             return False
         unmatched.remove(match_index)
 
-    actual_related = event.get("related_entities")
+    actual_related = actual.get("related_entities")
     expected_related = expected.get("related_entity_names", [])
     if not isinstance(actual_related, list) or not isinstance(expected_related, list):
         return False
@@ -269,11 +298,13 @@ def _event_matches(
 
 
 def _all_expected_records_match(
-    actual_records: list[Any],
-    expected_records: list[Any],
-    matcher: Any,
+    actual_records: Any,
+    expected_records: Any,
+    matcher: Callable[[Any, Any, dict[str, set[str]]], bool],
     names_by_id: dict[str, set[str]],
 ) -> tuple[bool, list[int]]:
+    if not isinstance(actual_records, list) or not isinstance(expected_records, list):
+        return False, []
     if len(actual_records) != len(expected_records):
         return False, list(range(len(expected_records)))
     unmatched_actual = list(range(len(actual_records)))
@@ -301,8 +332,10 @@ def evaluate_case(
     blocked: bool,
     run: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    gold = case["gold"]
-    expected_status = gold["expected_status"]
+    gold = case.get("gold")
+    if not isinstance(gold, dict):
+        return {"pass": False, "checks": [{"id": "gold-present", "pass": False}]}
+    expected_status = gold.get("expected_status")
     checks: list[dict[str, Any]] = []
 
     if expected_status == "blocked_before_invocation":
@@ -317,7 +350,7 @@ def evaluate_case(
     if run is None:
         return {"pass": False, "checks": [{"id": "run-present", "pass": False}]}
 
-    observed_status = run["validation"]["status"]
+    observed_status = run.get("validation", {}).get("status")
     checks.append(
         {
             "id": "status",
@@ -334,10 +367,13 @@ def evaluate_case(
             for check in run.get("evaluation_trace", {}).get("checks", [])
             if isinstance(check, dict) and check.get("status") == "fail"
         }
-        candidates = run.get("candidates", {})
+        candidates = run.get("candidates")
         candidate_arrays_empty = (
             isinstance(candidates, dict)
-            and all(candidates.get(name) == [] for name in ("evidence", "entities", "claims", "events"))
+            and all(
+                candidates.get(name) == []
+                for name in ("evidence", "entities", "claims", "events")
+            )
         )
         checks.extend(
             [
@@ -345,7 +381,9 @@ def evaluate_case(
                     "id": "expected-rejection-check",
                     "pass": isinstance(expected_check, str) and expected_check in failed_checks,
                     "expected": expected_check,
-                    "observed": sorted(value for value in failed_checks if isinstance(value, str)),
+                    "observed": sorted(
+                        value for value in failed_checks if isinstance(value, str)
+                    ),
                 },
                 {
                     "id": "rejected-candidates-empty",
@@ -355,70 +393,39 @@ def evaluate_case(
         )
         return {"pass": all(check["pass"] for check in checks), "checks": checks}
 
-    if observed_status != "accepted_for_candidate_review":
+    if expected_status != "accepted_for_candidate_review" or observed_status != expected_status:
         return {"pass": False, "checks": checks}
 
-    candidates = run.get("candidates", {})
+    candidates = run.get("candidates")
     if not isinstance(candidates, dict):
         checks.append({"id": "candidate-object", "pass": False})
         return {"pass": False, "checks": checks}
 
-    entities = candidates.get("entities", [])
-    claims = candidates.get("claims", [])
-    events = candidates.get("events", [])
     names_by_id = _entity_names_by_id(run)
-    names = observed_entity_names(run)
-    required_names = {
-        normalize_name(value) for value in gold.get("required_entity_names", [])
+    expected_specs = {
+        "evidence": (gold.get("expected_evidence"), _evidence_matches),
+        "entities": (gold.get("expected_entities"), _entity_matches),
+        "claims": (gold.get("expected_claims"), _claim_matches),
+        "events": (gold.get("expected_events"), _event_matches),
     }
-    expected_entity_count = gold.get("expected_entity_count")
-    expected_claims = gold.get("expected_claims", [])
-    expected_events = gold.get("expected_events", [])
+    for name, (expected_records, matcher) in expected_specs.items():
+        actual_records = candidates.get(name)
+        matched, missing = _all_expected_records_match(
+            actual_records,
+            expected_records,
+            matcher,
+            names_by_id,
+        )
+        checks.append(
+            {
+                "id": f"{name}-semantics",
+                "pass": matched,
+                "missing_expected_indexes": missing,
+                "observed_count": len(actual_records) if isinstance(actual_records, list) else None,
+                "expected_count": len(expected_records) if isinstance(expected_records, list) else None,
+            }
+        )
 
-    claim_match, missing_claims = _all_expected_records_match(
-        claims if isinstance(claims, list) else [],
-        expected_claims if isinstance(expected_claims, list) else [],
-        _claim_matches,
-        names_by_id,
-    )
-    event_match, missing_events = _all_expected_records_match(
-        events if isinstance(events, list) else [],
-        expected_events if isinstance(expected_events, list) else [],
-        _event_matches,
-        names_by_id,
-    )
-
-    checks.extend(
-        [
-            {
-                "id": "required-entity-names",
-                "pass": required_names.issubset(names),
-                "missing": sorted(required_names - names),
-            },
-            {
-                "id": "entity-count",
-                "pass": isinstance(entities, list)
-                and isinstance(expected_entity_count, int)
-                and len(entities) == expected_entity_count,
-                "observed": len(entities) if isinstance(entities, list) else None,
-                "expected": expected_entity_count,
-            },
-            {
-                "id": "claim-semantics",
-                "pass": claim_match,
-                "missing_expected_indexes": missing_claims,
-                "observed_count": len(claims) if isinstance(claims, list) else None,
-                "expected_count": len(expected_claims) if isinstance(expected_claims, list) else None,
-            },
-            {
-                "id": "event-semantics",
-                "pass": event_match,
-                "missing_expected_indexes": missing_events,
-                "observed_count": len(events) if isinstance(events, list) else None,
-                "expected_count": len(expected_events) if isinstance(expected_events, list) else None,
-            },
-        ]
-    )
     return {"pass": all(check["pass"] for check in checks), "checks": checks}
 
 
@@ -558,7 +565,7 @@ def main() -> int:
     throughput = invocation_count / total_seconds if total_seconds > 0 else None
 
     report = {
-        "report_version": "m4-model-extraction-live-trial-v0.2",
+        "report_version": "m4-model-extraction-live-trial-v0.3",
         "corpus_version": corpus_version,
         "provider": "github-copilot-cli",
         "requested_model": args.model,
