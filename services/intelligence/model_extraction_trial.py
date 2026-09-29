@@ -1,12 +1,8 @@
-"""Bounded real-model extraction trial adapter for M4.
+"""Provider-independent bounded real-model extraction trial boundary for M4.
 
-This module is intentionally provider-independent. It prepares a prompt for a
-pre-authorized ``candidate_extraction`` queue item, invokes a caller-supplied
-model function, and converts the untrusted response into the existing
-``AIExtractionRun`` candidate-only contract.
-
-It owns no canonical identity resolution, truth admission, human approval,
-canonical mutation, or publication authority.
+The adapter accepts only pre-authorized synthetic ``candidate_extraction`` work,
+turns untrusted model text into the existing ``AIExtractionRun`` contract, and
+owns no canonical resolution, truth, approval, mutation, or publication authority.
 """
 
 from __future__ import annotations
@@ -21,7 +17,6 @@ from services.intelligence.ai_extraction_boundary import (
     AIExtractionBoundaryError,
     validate_ai_extraction_run,
 )
-
 
 ADAPTER_VERSION = "m4-model-trial-v0.1"
 PROMPT_TEMPLATE_ID = "m4-bounded-candidate-extraction"
@@ -42,14 +37,14 @@ Rules:
 1. Use only facts explicitly stated in SOURCE_TEXT. Do not infer missing facts.
 2. Every factual entity, claim, and event must cite one or more candidate evidence IDs.
 3. All model-created record IDs must begin with CAND- and be unique across all arrays.
-4. Entity references must use {\"kind\":\"candidate_entity\",\"candidate_id\":\"CAND-...\"}.
+4. Entity references must use kind=candidate_entity with candidate_id=CAND-*.
 5. Evidence document_id must be the supplied SOURCE_DOCUMENT_ID.
 6. Do not output canonical SDA entity IDs or claim canonical truth.
 7. Do not add coordinates, readiness, stock levels, patrol patterns, live unit disposition,
    tactical vulnerabilities, or other operationally sensitive detail.
 8. Allowed claim predicates and event types are supplied below. Do not invent others.
 9. If the source does not support a substantive entity, claim, or event, return empty arrays.
-10. Candidate locators should use {\"fragment\":\"source-text\"} for this synthetic trial.
+10. Candidate locators should use fragment=source-text for this synthetic trial.
 
 SOURCE_DOCUMENT_ID: {source_document_id}
 ALLOWED_CLAIM_PREDICATES: {allowed_predicates}
@@ -62,7 +57,7 @@ SOURCE_TEXT_END
 
 
 class ModelExtractionTrialError(ValueError):
-    """Raised when a trial case is not safe or well-formed enough to invoke a model."""
+    """Raised when a trial case is unsafe or malformed."""
 
 
 @dataclass(frozen=True)
@@ -83,7 +78,9 @@ class ModelTrace:
             if not isinstance(value, str) or not value.strip():
                 raise ModelExtractionTrialError(f"model trace {key} must be non-empty")
             if len(value) > 128:
-                raise ModelExtractionTrialError(f"model trace {key} exceeds schema maximum length")
+                raise ModelExtractionTrialError(
+                    f"model trace {key} exceeds schema maximum length"
+                )
         return values
 
 
@@ -97,19 +94,12 @@ class TrialCaseOutcome:
 
 def _canonical_json_bytes(value: Any) -> bytes:
     return json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
 
 
-def _sha256_bytes(value: bytes) -> str:
-    return hashlib.sha256(value).hexdigest()
-
-
 def _sha256_text(value: str) -> str:
-    return _sha256_bytes(value.encode("utf-8"))
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
 def _utc_now() -> str:
@@ -141,21 +131,25 @@ def validate_trial_case(case: Mapping[str, Any]) -> None:
     case_id = case.get("id")
     if not isinstance(case_id, str) or not case_id.startswith("TRIAL-"):
         raise ModelExtractionTrialError("trial case id must use TRIAL-* identity")
-
     if case.get("sensitivity") != "public_non_operational":
         raise ModelExtractionTrialError("trial case is not authorized for model invocation")
     if case.get("synthetic_fixture") is not True:
         raise ModelExtractionTrialError("live trial is restricted to synthetic fixtures")
 
     source_document_id = case.get("source_document_id")
-    if not isinstance(source_document_id, str) or not source_document_id.startswith("SDA-DOC-"):
-        raise ModelExtractionTrialError("trial source_document_id must be an SDA Document ID")
-
+    if not isinstance(source_document_id, str) or not source_document_id.startswith(
+        "SDA-DOC-"
+    ):
+        raise ModelExtractionTrialError(
+            "trial source_document_id must be an SDA Document ID"
+        )
     source_text = case.get("source_text")
     if not isinstance(source_text, str) or not source_text.strip():
         raise ModelExtractionTrialError("trial source_text must be non-empty")
     if len(source_text) > 20_000:
-        raise ModelExtractionTrialError("trial source_text exceeds bounded 20k-character limit")
+        raise ModelExtractionTrialError(
+            "trial source_text exceeds bounded 20k-character limit"
+        )
 
     queue_item = case.get("queue_item")
     if not isinstance(queue_item, Mapping):
@@ -167,12 +161,15 @@ def validate_trial_case(case: Mapping[str, Any]) -> None:
     if queue_item.get("ai_extraction_allowed") is not True:
         raise ModelExtractionTrialError("queue item does not authorize AI extraction")
     if queue_item.get("canonical_mutation_authority") is not False:
-        raise ModelExtractionTrialError("queue item must not have canonical mutation authority")
+        raise ModelExtractionTrialError(
+            "queue item must not have canonical mutation authority"
+        )
 
     document_ids = _string_list(queue_item.get("document_ids"), "queue document_ids")
     if source_document_id not in document_ids:
-        raise ModelExtractionTrialError("trial source Document is outside queue provenance")
-
+        raise ModelExtractionTrialError(
+            "trial source Document is outside queue provenance"
+        )
     _string_list(case.get("allowed_predicates"), "allowed_predicates", allow_empty=True)
     _string_list(case.get("allowed_event_types"), "allowed_event_types", allow_empty=True)
 
@@ -188,35 +185,31 @@ def build_trial_prompt(case: Mapping[str, Any]) -> str:
 
 
 def _candidate_envelope(raw_output: str) -> tuple[dict[str, Any] | None, list[str]]:
-    errors: list[str] = []
     try:
         payload = json.loads(raw_output)
     except json.JSONDecodeError as exc:
         return None, [f"model output is not strict JSON: {exc.msg}"]
-
     if not isinstance(payload, dict):
         return None, ["model output root must be an object"]
 
     expected = {"evidence", "entities", "claims", "events"}
     actual = set(payload)
-    if actual != expected:
-        missing = sorted(expected - actual)
-        extra = sorted(actual - expected)
-        if missing:
-            errors.append(f"model output missing keys: {', '.join(missing)}")
-        if extra:
-            errors.append(f"model output contains unsupported keys: {', '.join(extra)}")
-
+    errors: list[str] = []
+    missing = sorted(expected - actual)
+    extra = sorted(actual - expected)
+    if missing:
+        errors.append(f"model output missing keys: {', '.join(missing)}")
+    if extra:
+        errors.append(f"model output contains unsupported keys: {', '.join(extra)}")
     for key in sorted(expected):
         if not isinstance(payload.get(key), list):
             errors.append(f"model output {key} must be an array")
-
-    if errors:
-        return None, errors
-    return payload, []
+    return (None, errors) if errors else (payload, [])
 
 
-def _enforce_case_allowlist(case: Mapping[str, Any], candidates: Mapping[str, Any]) -> list[str]:
+def _enforce_case_allowlist(
+    case: Mapping[str, Any], candidates: Mapping[str, Any]
+) -> list[str]:
     errors: list[str] = []
     allowed_predicates = set(
         _string_list(case.get("allowed_predicates"), "allowed_predicates", allow_empty=True)
@@ -229,21 +222,16 @@ def _enforce_case_allowlist(case: Mapping[str, Any], candidates: Mapping[str, An
     for item in candidates.get("evidence", []):
         if isinstance(item, Mapping) and item.get("document_id") != source_document_id:
             errors.append("candidate Evidence escaped the trial source Document")
-
     for item in candidates.get("claims", []):
-        if not isinstance(item, Mapping):
-            continue
-        predicate = item.get("predicate_id")
-        if predicate not in allowed_predicates:
-            errors.append(f"candidate Claim used non-allowlisted predicate: {predicate!r}")
-
+        if isinstance(item, Mapping) and item.get("predicate_id") not in allowed_predicates:
+            errors.append(
+                f"candidate Claim used non-allowlisted predicate: {item.get('predicate_id')!r}"
+            )
     for item in candidates.get("events", []):
-        if not isinstance(item, Mapping):
-            continue
-        event_type = item.get("event_type")
-        if event_type not in allowed_event_types:
-            errors.append(f"candidate Event used non-allowlisted event_type: {event_type!r}")
-
+        if isinstance(item, Mapping) and item.get("event_type") not in allowed_event_types:
+            errors.append(
+                f"candidate Event used non-allowlisted event_type: {item.get('event_type')!r}"
+            )
     return errors
 
 
@@ -267,8 +255,9 @@ def _base_run(
         "started_at": started_at,
         "completed_at": completed_at,
     }
+    run_id = hashlib.sha256(_canonical_json_bytes(seed)).hexdigest()[:20].upper()
     return {
-        "id": f"SDA-AIRUN-TRIAL-{_sha256_bytes(_canonical_json_bytes(seed))[:20].upper()}",
+        "id": f"SDA-AIRUN-TRIAL-{run_id}",
         "queue_item_id": case["queue_item"]["id"],
         "source_document_ids": [case["source_document_id"]],
         "started_at": started_at,
@@ -290,12 +279,11 @@ def _base_run(
 
 
 def _rejected_run(
-    *,
-    base: Mapping[str, Any],
-    errors: Sequence[str],
-    check_id: str,
+    *, base: Mapping[str, Any], errors: Sequence[str], check_id: str
 ) -> dict[str, Any]:
-    rendered = [str(error)[:512] for error in errors if str(error)] or ["model output rejected"]
+    rendered = [str(error)[:512] for error in errors if str(error)] or [
+        "model output rejected"
+    ]
     return {
         **dict(base),
         "validation": {"status": "rejected", "errors": rendered},
@@ -318,18 +306,13 @@ def build_extraction_run_from_model_output(
     started_at: str,
     completed_at: str,
 ) -> dict[str, Any]:
-    """Convert exact model response text into an accepted or rejected AIExtractionRun.
-
-    ``input_sha256`` hashes the exact rendered prompt supplied to the invoker and
-    ``raw_output_sha256`` hashes the exact response string returned by the invoker.
-    Structural JSON-Schema validation remains the caller's responsibility; the
-    existing M4 extraction boundary owns semantic authority/reference closure.
-    """
+    """Convert exact model response text into accepted/rejected ``AIExtractionRun``."""
 
     validate_trial_case(case)
-    expected_prompt = build_trial_prompt(case)
-    if prompt != expected_prompt:
-        raise ModelExtractionTrialError("prompt does not match the approved trial template")
+    if prompt != build_trial_prompt(case):
+        raise ModelExtractionTrialError(
+            "prompt does not match the approved trial template"
+        )
     if not isinstance(raw_output, str):
         raise ModelExtractionTrialError("raw model output must be text")
 
@@ -341,14 +324,17 @@ def build_extraction_run_from_model_output(
         started_at=started_at,
         completed_at=completed_at,
     )
-
     candidates, errors = _candidate_envelope(raw_output)
     if errors or candidates is None:
-        return _rejected_run(base=base, errors=errors, check_id="strict-json-envelope")
+        return _rejected_run(
+            base=base, errors=errors, check_id="strict-json-envelope"
+        )
 
     allowlist_errors = _enforce_case_allowlist(case, candidates)
     if allowlist_errors:
-        return _rejected_run(base=base, errors=allowlist_errors, check_id="case-allowlist")
+        return _rejected_run(
+            base=base, errors=allowlist_errors, check_id="case-allowlist"
+        )
 
     run = {
         **base,
@@ -374,8 +360,10 @@ def build_extraction_run_from_model_output(
     return run
 
 
-def reject_schema_invalid_run(run: Mapping[str, Any], errors: Sequence[str]) -> dict[str, Any]:
-    """Clear all candidates if downstream JSON-Schema validation fails."""
+def reject_schema_invalid_run(
+    run: Mapping[str, Any], errors: Sequence[str]
+) -> dict[str, Any]:
+    """Clear all candidates when downstream JSON-Schema validation fails."""
 
     base = {
         key: run[key]
@@ -408,12 +396,7 @@ def execute_trial_case(
     try:
         prompt = build_trial_prompt(case)
     except ModelExtractionTrialError as exc:
-        return TrialCaseOutcome(
-            case_id=case_id,
-            invoked=False,
-            blocked_reason=str(exc),
-            run=None,
-        )
+        return TrialCaseOutcome(case_id, False, str(exc), None)
 
     started_at = clock()
     raw_output = invoke(prompt)
@@ -428,4 +411,4 @@ def execute_trial_case(
         started_at=started_at,
         completed_at=completed_at,
     )
-    return TrialCaseOutcome(case_id=case_id, invoked=True, blocked_reason=None, run=run)
+    return TrialCaseOutcome(case_id, True, None, run)
