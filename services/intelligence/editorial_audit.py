@@ -626,7 +626,8 @@ def _validate_audit_report_integrity(audit_report: Mapping[str, Any]) -> tuple[s
         )
         action_key = (str(kind), subject_id)
         if kind == "source_monitoring_required":
-            action_key = (str(kind), subject_id, str(context["feed_key"]))
+            # Registered feed_key is globally unique in the upstream M2 contract.
+            action_key = (str(kind), str(context["feed_key"]))
         if action_key in seen_action_keys:
             raise EditorialAuditError("audit findings contain a duplicate semantic action")
         seen_action_keys.add(action_key)

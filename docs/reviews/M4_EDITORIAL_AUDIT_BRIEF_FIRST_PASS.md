@@ -181,9 +181,11 @@ Codex reviewed head `180dd015de64e0be9eff894816ad99e4d3eba08f` and reported one 
 
 **CODEX CLAIM:** content-ID uniqueness alone is insufficient because array-order variants can encode the same editorial action under different hashes.
 
-**OUR VERIFICATION:** CONFIRMED and generalized. The invariant is semantic action uniqueness, not merely canonical reason ordering. Claim-review actions are unique per Claim ID; queue actions are unique per queue-item ID; source-monitoring actions are unique per Source + registered `feed_key`, preserving the intentional ability for one Source to expose multiple independent feeds.
+**OUR VERIFICATION:** CONFIRMED and generalized. The invariant is semantic action uniqueness, not merely canonical reason ordering. Claim-review actions are unique per Claim ID; queue actions are unique per queue-item ID; source-monitoring actions are unique per registered `feed_key`. The upstream M2 source-freshness contract makes `feed_key` globally unique while still allowing one Source to own multiple distinct feeds.
 
-**RESULT:** CONFIRMED and remediated. The semantic brief boundary now tracks action keys after kind-specific context validation and rejects duplicate semantic actions even when content-addressed finding IDs differ. A self-consistent re-hashed fixture duplicates one source-monitoring action with reversed `reason_codes`, updates its summary consistently, proves the content IDs differ, and must still fail closed.
+**OUR EXTENSION:** the initial generalized key was Source + `feed_key`. A second adversarial pass found that this would still admit the same globally unique registered feed under two different Source IDs. The source-monitoring semantic key was therefore tightened to `feed_key` itself, with Source identity remaining validated context/provenance.
+
+**RESULT:** CONFIRMED and remediated. The semantic brief boundary now tracks action keys after kind-specific context validation and rejects duplicate semantic actions even when content-addressed finding IDs differ. One self-consistent re-hashed fixture duplicates a source-monitoring action with reversed `reason_codes`; another assigns the same registered `feed_key` to a different canonical Source. Both must fail closed.
 
 ## Final bounded assessment
 

@@ -481,6 +481,27 @@ def main() -> int:
         failures,
     )
 
+    duplicate_feed_identity = copy.deepcopy(report)
+    original_feed_action = next(
+        item for item in duplicate_feed_identity["findings"]
+        if item["kind"] == "source_monitoring_required"
+    )
+    duplicate_feed_action = copy.deepcopy(original_feed_action)
+    duplicate_feed_action["subject_id"] = "SDA-SOURCE-DUPLICATE-FEED-OWNER"
+    duplicate_feed_action["context"]["source_id"] = (
+        "SDA-SOURCE-DUPLICATE-FEED-OWNER"
+    )
+    duplicate_feed_identity["findings"].append(duplicate_feed_action)
+    duplicate_feed_identity["summary"]["total"] += 1
+    duplicate_feed_identity["summary"][duplicate_feed_action["priority"]] += 1
+    duplicate_feed_identity["summary"]["source_monitoring_required"] += 1
+    _rehash_report(duplicate_feed_identity)
+    expect_raises(
+        "self-consistent duplicate registered feed under another Source",
+        lambda: build_daily_editorial_brief(audit_report=duplicate_feed_identity),
+        failures,
+    )
+
     source_deadline_not_after_observation = copy.deepcopy(report)
     source_deadline_finding = next(
         item for item in source_deadline_not_after_observation["findings"]
