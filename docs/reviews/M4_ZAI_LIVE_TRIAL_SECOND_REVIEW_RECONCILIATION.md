@@ -46,7 +46,7 @@ Recorded on 2026-09-30, restating an operator decision made before execution on 
 
 - the operator (account holder) cleared the entitlement gate for the live trial and directed use of the Coding Plan endpoint (`https://api.z.ai/api/coding/paas/v4`) for this structured-extraction workload on this account;
 - the attestation is specific to that account and that decision; Z.ai public documentation describes the Coding Plan endpoint as serving coding scenarios, and nothing in this repository claims otherwise;
-- future live runs must re-attest explicitly if the account, endpoint, or workload changes.
+- every future live run must record a fresh operator entitlement attestation specific to that run; any change to the account, endpoint, or workload invalidates prior attestation and must be called out explicitly.
 
 ## Precise post-remediation status
 
