@@ -1,5 +1,5 @@
 {
-  "version": "m4-model-extraction-eval-v0.1",
+  "version": "m4-model-extraction-eval-v0.2",
   "description": "Synthetic, non-operational corpus for the bounded M4 real-model extraction trial. These records are evaluation fixtures only and are not canonical facts.",
   "cases": [
     {
@@ -27,8 +27,26 @@
       "gold": {
         "expected_status": "accepted_for_candidate_review",
         "required_entity_names": ["Atlas Aerospace", "Falcon-X", "Royal Example Air Force"],
-        "required_predicates": ["manufacturer.manufactures.equipment"],
-        "required_event_types": ["delivery"]
+        "expected_entity_count": 3,
+        "expected_claims": [
+          {
+            "predicate_id": "manufacturer.manufactures.equipment",
+            "subject_name": "Atlas Aerospace",
+            "value": {"kind": "candidate_entity", "entity_name": "Falcon-X"},
+            "validity": {"point_in_time": {"value": "2020-12-10", "precision": "day"}}
+          }
+        ],
+        "expected_events": [
+          {
+            "event_type": "delivery",
+            "occurred_at": {"value": "2020-12-10", "precision": "day"},
+            "participants": [
+              {"entity_name": "Royal Example Air Force", "role": "recipient"},
+              {"entity_name": "Atlas Aerospace", "role": "manufacturer"}
+            ],
+            "related_entity_names": ["Falcon-X"]
+          }
+        ]
       }
     },
     {
@@ -56,8 +74,18 @@
       "gold": {
         "expected_status": "accepted_for_candidate_review",
         "required_entity_names": ["شركة النور للصناعات", "برنامج الصقر", "منظومة التدريب ألفا"],
-        "required_predicates": [],
-        "required_event_types": ["contract_signature"]
+        "expected_entity_count": 3,
+        "expected_claims": [],
+        "expected_events": [
+          {
+            "event_type": "contract_signature",
+            "occurred_at": {"value": "2024-03-15", "precision": "day"},
+            "participants": [
+              {"entity_name": "شركة النور للصناعات", "role": "contractor"}
+            ],
+            "related_entity_names": ["برنامج الصقر", "منظومة التدريب ألفا"]
+          }
+        ]
       }
     },
     {
@@ -85,8 +113,22 @@
       "gold": {
         "expected_status": "accepted_for_candidate_review",
         "required_entity_names": ["Project Cedar"],
-        "required_predicates": ["procurement.quantity"],
-        "required_event_types": []
+        "expected_entity_count": 1,
+        "expected_claims": [
+          {
+            "predicate_id": "procurement.quantity",
+            "subject_name": "Project Cedar",
+            "value": {
+              "kind": "number",
+              "value": 12,
+              "unit": "aircraft",
+              "precision": "exact",
+              "lower_bound": null,
+              "upper_bound": null
+            }
+          }
+        ],
+        "expected_events": []
       }
     },
     {
@@ -114,8 +156,18 @@
       "gold": {
         "expected_status": "accepted_for_candidate_review",
         "required_entity_names": ["Example Air College"],
-        "required_predicates": [],
-        "required_event_types": ["training"]
+        "expected_entity_count": 1,
+        "expected_claims": [],
+        "expected_events": [
+          {
+            "event_type": "training",
+            "occurred_at": {"value": "2018", "precision": "year"},
+            "participants": [
+              {"entity_name": "Example Air College", "role": "participant"}
+            ],
+            "related_entity_names": []
+          }
+        ]
       }
     },
     {
@@ -142,9 +194,11 @@
       },
       "gold": {
         "expected_status": "rejected",
+        "expected_rejection_check": "no-substantive-candidates",
         "required_entity_names": [],
-        "required_predicates": [],
-        "required_event_types": []
+        "expected_entity_count": 0,
+        "expected_claims": [],
+        "expected_events": []
       }
     },
     {
@@ -170,10 +224,7 @@
         "created_at": "2026-09-29T08:00:00Z"
       },
       "gold": {
-        "expected_status": "blocked_before_invocation",
-        "required_entity_names": [],
-        "required_predicates": [],
-        "required_event_types": []
+        "expected_status": "blocked_before_invocation"
       }
     }
   ]
