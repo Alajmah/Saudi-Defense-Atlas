@@ -86,13 +86,7 @@ def cli_version(command: str) -> str:
 
 
 def copilot_command_args(command: str, model: str, prompt: str) -> list[str]:
-    """Return a prompt-mode command with no usable data-access/action tools.
-
-    ``ask_user`` is the sole tool left in the model-visible availability set and
-    is simultaneously disabled by ``--no-ask-user``. Broad permission denials are
-    retained as defense in depth. Built-in MCPs, remote control/export, custom
-    instructions, experimental features, and auto-update are also disabled.
-    """
+    """Return a prompt-mode command with no usable data-access/action tools."""
 
     return [
         command,
@@ -128,8 +122,6 @@ def copilot_invoker(command: str, model: str, timeout_seconds: int):
             raise RuntimeError(
                 f"Copilot CLI exited {result.returncode}: {stderr[:300] or 'no stderr'}"
             )
-        # Preserve stdout exactly as captured. AIExtractionRun.raw_output_sha256
-        # hashes this exact string; surrounding whitespace is intentionally kept.
         return result.stdout
 
     return invoke
@@ -139,16 +131,167 @@ def normalize_name(value: str) -> str:
     return " ".join(value.casefold().split())
 
 
-def observed_entity_names(run: dict[str, Any]) -> set[str]:
-    result: set[str] = set()
+def _entity_names_by_id(run: dict[str, Any]) -> dict[str, set[str]]:
+    result: dict[str, set[str]] = {}
     for entity in run.get("candidates", {}).get("entities", []):
-        names = entity.get("names", {}) if isinstance(entity, dict) else {}
-        if not isinstance(names, dict):
+        if not isinstance(entity, dict):
             continue
-        for value in names.values():
-            if isinstance(value, str) and value.strip():
-                result.add(normalize_name(value))
+        candidate_id = entity.get("candidate_id")
+        names = entity.get("names")
+        if not isinstance(candidate_id, str) or not isinstance(names, dict):
+            continue
+        normalized = {
+            normalize_name(value)
+            for value in names.values()
+            if isinstance(value, str) and value.strip()
+        }
+        result[candidate_id] = normalized
     return result
+
+
+def observed_entity_names(run: dict[str, Any]) -> set[str]:
+    names: set[str] = set()
+    for values in _entity_names_by_id(run).values():
+        names.update(values)
+    return names
+
+
+def _ref_has_name(ref: Any, expected_name: str, names_by_id: dict[str, set[str]]) -> bool:
+    if not isinstance(ref, dict) or ref.get("kind") != "candidate_entity":
+        return False
+    candidate_id = ref.get("candidate_id")
+    if not isinstance(candidate_id, str):
+        return False
+    return normalize_name(expected_name) in names_by_id.get(candidate_id, set())
+
+
+def _value_matches(
+    actual: Any,
+    expected: Any,
+    names_by_id: dict[str, set[str]],
+) -> bool:
+    if not isinstance(actual, dict) or not isinstance(expected, dict):
+        return False
+    expected_kind = expected.get("kind")
+    if actual.get("kind") != expected_kind:
+        return False
+    if expected_kind == "candidate_entity":
+        entity_name = expected.get("entity_name")
+        return isinstance(entity_name, str) and _ref_has_name(actual, entity_name, names_by_id)
+    return all(actual.get(key) == value for key, value in expected.items())
+
+
+def _claim_matches(
+    claim: Any,
+    expected: Any,
+    names_by_id: dict[str, set[str]],
+) -> bool:
+    if not isinstance(claim, dict) or not isinstance(expected, dict):
+        return False
+    if claim.get("predicate_id") != expected.get("predicate_id"):
+        return False
+    subject_name = expected.get("subject_name")
+    if not isinstance(subject_name, str) or not _ref_has_name(
+        claim.get("subject"), subject_name, names_by_id
+    ):
+        return False
+    if not _value_matches(claim.get("value"), expected.get("value"), names_by_id):
+        return False
+    if "validity" in expected and claim.get("validity") != expected.get("validity"):
+        return False
+    return True
+
+
+def _event_matches(
+    event: Any,
+    expected: Any,
+    names_by_id: dict[str, set[str]],
+) -> bool:
+    if not isinstance(event, dict) or not isinstance(expected, dict):
+        return False
+    if event.get("event_type") != expected.get("event_type"):
+        return False
+    if event.get("occurred_at") != expected.get("occurred_at"):
+        return False
+
+    actual_participants = event.get("participants")
+    expected_participants = expected.get("participants", [])
+    if not isinstance(actual_participants, list) or not isinstance(expected_participants, list):
+        return False
+    if len(actual_participants) != len(expected_participants):
+        return False
+    unmatched = list(range(len(actual_participants)))
+    for wanted in expected_participants:
+        if not isinstance(wanted, dict):
+            return False
+        wanted_name = wanted.get("entity_name")
+        wanted_role = wanted.get("role")
+        match_index = next(
+            (
+                index
+                for index in unmatched
+                if isinstance(actual_participants[index], dict)
+                and actual_participants[index].get("role") == wanted_role
+                and isinstance(wanted_name, str)
+                and _ref_has_name(
+                    actual_participants[index].get("entity"),
+                    wanted_name,
+                    names_by_id,
+                )
+            ),
+            None,
+        )
+        if match_index is None:
+            return False
+        unmatched.remove(match_index)
+
+    actual_related = event.get("related_entities")
+    expected_related = expected.get("related_entity_names", [])
+    if not isinstance(actual_related, list) or not isinstance(expected_related, list):
+        return False
+    if len(actual_related) != len(expected_related):
+        return False
+    unmatched_related = list(range(len(actual_related)))
+    for wanted_name in expected_related:
+        match_index = next(
+            (
+                index
+                for index in unmatched_related
+                if isinstance(wanted_name, str)
+                and _ref_has_name(actual_related[index], wanted_name, names_by_id)
+            ),
+            None,
+        )
+        if match_index is None:
+            return False
+        unmatched_related.remove(match_index)
+    return True
+
+
+def _all_expected_records_match(
+    actual_records: list[Any],
+    expected_records: list[Any],
+    matcher: Any,
+    names_by_id: dict[str, set[str]],
+) -> tuple[bool, list[int]]:
+    if len(actual_records) != len(expected_records):
+        return False, list(range(len(expected_records)))
+    unmatched_actual = list(range(len(actual_records)))
+    missing_expected: list[int] = []
+    for expected_index, expected in enumerate(expected_records):
+        match_index = next(
+            (
+                index
+                for index in unmatched_actual
+                if matcher(actual_records[index], expected, names_by_id)
+            ),
+            None,
+        )
+        if match_index is None:
+            missing_expected.append(expected_index)
+        else:
+            unmatched_actual.remove(match_index)
+    return not missing_expected and not unmatched_actual, missing_expected
 
 
 def evaluate_case(
@@ -184,43 +327,98 @@ def evaluate_case(
         }
     )
 
-    if observed_status == "accepted_for_candidate_review":
-        names = observed_entity_names(run)
-        required_names = {
-            normalize_name(value) for value in gold.get("required_entity_names", [])
+    if expected_status == "rejected":
+        expected_check = gold.get("expected_rejection_check")
+        failed_checks = {
+            check.get("check_id")
+            for check in run.get("evaluation_trace", {}).get("checks", [])
+            if isinstance(check, dict) and check.get("status") == "fail"
         }
-        predicates = {
-            claim.get("predicate_id")
-            for claim in run["candidates"].get("claims", [])
-            if isinstance(claim, dict)
-        }
-        events = {
-            event.get("event_type")
-            for event in run["candidates"].get("events", [])
-            if isinstance(event, dict)
-        }
-        required_predicates = set(gold.get("required_predicates", []))
-        required_events = set(gold.get("required_event_types", []))
+        candidates = run.get("candidates", {})
+        candidate_arrays_empty = (
+            isinstance(candidates, dict)
+            and all(candidates.get(name) == [] for name in ("evidence", "entities", "claims", "events"))
+        )
         checks.extend(
             [
                 {
-                    "id": "required-entity-names",
-                    "pass": required_names.issubset(names),
-                    "missing": sorted(required_names - names),
+                    "id": "expected-rejection-check",
+                    "pass": isinstance(expected_check, str) and expected_check in failed_checks,
+                    "expected": expected_check,
+                    "observed": sorted(value for value in failed_checks if isinstance(value, str)),
                 },
                 {
-                    "id": "required-predicates",
-                    "pass": required_predicates.issubset(predicates),
-                    "missing": sorted(required_predicates - predicates),
-                },
-                {
-                    "id": "required-event-types",
-                    "pass": required_events.issubset(events),
-                    "missing": sorted(required_events - events),
+                    "id": "rejected-candidates-empty",
+                    "pass": candidate_arrays_empty,
                 },
             ]
         )
+        return {"pass": all(check["pass"] for check in checks), "checks": checks}
 
+    if observed_status != "accepted_for_candidate_review":
+        return {"pass": False, "checks": checks}
+
+    candidates = run.get("candidates", {})
+    if not isinstance(candidates, dict):
+        checks.append({"id": "candidate-object", "pass": False})
+        return {"pass": False, "checks": checks}
+
+    entities = candidates.get("entities", [])
+    claims = candidates.get("claims", [])
+    events = candidates.get("events", [])
+    names_by_id = _entity_names_by_id(run)
+    names = observed_entity_names(run)
+    required_names = {
+        normalize_name(value) for value in gold.get("required_entity_names", [])
+    }
+    expected_entity_count = gold.get("expected_entity_count")
+    expected_claims = gold.get("expected_claims", [])
+    expected_events = gold.get("expected_events", [])
+
+    claim_match, missing_claims = _all_expected_records_match(
+        claims if isinstance(claims, list) else [],
+        expected_claims if isinstance(expected_claims, list) else [],
+        _claim_matches,
+        names_by_id,
+    )
+    event_match, missing_events = _all_expected_records_match(
+        events if isinstance(events, list) else [],
+        expected_events if isinstance(expected_events, list) else [],
+        _event_matches,
+        names_by_id,
+    )
+
+    checks.extend(
+        [
+            {
+                "id": "required-entity-names",
+                "pass": required_names.issubset(names),
+                "missing": sorted(required_names - names),
+            },
+            {
+                "id": "entity-count",
+                "pass": isinstance(entities, list)
+                and isinstance(expected_entity_count, int)
+                and len(entities) == expected_entity_count,
+                "observed": len(entities) if isinstance(entities, list) else None,
+                "expected": expected_entity_count,
+            },
+            {
+                "id": "claim-semantics",
+                "pass": claim_match,
+                "missing_expected_indexes": missing_claims,
+                "observed_count": len(claims) if isinstance(claims, list) else None,
+                "expected_count": len(expected_claims) if isinstance(expected_claims, list) else None,
+            },
+            {
+                "id": "event-semantics",
+                "pass": event_match,
+                "missing_expected_indexes": missing_events,
+                "observed_count": len(events) if isinstance(events, list) else None,
+                "expected_count": len(expected_events) if isinstance(expected_events, list) else None,
+            },
+        ]
+    )
     return {"pass": all(check["pass"] for check in checks), "checks": checks}
 
 
@@ -256,13 +454,9 @@ def main() -> int:
     trace = ModelTrace(
         provider="github-copilot-cli",
         model=args.model,
-        # Copilot exposes the requested model identifier but not a stable provider
-        # checkpoint/version identifier to this harness. Keep unknown explicit.
         model_version="provider-managed-unknown",
         adapter_version=ADAPTER_VERSION,
     )
-    # Validate all trace fields before a model process can be invoked. This also
-    # bounds user-supplied workflow input such as an overlong model identifier.
     try:
         trace.as_dict()
     except ModelExtractionTrialError as exc:
@@ -364,7 +558,7 @@ def main() -> int:
     throughput = invocation_count / total_seconds if total_seconds > 0 else None
 
     report = {
-        "report_version": "m4-model-extraction-live-trial-v0.1",
+        "report_version": "m4-model-extraction-live-trial-v0.2",
         "corpus_version": corpus_version,
         "provider": "github-copilot-cli",
         "requested_model": args.model,
@@ -397,6 +591,8 @@ def main() -> int:
         "qualification": {
             "candidate_only_boundary_exercised": validated_run_count > 0,
             "trial_integrity_clean": integrity_failures == 0,
+            "quality_expectations_all_pass": bool(results)
+            and quality_passes == len(results),
             "synthetic_corpus_only": True,
             "representative_batch_scale_qualified": False,
             "production_model_pipeline_qualified": False,
@@ -408,7 +604,7 @@ def main() -> int:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
-        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
         encoding="utf-8",
     )
 
@@ -426,6 +622,7 @@ def main() -> int:
                 "output": str(args.output),
             },
             sort_keys=True,
+            allow_nan=False,
         )
     )
     return 1 if integrity_failures else 0
