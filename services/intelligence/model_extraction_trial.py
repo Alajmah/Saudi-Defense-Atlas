@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Mapping, Sequence
@@ -184,11 +185,26 @@ def build_trial_prompt(case: Mapping[str, Any]) -> str:
     )
 
 
+def _reject_json_constant(value: str) -> Any:
+    raise ValueError(f"non-finite JSON constant is not allowed: {value}")
+
+
+def _finite_json_float(value: str) -> float:
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError(f"non-finite JSON number is not allowed: {value}")
+    return parsed
+
+
 def _candidate_envelope(raw_output: str) -> tuple[dict[str, Any] | None, list[str]]:
     try:
-        payload = json.loads(raw_output)
-    except json.JSONDecodeError as exc:
-        return None, [f"model output is not strict JSON: {exc.msg}"]
+        payload = json.loads(
+            raw_output,
+            parse_constant=_reject_json_constant,
+            parse_float=_finite_json_float,
+        )
+    except (json.JSONDecodeError, ValueError) as exc:
+        return None, [f"model output is not strict finite JSON: {exc}"]
     if not isinstance(payload, dict):
         return None, ["model output root must be an object"]
 
@@ -334,6 +350,13 @@ def build_extraction_run_from_model_output(
     if allowlist_errors:
         return _rejected_run(
             base=base, errors=allowlist_errors, check_id="case-allowlist"
+        )
+
+    if not any(candidates[name] for name in ("evidence", "entities", "claims", "events")):
+        return _rejected_run(
+            base=base,
+            errors=["model returned no substantive candidates"],
+            check_id="no-substantive-candidates",
         )
 
     run = {
