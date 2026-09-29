@@ -386,6 +386,27 @@
           }
         }
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "validation": {
+            "properties": {
+              "status": {
+                "const": "accepted_for_candidate_review"
+              }
+            }
+          }
+        },
+        "required": [
+          "validation"
+        ]
+      },
+      "then": {
+        "properties": {
+          "rejection_diagnostics": false
+        }
+      }
     }
   ],
   "$defs": {

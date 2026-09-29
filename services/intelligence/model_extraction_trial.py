@@ -362,10 +362,13 @@ def _enforce_candidate_conventions(
     for item in evidence:
         if isinstance(item, Mapping):
             locator = item.get("locator")
-            fragment = locator.get("fragment") if isinstance(locator, Mapping) else None
-            if fragment != "source-text":
+            if (
+                not isinstance(locator, Mapping)
+                or dict(locator) != {"fragment": "source-text"}
+            ):
                 errors.append(
-                    "candidate Evidence must use locator fragment exactly 'source-text'"
+                    "candidate Evidence locator must be exactly "
+                    "{'fragment': 'source-text'} with no additional keys"
                 )
     if errors:
         return "evidence-locator", errors
@@ -377,10 +380,15 @@ def _enforce_candidate_conventions(
 
     for item in candidates.get("events", []) or []:
         if isinstance(item, Mapping):
-            for participant in item.get("participants", []) or []:
-                if isinstance(participant, Mapping) and participant.get(
-                    "role"
-                ) not in CANONICAL_EVENT_ROLES:
+            participants = item.get("participants")
+            if not isinstance(participants, list) or not all(
+                isinstance(participant, Mapping) for participant in participants
+            ):
+                return "event-participants-shape", [
+                    "candidate Event participants must be an array of objects"
+                ]
+            for participant in participants:
+                if participant.get("role") not in CANONICAL_EVENT_ROLES:
                     errors.append(
                         "candidate Event used non-canonical participant role: "
                         f"{participant.get('role')!r}"
@@ -559,6 +567,7 @@ def build_extraction_run_from_model_output(
             base=base,
             errors=[f"candidate boundary rejected model output: {exc}"],
             check_id="candidate-boundary",
+            rejection_diagnostics=_candidate_counts(candidates),
         )
     return run
 

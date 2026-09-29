@@ -86,12 +86,12 @@ The prompt treats source text as untrusted data and explicitly instructs the mod
 
 The prompt also supplies a case-specific allowlist for Claim predicates and Event types. Output outside those allowlists is rejected before candidate review.
 
-Prompt template `v0.3` additionally fixes the representation conventions that the first live trial showed were under-specified, all derived from existing SDA contracts rather than from observed model output:
+Prompt template `v0.3` additionally fixes the representation conventions that the first live trial showed were under-specified. The role vocabulary is a canonical contract; the remaining rules are **bounded-trial normalizations** — grounded in the canonical model where it speaks, and chosen for this single-document synthetic corpus where it is silent. None were derived from observed model output:
 
-- Event participant roles must come from the canonical SDA role vocabulary (`buyer`, `seller`, `contractor`, `operator`, `recipient`, `manufacturer`, `host`, `participant`, `observer`, `supplier`, `other`), supplied to the model as `ALLOWED_EVENT_ROLES` and enforced at the candidate boundary with the dedicated `event-role-vocabulary` rejection check;
+- Event participant roles must come from the canonical SDA role vocabulary (`buyer`, `seller`, `contractor`, `operator`, `recipient`, `manufacturer`, `host`, `participant`, `observer`, `supplier`, `other`), supplied to the model as `ALLOWED_EVENT_ROLES` and enforced at the candidate boundary with the dedicated `event-role-vocabulary` rejection check; a malformed `participants` value (scalar, string, or non-object entries) is rejected as `event-participants-shape` rather than aborting the run;
 - a specific named model or variant of an equipment family is typed `equipment_variant`, the family or design itself `equipment`;
-- an exact numeric quantity sets `value` and leaves `lower_bound`/`upper_bound` null (`exact-quantity-bounds` rejection);
-- exactly one document-level Evidence record per extraction with the literal locator token `{"fragment": "source-text"}` (`evidence-cardinality` and `evidence-locator` rejections);
+- an exact numeric quantity sets `value` and leaves `lower_bound`/`upper_bound` null (`exact-quantity-bounds` rejection) — a trial normalization consistent with the ontology's precision-or-bounds concept; the canonical `number_value` schema defines nullable bounds and does not by itself encode this rule;
+- exactly one document-level Evidence record per extraction with the locator object exactly `{"fragment": "source-text"}` and no additional keys (`evidence-cardinality` and `evidence-locator` rejections) — a trial normalization for this bounded single-document corpus; the canonical ontology and Evidence schema do not impose one record per Document and permit multiple Evidence records and one-or-more evidence links;
 - allowlisted predicates and event types are permissions, not requirements: when a proposition cannot be represented without changing its subject, value, or meaning, the model must omit the record.
 
 Trace semantics are exact at the adapter boundary:
@@ -132,8 +132,9 @@ The fixtures exist only to evaluate extraction mechanics and do not assert facts
 10. existing `AIExtractionRun` candidate/reference closure remains authoritative;
 11. downstream JSON-Schema failure is isolated into a rejected run with zero candidate leakage;
 12. accepted and rejected runs retain zero canonical-mutation and publication authority;
-13. non-canonical participant roles, mirrored exact-quantity bounds, extra Evidence records, and quoted locators each fail closed at the candidate boundary with a dedicated check id, empty candidates, and bounded pre-clear count diagnostics;
-14. a fully abstaining envelope still reaches the `no-substantive-candidates` path with all-zero pre-clear diagnostics, never a convention rejection.
+13. non-canonical participant roles, malformed `participants` values (including scalars), mirrored exact-quantity bounds, extra Evidence records, quoted or extended locators, and candidate-boundary rejections each fail closed with a dedicated check id, empty candidates, and bounded pre-clear count diagnostics, and an accepted run carrying `rejection_diagnostics` is schema-invalid;
+14. the canonical Event-role vocabulary, the Resolver/Verifier role set, the candidate schema enum, and the trial's `CANONICAL_EVENT_ROLES` are asserted identical, so vocabulary drift fails CI;
+15. a fully abstaining envelope still reaches the `no-substantive-candidates` path with all-zero pre-clear diagnostics, never a convention rejection.
 
 `scripts/validate_m4_model_extraction_trial_zai_provider.py` adds deterministic coverage for the Z.ai provider edge, again with no network access and no model-credit consumption. It injects a fake HTTP transport and verifies: the exact rendered prompt is the request payload input; the request carries no tool surface and pins the reasoning configuration; the environment-only credential is character-rejected and redacted from errors, stdout, report, and sidecar; explicit coding-plan/prepaid endpoint selection with no silent default and base-URL validation restricted to official `api.z.ai` routes; strict duplicate-key/non-finite provider-envelope parsing; the bounded response size; git-bound report provenance with a matching SHA-256 sidecar; fail-closed HTTP/timeout/malformed-response behavior; the identical strict JSON/candidate boundary as the Copilot path; backward compatibility of the Copilot path; and the absence of any governance/mutation import in the runner.
 
