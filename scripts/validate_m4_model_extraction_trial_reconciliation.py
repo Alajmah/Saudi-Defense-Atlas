@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Regression checks for Codex findings on the bounded M4 model trial."""
+"""Regression checks for Codex findings and maintainer reconciliation on the M4 model trial."""
 
 from __future__ import annotations
 
@@ -68,6 +68,13 @@ def quality(case: dict[str, Any], run: dict[str, Any]) -> dict[str, Any]:
     return evaluate_case(case, invoked=True, blocked=False, run=run)
 
 
+def without_manufacturer_validity(raw_output: str) -> str:
+    payload = json.loads(raw_output)
+    if payload.get("claims"):
+        payload["claims"][0].pop("validity", None)
+    return json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+
+
 def main() -> int:
     failures: list[str] = []
     cases = load_cases()
@@ -127,7 +134,7 @@ def main() -> int:
         )
 
     # Codex P1: quality scoring must compare extracted semantics, not merely
-    # predicate/event-type presence. A good deterministic fixture must pass.
+    # predicate/event-type presence.
     good_quantity = build_run(quantity_case, quantity_raw)
     expect(
         quality(quantity_case, good_quantity)["pass"] is True,
@@ -152,20 +159,68 @@ def main() -> int:
     )
 
     extra_claim = copy.deepcopy(good_quantity)
-    hallucinated = copy.deepcopy(extra_claim["candidates"]["claims"][0])
-    hallucinated["candidate_id"] = "CAND-CLAIM-QUANTITY-HALLUCINATED"
-    extra_claim["candidates"]["claims"].append(hallucinated)
+    hallucinated_claim = copy.deepcopy(extra_claim["candidates"]["claims"][0])
+    hallucinated_claim["candidate_id"] = "CAND-CLAIM-QUANTITY-HALLUCINATED"
+    extra_claim["candidates"]["claims"].append(hallucinated_claim)
     expect(
         quality(quantity_case, extra_claim)["pass"] is False,
         "extra allowlisted quantity claim passed semantic scorer",
         failures,
     )
 
+    # Maintainer reconciliation: entity/evidence semantics must also be exact.
+    wrong_entity_type = copy.deepcopy(good_quantity)
+    wrong_entity_type["candidates"]["entities"][0]["entity_type"] = "organization"
+    expect(
+        quality(quantity_case, wrong_entity_type)["pass"] is False,
+        "wrong entity type passed semantic scorer",
+        failures,
+    )
+
+    invented_alias = copy.deepcopy(good_quantity)
+    invented_alias["candidates"]["entities"][0]["aliases"] = [
+        {"value": "Invented Cedar Alias", "language": "en"}
+    ]
+    expect(
+        quality(quantity_case, invented_alias)["pass"] is False,
+        "invented entity alias passed semantic scorer",
+        failures,
+    )
+
+    extra_evidence = copy.deepcopy(good_quantity)
+    extra_record = copy.deepcopy(extra_evidence["candidates"]["evidence"][0])
+    extra_record["candidate_id"] = "CAND-EVID-QUANTITY-EXTRA"
+    extra_evidence["candidates"]["evidence"].append(extra_record)
+    expect(
+        quality(quantity_case, extra_evidence)["pass"] is False,
+        "extra evidence record passed semantic scorer",
+        failures,
+    )
+
+    wrong_capture = copy.deepcopy(good_quantity)
+    wrong_capture["candidates"]["evidence"][0]["capture_assessment"] = "ambiguous_text"
+    expect(
+        quality(quantity_case, wrong_capture)["pass"] is False,
+        "wrong evidence capture assessment passed semantic scorer",
+        failures,
+    )
+
     delivery_case = cases["TRIAL-EN-DELIVERY"]
-    good_delivery = build_run(delivery_case, fake_output(delivery_case))
+    delivery_raw = without_manufacturer_validity(fake_output(delivery_case))
+    good_delivery = build_run(delivery_case, delivery_raw)
     expect(
         quality(delivery_case, good_delivery)["pass"] is True,
         "gold delivery extraction did not pass semantic scorer",
+        failures,
+    )
+
+    unsupported_validity = copy.deepcopy(good_delivery)
+    unsupported_validity["candidates"]["claims"][0]["validity"] = {
+        "point_in_time": {"value": "2020-12-10", "precision": "day"}
+    }
+    expect(
+        quality(delivery_case, unsupported_validity)["pass"] is False,
+        "unsupported manufacturer validity passed semantic scorer",
         failures,
     )
 
@@ -177,6 +232,17 @@ def main() -> int:
     expect(
         quality(delivery_case, wrong_date)["pass"] is False,
         "wrong event date passed semantic scorer",
+        failures,
+    )
+
+    wrong_end = copy.deepcopy(good_delivery)
+    wrong_end["candidates"]["events"][0]["ended_at"] = {
+        "value": "2020-12-11",
+        "precision": "day",
+    }
+    expect(
+        quality(delivery_case, wrong_end)["pass"] is False,
+        "invented event end date passed semantic scorer",
         failures,
     )
 
@@ -216,15 +282,16 @@ def main() -> int:
     )
 
     if failures:
-        print("M4 model-trial Codex reconciliation validation FAILED:")
+        print("M4 model-trial review reconciliation validation FAILED:")
         for failure in failures:
             print(f"- {failure}")
         return 1
 
     print(
-        "Validated Codex reconciliation regressions: workflow-dispatch inputs remain out of Bash source; "
-        "non-finite JSON fails closed; claim values/units/counts and event dates/participants are scored; "
-        "structured no-evidence rejection remains distinct from malformed JSON."
+        "Validated model-trial review reconciliation: dispatch inputs remain out of Bash source; "
+        "non-finite JSON fails closed; claim/entity/evidence/event semantics and counts are scored; "
+        "unsupported temporal scope is rejected by quality evaluation; structured no-evidence rejection "
+        "remains distinct from malformed JSON."
     )
     return 0
 
