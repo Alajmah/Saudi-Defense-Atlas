@@ -2,7 +2,7 @@
 
 ## Status
 
-Trial harness implemented; live model evidence is not qualified until the manual workflow is executed and its report is reviewed.
+Trial harness implemented with two reviewed provider edges (a pinned Copilot CLI driver and a local Z.ai OpenAI-compatible HTTP driver). The first bounded live Z.ai trial was executed on 2026-09-29 from clean `main` and reviewed; the report and SHA-256 sidecar are preserved as immutable evidence under `docs/evidence/m4/2026-09-29/`. Live provider mechanics and pre-invocation sensitivity gating are evidenced. Extraction quality remains unqualified; downstream Resolver/Verifier preservation is not yet demonstrated (three accepted candidates carry participant roles outside the canonical Event vocabulary); the served model checkpoint is unknown (the requested model `glm-5.3` is what the evidence traces).
 
 ## Purpose
 
@@ -179,13 +179,15 @@ No GitHub Actions workflow is provided for the Z.ai edge: CI must never call Z.a
 
 This increment can establish only that a real model **can be exercised** through the existing candidate-only extraction boundary on a bounded synthetic corpus once a live workflow report exists and is reviewed.
 
-Until that report exists, this PR establishes only the trial harness and deterministic boundary validation.
+The first live report now exists and is preserved as reviewed evidence. It establishes only that a Z.ai provider request configured with requested model `glm-5.3` was exercised through the existing candidate-only extraction boundary on the bounded synthetic corpus, with zero integrity failures and pre-invocation blocking intact. The served model checkpoint remains unknown.
 
 It does **not** by itself establish:
 
 - acceptable extraction quality for production use;
 - representative batch throughput or extraction “at scale”;
 - a production provider/model choice — the Z.ai edge is a trial provider option alongside Copilot, not a production model-platform selection;
+- downstream Resolver/Verifier preservation — three accepted live candidates carry participant roles outside the canonical Event vocabulary and would fail that boundary until the candidate contract enforces it;
+- served model/checkpoint identity — the artifact traces the requested model only;
 - a scheduler or autonomous worker;
 - multi-process writer coordination;
 - truth, approval, canonical-mutation, or publication authority;
@@ -193,4 +195,4 @@ It does **not** by itself establish:
 - automatic progression from model output to canonical knowledge;
 - end-to-end real-model passage through Resolver/Verifier and human review.
 
-M4 closure still requires execution and review of live trial evidence, explicit quality/performance evaluation, evidence that real-model candidates preserve the downstream Resolver/Verifier and human-review boundaries, representative batch-volume/throughput evidence for any scale claim, bilingual drafting, and evaluation/observability outcomes.
+M4 closure still requires revision of the candidate/prompt/evaluator contract from existing SDA ontology and a corpus rerun under the revised contract, explicit quality/performance evaluation, evidence that real-model candidates preserve the downstream Resolver/Verifier and human-review boundaries, representative batch-volume/throughput evidence for any scale claim, bilingual drafting, and evaluation/observability outcomes.
