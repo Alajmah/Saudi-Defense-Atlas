@@ -1,0 +1,79 @@
+name: M4 bounded real-model extraction trial
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: GitHub Copilot model identifier
+        required: true
+        default: gpt-5.4
+        type: string
+      max_cases:
+        description: Maximum corpus cases to run; 0 means all
+        required: true
+        default: "0"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  bounded-model-trial:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install validation dependencies
+        run: python -m pip install -r requirements-dev.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Install pinned GitHub Copilot CLI
+        run: npm install -g @github/copilot@1.0.88
+
+      - name: Validate deterministic trial boundary before model use
+        run: python scripts/validate_m4_model_extraction_trial.py
+
+      - name: Require dedicated Copilot trial credential
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+        run: |
+          if [ -z "$COPILOT_GITHUB_TOKEN" ]; then
+            echo "Missing repository secret COPILOT_GITHUB_TOKEN. Use a fine-grained PAT with Copilot Requests permission for this personal-repository trial." >&2
+            exit 1
+          fi
+
+      - name: Run bounded synthetic-corpus model trial
+        id: model_trial
+        continue-on-error: true
+        env:
+          COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
+          COPILOT_AUTO_UPDATE: "false"
+        run: |
+          python scripts/run_m4_model_extraction_trial.py \
+            --model "${{ inputs.model }}" \
+            --max-cases "${{ inputs.max_cases }}" \
+            --output "$RUNNER_TEMP/m4-model-extraction-trial-report.json"
+
+      - name: Upload trial report
+        if: always() && steps.model_trial.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: m4-model-extraction-trial-${{ github.run_id }}
+          path: ${{ runner.temp }}/m4-model-extraction-trial-report.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Propagate integrity failure after artifact upload
+        if: steps.model_trial.outcome == 'failure'
+        run: exit 1
