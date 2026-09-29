@@ -37,6 +37,17 @@ The manual workflow pins:
 
 Copilot exposes the requested model identifier to this harness, but not a stable provider checkpoint identifier. The `AIExtractionRun.model_version` field therefore records `provider-managed-unknown`; the report separately records the requested model and CLI version. Unknown provider checkpoint identity is not invented.
 
+A second local provider edge, `--provider zai`, drives Z.ai's OpenAI-compatible HTTP API:
+
+- default requested model: `glm-5.3` (overrideable with `--model`; the model remains explicit in the report trace);
+- the exact rendered SDA trial prompt is sent as one user message and only the exact assistant response text returns to the extraction boundary;
+- the request carries `model`, `messages`, and `stream: false` only — no tools, function calling, repository/file/shell access, retrieval, MCPs, or autonomous actions;
+- the HTTPS call uses the Python standard library; no SDK dependency is added;
+- the base URL resolves from `--base-url`, then the `ZAI_BASE_URL` environment variable, then the Coding Plan endpoint `https://api.z.ai/api/coding/paas/v4`; prepaid/resource-package keys use `https://api.z.ai/api/paas/v4`, and the two routes are not interchangeable;
+- the driver fails closed on a missing `ZAI_API_KEY`, non-2xx responses, timeouts, malformed API responses, missing or non-text assistant content, and any transport/provider exception; provider failures become trial integrity failures and never leak candidates or mutate canonical state.
+
+Like the Copilot edge, the Z.ai driver is a **trial provider option**, not a production model-platform adoption. It introduces no second extraction pipeline: prompts, strict JSON parsing, duplicate-key rejection, candidate-only `AIExtractionRun` construction, quality scoring, latency/throughput reporting, and the report format are shared with the Copilot path through the provider-independent boundary.
+
 A future model/provider may replace this edge without changing SDA domain schemas or authority semantics.
 
 ## Authentication
@@ -44,6 +55,8 @@ A future model/provider may replace this edge without changing SDA domain schema
 The manual workflow expects repository secret `COPILOT_GITHUB_TOKEN` containing a fine-grained personal access token with Copilot Requests permission.
 
 The credential is used only by the Copilot CLI process. The workflow has repository `contents: read` permission and no canonical backend credentials.
+
+The Z.ai edge reads its credential only from the `ZAI_API_KEY` environment variable. The key is never accepted as a command-line argument, never logged, never serialized into the report, and never committed; every error message raised by the driver is redacted against the live key value before surfacing.
 
 ## Model isolation
 
@@ -111,11 +124,14 @@ The fixtures exist only to evaluate extraction mechanics and do not assert facts
 11. downstream JSON-Schema failure is isolated into a rejected run with zero candidate leakage;
 12. accepted and rejected runs retain zero canonical-mutation and publication authority.
 
+`scripts/validate_m4_model_extraction_trial_zai_provider.py` adds deterministic coverage for the Z.ai provider edge, again with no network access and no model-credit consumption. It injects a fake HTTP transport and verifies: the exact rendered prompt is the request payload input and the request carries no tool surface; the environment-only credential is redacted from errors, stdout, and the report; Coding Plan versus prepaid endpoint resolution and base-URL validation; fail-closed HTTP/timeout/malformed-response behavior; the identical strict JSON/candidate boundary as the Copilot path; backward compatibility of the Copilot path; and the absence of any governance/mutation import in the runner.
+
 ## Live trial report
 
 `scripts/run_m4_model_extraction_trial.py` writes one JSON report containing:
 
 - corpus/provider/requested-model/CLI/adapter trace;
+- a `provider_edge` trace recording the driver, resolved base URL and its source (`flag` / `env` / `default`), credential source, transport, and tool exposure for the selected provider;
 - explicit unknown provider checkpoint version;
 - invocation and schema/boundary-validated-run counts;
 - accepted/rejected/blocked counts only for integrity-valid typed runs;
@@ -145,6 +161,17 @@ The workflow:
 
 A model-quality miss may be recorded as evaluation evidence without becoming a canonical change. Any harness/schema/boundary integrity failure is a workflow failure.
 
+### Local Z.ai execution
+
+The Z.ai edge is driven locally, after the deterministic suite is green and the implementation first-pass review is complete:
+
+1. set the credential outside any tracked file: `export ZAI_API_KEY=...` (PowerShell: `$env:ZAI_API_KEY = "..."`);
+2. for a Coding Plan key the default endpoint `https://api.z.ai/api/coding/paas/v4` applies; for a prepaid/resource-package key also set `ZAI_BASE_URL=https://api.z.ai/api/paas/v4` or pass `--base-url` explicitly — the two routes are not interchangeable;
+3. run `python scripts/run_m4_model_extraction_trial.py --provider zai --output <report.json>` (with the usual `--model`, `--max-cases`, and `--timeout-seconds` controls available);
+4. review the JSON report before drawing any model-quality or scale conclusion.
+
+No GitHub Actions workflow is provided for the Z.ai edge: CI must never call Z.ai or consume model credits.
+
 ## Claim ceiling
 
 This increment can establish only that a real model **can be exercised** through the existing candidate-only extraction boundary on a bounded synthetic corpus once a live workflow report exists and is reviewed.
@@ -155,7 +182,7 @@ It does **not** by itself establish:
 
 - acceptable extraction quality for production use;
 - representative batch throughput or extraction “at scale”;
-- a production provider/model choice;
+- a production provider/model choice — the Z.ai edge is a trial provider option alongside Copilot, not a production model-platform selection;
 - a scheduler or autonomous worker;
 - multi-process writer coordination;
 - truth, approval, canonical-mutation, or publication authority;

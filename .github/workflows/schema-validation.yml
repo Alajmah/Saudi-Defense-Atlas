@@ -117,6 +117,9 @@ jobs:
       - name: Validate M4 model extraction trial fallback second review
         run: python scripts/validate_m4_model_extraction_trial_fallback_review.py
 
+      - name: Validate M4 Z.ai trial provider edge
+        run: python scripts/validate_m4_model_extraction_trial_zai_provider.py
+
       - name: Validate M4 resolver verifier boundary
         run: python scripts/validate_m4_resolver_verifier.py
 

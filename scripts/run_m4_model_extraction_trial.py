@@ -1,9 +1,23 @@
 #!/usr/bin/env python3
-"""Run the bounded M4 real-model extraction trial through GitHub Copilot CLI.
+"""Run the bounded M4 real-model extraction trial through a provider edge.
+
+Supported trial providers:
+
+- ``copilot``: GitHub Copilot CLI subprocess (the original trial driver);
+- ``zai``: Z.ai OpenAI-compatible HTTP API using only the Python standard
+  library, with the credential read solely from the ``ZAI_API_KEY``
+  environment variable.
 
 The runner uses only the synthetic evaluation corpus. It captures AIExtractionRun
 artifacts and aggregate quality/latency evidence; it does not read or write the
 canonical knowledge backend and does not publish anything.
+
+Both provider edges return only the exact assistant response text to the
+provider-independent extraction boundary in
+``services/intelligence/model_extraction_trial.py``. Neither edge adds tools,
+function calling, repository/file/shell access, retrieval, MCPs, or autonomous
+actions, and neither holds canonical mutation, publication, Resolver/Verifier,
+or human-review authority.
 """
 
 from __future__ import annotations
@@ -15,8 +29,11 @@ import statistics
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from jsonschema import Draft202012Validator, FormatChecker
 
@@ -39,16 +56,56 @@ from services.intelligence.model_extraction_trial import (  # noqa: E402
 
 DEFAULT_FIXTURE = ROOT / "tests" / "fixtures" / "m4-model-extraction-eval.json"
 
+PROVIDER_COPILOT = "copilot"
+PROVIDER_ZAI = "zai"
+COPILOT_PROVIDER_NAME = "github-copilot-cli"
+ZAI_PROVIDER_NAME = "zai-openai-compatible-api"
+DEFAULT_MODELS = {PROVIDER_COPILOT: "gpt-5.4", PROVIDER_ZAI: "glm-5.3"}
+# Z.ai documents separate OpenAI-compatible endpoints per account type; they are
+# not interchangeable. The Coding Plan route is the default because this trial's
+# credentials are Coding Plan keys; prepaid/resource-package keys must override
+# the endpoint through ZAI_BASE_URL or --base-url.
+ZAI_DEFAULT_BASE_URL = "https://api.z.ai/api/coding/paas/v4"
+ZAI_PREPAID_BASE_URL = "https://api.z.ai/api/paas/v4"
+ZAI_CREDENTIAL_ENV = "ZAI_API_KEY"
+ZAI_BASE_URL_ENV = "ZAI_BASE_URL"
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
-    parser.add_argument("--model", default="gpt-5.4")
+    parser.add_argument(
+        "--provider",
+        choices=(PROVIDER_COPILOT, PROVIDER_ZAI),
+        default=PROVIDER_COPILOT,
+        help="trial provider edge (default: copilot)",
+    )
+    parser.add_argument(
+        "--model",
+        default=None,
+        help=(
+            "requested model "
+            f"(default: {DEFAULT_MODELS[PROVIDER_COPILOT]} for copilot, "
+            f"{DEFAULT_MODELS[PROVIDER_ZAI]} for zai)"
+        ),
+    )
     parser.add_argument("--copilot-command", default="copilot")
+    parser.add_argument(
+        "--base-url",
+        default=None,
+        help=(
+            "Z.ai OpenAI-compatible base URL; resolved from this flag, then the "
+            f"{ZAI_BASE_URL_ENV} environment variable, then the Coding Plan endpoint "
+            f"{ZAI_DEFAULT_BASE_URL}"
+        ),
+    )
     parser.add_argument("--timeout-seconds", type=int, default=120)
     parser.add_argument("--max-cases", type=int, default=0, help="0 means all fixture cases")
     parser.add_argument("--output", type=Path, required=True)
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.base_url is not None and args.provider != PROVIDER_ZAI:
+        parser.error("--base-url applies only to --provider zai")
+    return args
 
 
 def load_cases(path: Path) -> tuple[str, list[dict[str, Any]]]:
@@ -123,6 +180,160 @@ def copilot_invoker(command: str, model: str, timeout_seconds: int) -> Callable[
                 f"Copilot CLI exited {result.returncode}: {stderr[:300] or 'no stderr'}"
             )
         return result.stdout
+
+    return invoke
+
+
+def resolve_requested_model(provider: str, model: str | None) -> str:
+    if model is not None and model.strip():
+        return model
+    return DEFAULT_MODELS[provider]
+
+
+def require_zai_api_key(env: Mapping[str, str] | None = None) -> str:
+    """Read the credential from the environment only; never a CLI argument."""
+
+    source = os.environ if env is None else env
+    api_key = source.get(ZAI_CREDENTIAL_ENV, "")
+    if not api_key or not api_key.strip():
+        raise SystemExit(
+            "Z.ai credential missing; set the ZAI_API_KEY environment variable "
+            "(credentials are never accepted as command-line arguments)"
+        )
+    return api_key
+
+
+def validate_zai_base_url(base_url: str) -> None:
+    """Fail closed on non-HTTPS endpoints and embedded credentials."""
+
+    parsed = urllib.parse.urlsplit(base_url)
+    if parsed.scheme != "https":
+        raise SystemExit("Z.ai base URL must use https")
+    if parsed.username or parsed.password or "@" in (parsed.netloc or ""):
+        raise SystemExit("Z.ai base URL must not embed credentials")
+    if not parsed.hostname:
+        raise SystemExit("Z.ai base URL must include a host")
+    if parsed.query or parsed.fragment:
+        raise SystemExit("Z.ai base URL must not include a query or fragment")
+
+
+def resolve_zai_base_url(
+    base_url_arg: str | None, env: Mapping[str, str] | None = None
+) -> tuple[str, str]:
+    """Resolve the endpoint as (url, source) without assuming route interchangeability."""
+
+    source = os.environ if env is None else env
+    if base_url_arg:
+        return base_url_arg, "flag"
+    from_env = source.get(ZAI_BASE_URL_ENV, "").strip()
+    if from_env:
+        return from_env, "env"
+    return ZAI_DEFAULT_BASE_URL, "default"
+
+
+def redact_secret(text: str, secret: str | None) -> str:
+    rendered = str(text)
+    if secret:
+        rendered = rendered.replace(secret, "***REDACTED***")
+    return rendered
+
+
+def zai_request_payload(model: str, prompt: str) -> bytes:
+    """Encode the exact rendered trial prompt as one user message with no tool surface."""
+
+    return json.dumps(
+        {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+        },
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+
+
+def zai_http_post_json(
+    url: str, payload: bytes, headers: dict[str, str], timeout_seconds: int
+) -> tuple[int, bytes]:
+    """Stdlib HTTPS POST returning (status, body) even for non-2xx statuses."""
+
+    request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            return int(response.status), response.read()
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read()
+        except Exception:  # noqa: BLE001 - body is best-effort diagnostic context
+            body = b""
+        return int(exc.code), body
+
+
+def zai_response_content(status: int, body: bytes) -> str:
+    """Return the exact assistant text or fail closed with a specific reason."""
+
+    if not 200 <= status < 300:
+        excerpt = body[:4096].decode("utf-8", "replace")
+        raise RuntimeError(
+            f"Z.ai API returned HTTP {status}: {excerpt or 'empty body'}"
+        )
+    try:
+        envelope = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Z.ai response is not valid JSON: {exc}") from exc
+    choices = envelope.get("choices") if isinstance(envelope, dict) else None
+    if not isinstance(choices, list) or not choices:
+        raise RuntimeError("Z.ai response contains no choices")
+    first = choices[0]
+    message = first.get("message") if isinstance(first, dict) else None
+    content = message.get("content") if isinstance(message, dict) else None
+    if content is None:
+        raise RuntimeError("Z.ai response has no assistant content")
+    if not isinstance(content, str):
+        raise RuntimeError(
+            f"Z.ai assistant content has unexpected type {type(content).__name__}"
+        )
+    return content
+
+
+def zai_invoker(
+    *,
+    model: str,
+    api_key: str,
+    base_url: str,
+    timeout_seconds: int,
+    transport: Callable[[str, bytes, dict[str, str], int], tuple[int, bytes]] | None = None,
+) -> Callable[[str], str]:
+    """Build a prompt invoker for the Z.ai OpenAI-compatible chat-completions endpoint.
+
+    The invoker sends only the rendered trial prompt as model input, carries no
+    tools, function calling, repository/file/shell access, retrieval, MCP, or
+    autonomous-action surface, and fails closed on every transport, HTTP,
+    parsing, and response-shape error. The credential appears only in the
+    Authorization header and is redacted from every raised message.
+    """
+
+    resolved_transport = zai_http_post_json if transport is None else transport
+    url = base_url.rstrip("/") + "/chat/completions"
+
+    def invoke(prompt: str) -> str:
+        payload = zai_request_payload(model, prompt)
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        }
+        try:
+            status, body = resolved_transport(url, payload, headers, timeout_seconds)
+            return zai_response_content(status, body)
+        except RuntimeError as exc:
+            # Redact the full message before bounding it, so a credential echoed
+            # across a truncation boundary cannot survive partially.
+            redacted = redact_secret(str(exc), api_key)
+            raise RuntimeError(redacted[:512]) from exc
+        except Exception as exc:  # noqa: BLE001 - provider edge fails closed on anything
+            redacted = redact_secret(f"Z.ai transport failure: {exc!r}", api_key)
+            raise RuntimeError(redacted[:512]) from exc
 
     return invoke
 
@@ -448,28 +659,66 @@ def main() -> int:
     if args.max_cases:
         cases = cases[: args.max_cases]
 
-    if not any(
-        os.environ.get(name)
-        for name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
-    ):
-        raise SystemExit(
-            "Copilot CLI credential missing; set COPILOT_GITHUB_TOKEN "
-            "(preferred for this personal-repository trial), GH_TOKEN, or GITHUB_TOKEN"
-        )
+    requested_model = resolve_requested_model(args.provider, args.model)
 
-    version = cli_version(args.copilot_command)
-    trace = ModelTrace(
-        provider="github-copilot-cli",
-        model=args.model,
-        model_version="provider-managed-unknown",
-        adapter_version=ADAPTER_VERSION,
-    )
+    if args.provider == PROVIDER_ZAI:
+        api_key = require_zai_api_key()
+        base_url, base_url_source = resolve_zai_base_url(args.base_url)
+        validate_zai_base_url(base_url)
+        version = None
+        trace = ModelTrace(
+            provider=ZAI_PROVIDER_NAME,
+            model=requested_model,
+            model_version="provider-managed-unknown",
+            adapter_version=ADAPTER_VERSION,
+        )
+        invoke = zai_invoker(
+            model=requested_model,
+            api_key=api_key,
+            base_url=base_url,
+            timeout_seconds=args.timeout_seconds,
+        )
+        provider_edge = {
+            "driver": "zai-openai-compatible-http",
+            "base_url": base_url,
+            "base_url_source": base_url_source,
+            "credential_source": f"{ZAI_CREDENTIAL_ENV} environment variable",
+            "transport": "python-stdlib-urllib",
+            "tools": "none",
+        }
+    else:
+        if not any(
+            os.environ.get(name)
+            for name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
+        ):
+            raise SystemExit(
+                "Copilot CLI credential missing; set COPILOT_GITHUB_TOKEN "
+                "(preferred for this personal-repository trial), GH_TOKEN, or GITHUB_TOKEN"
+            )
+
+        version = cli_version(args.copilot_command)
+        trace = ModelTrace(
+            provider=COPILOT_PROVIDER_NAME,
+            model=requested_model,
+            model_version="provider-managed-unknown",
+            adapter_version=ADAPTER_VERSION,
+        )
+        invoke = copilot_invoker(args.copilot_command, requested_model, args.timeout_seconds)
+        provider_edge = {
+            "driver": "github-copilot-cli-subprocess",
+            "base_url": None,
+            "base_url_source": None,
+            "credential_source": (
+                "COPILOT_GITHUB_TOKEN / GH_TOKEN / GITHUB_TOKEN environment"
+            ),
+            "transport": "copilot-cli-subprocess",
+            "tools": "ask_user only and disabled; read/write/shell/url/memory denied",
+        }
     try:
         trace.as_dict()
     except ModelExtractionTrialError as exc:
         raise SystemExit(f"invalid model trace: {exc}") from exc
 
-    invoke = copilot_invoker(args.copilot_command, args.model, args.timeout_seconds)
     validator = build_schema_validator()
 
     results: list[dict[str, Any]] = []
@@ -565,12 +814,13 @@ def main() -> int:
     throughput = invocation_count / total_seconds if total_seconds > 0 else None
 
     report = {
-        "report_version": "m4-model-extraction-live-trial-v0.3",
+        "report_version": "m4-model-extraction-live-trial-v0.4",
         "corpus_version": corpus_version,
-        "provider": "github-copilot-cli",
-        "requested_model": args.model,
+        "provider": trace.provider,
+        "requested_model": requested_model,
         "provider_checkpoint_version": None,
         "copilot_cli_version": version,
+        "provider_edge": provider_edge,
         "adapter_version": ADAPTER_VERSION,
         "case_count": len(cases),
         "invocation_count": invocation_count,
@@ -592,6 +842,11 @@ def main() -> int:
             "value": None,
             "reason": (
                 "Copilot CLI trial runner does not expose a stable per-invocation "
+                "monetary-cost field; no cost claim is made."
+            )
+            if args.provider == PROVIDER_COPILOT
+            else (
+                "Z.ai trial driver does not expose a stable per-invocation "
                 "monetary-cost field; no cost claim is made."
             ),
         },
@@ -619,6 +874,7 @@ def main() -> int:
         json.dumps(
             {
                 "case_count": report["case_count"],
+                "provider": report["provider"],
                 "invocation_count": invocation_count,
                 "validated_runs": validated_run_count,
                 "accepted": accepted,
