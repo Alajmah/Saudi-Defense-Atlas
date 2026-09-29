@@ -59,10 +59,12 @@ jobs:
         env:
           COPILOT_GITHUB_TOKEN: ${{ secrets.COPILOT_GITHUB_TOKEN }}
           COPILOT_AUTO_UPDATE: "false"
+          TRIAL_MODEL: ${{ inputs.model }}
+          TRIAL_MAX_CASES: ${{ inputs.max_cases }}
         run: |
           python scripts/run_m4_model_extraction_trial.py \
-            --model "${{ inputs.model }}" \
-            --max-cases "${{ inputs.max_cases }}" \
+            --model "$TRIAL_MODEL" \
+            --max-cases "$TRIAL_MAX_CASES" \
             --output "$RUNNER_TEMP/m4-model-extraction-trial-report.json"
 
       - name: Upload trial report
