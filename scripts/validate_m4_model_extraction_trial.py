@@ -355,6 +355,110 @@ def main() -> int:
     expect(not any(isolated["candidates"].values()), "schema failure leaked candidates", failures)
     expect(not schema_errors(isolated), "schema-isolated rejection is invalid", failures)
 
+    # v0.3 contract conventions: violations fail closed at the candidate
+    # boundary with a dedicated check id, empty candidates, and bounded
+    # pre-clear count diagnostics; conforming output still passes.
+    def mutated_run(label: str, mutate: Any) -> dict[str, Any]:
+        payload = json.loads(fake_output(base_case))
+        mutate(payload)
+        return build_extraction_run_from_model_output(
+            case=base_case, model_trace=trace, prompt=prompt,
+            raw_output=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            started_at=clock(), completed_at=clock(),
+        )
+
+    def expect_rejected(label: str, run: dict[str, Any], check_id: str) -> None:
+        expect(run["validation"]["status"] == "rejected", f"{label} was not rejected", failures)
+        failed = {
+            check.get("check_id")
+            for check in run.get("evaluation_trace", {}).get("checks", [])
+            if isinstance(check, dict) and check.get("status") == "fail"
+        }
+        expect(check_id in failed, f"{label} lacks the {check_id} rejection reason", failures)
+        expect(not any(run["candidates"].values()), f"{label} leaked candidates", failures)
+        expect(not schema_errors(run), f"{label} rejection is not schema-valid", failures)
+        counts = run.get("rejection_diagnostics", {}).get("pre_clear_candidate_counts")
+        expect(
+            isinstance(counts, dict) and set(counts) == {"evidence", "entities", "claims", "events"},
+            f"{label} lacks bounded pre-clear count diagnostics",
+            failures,
+        )
+
+    def set_role(payload: dict[str, Any]) -> None:
+        payload["events"][0]["participants"][0]["role"] = "deliverer"
+
+    def set_mirrored_bounds(payload: dict[str, Any]) -> None:
+        claim = payload["claims"][0]
+        if claim.get("value", {}).get("kind") == "number":
+            claim["value"]["lower_bound"] = claim["value"]["value"]
+            claim["value"]["upper_bound"] = claim["value"]["value"]
+
+    def duplicate_evidence(payload: dict[str, Any]) -> None:
+        extra = dict(payload["evidence"][0])
+        extra["candidate_id"] = "CAND-EVID-EXTRA"
+        payload["evidence"].append(extra)
+
+    def set_quoted_locator(payload: dict[str, Any]) -> None:
+        payload["evidence"][0]["locator"] = {"fragment": "a quoted sentence"}
+
+    quantity_case = by_id["TRIAL-EN-PROCUREMENT-QUANTITY"]
+    quantity_prompt = build_trial_prompt(quantity_case)
+    quantity_run = build_extraction_run_from_model_output(
+        case=quantity_case, model_trace=trace, prompt=quantity_prompt,
+        raw_output=fake_output(quantity_case), started_at=clock(), completed_at=clock(),
+    )
+    expect(
+        quantity_run["validation"]["status"] == "accepted_for_candidate_review",
+        "conforming exact-quantity output stopped passing the convention checks",
+        failures,
+    )
+    expect(
+        "rejection_diagnostics" not in quantity_run,
+        "accepted run carries rejection diagnostics",
+        failures,
+    )
+    mirrored = build_extraction_run_from_model_output(
+        case=quantity_case, model_trace=trace, prompt=quantity_prompt,
+        raw_output=json.dumps(
+            {
+                **json.loads(fake_output(quantity_case)),
+                "claims": [
+                    {
+                        **json.loads(fake_output(quantity_case))["claims"][0],
+                        "value": {
+                            **json.loads(fake_output(quantity_case))["claims"][0]["value"],
+                            "lower_bound": 12,
+                            "upper_bound": 12,
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        started_at=clock(), completed_at=clock(),
+    )
+    expect_rejected("mirrored exact bounds", mirrored, "exact-quantity-bounds")
+    role_run = mutated_run("non-canonical role", set_role)
+    expect_rejected("non-canonical role", role_run, "event-role-vocabulary")
+    card_run = mutated_run("duplicate evidence", duplicate_evidence)
+    expect_rejected("duplicate evidence", card_run, "evidence-cardinality")
+    locator_run = mutated_run("quoted locator", set_quoted_locator)
+    expect_rejected("quoted locator", locator_run, "evidence-locator")
+
+    insufficient_diag = build_extraction_run_from_model_output(
+        case=by_id["TRIAL-INSUFFICIENT"], model_trace=trace,
+        prompt=build_trial_prompt(by_id["TRIAL-INSUFFICIENT"]),
+        raw_output=fake_output(by_id["TRIAL-INSUFFICIENT"]),
+        started_at=clock(), completed_at=clock(),
+    )
+    expect(
+        insufficient_diag.get("rejection_diagnostics", {}).get("pre_clear_candidate_counts")
+        == {"evidence": 0, "entities": 0, "claims": 0, "events": 0},
+        "structured abstention lacks all-zero pre-clear diagnostics",
+        failures,
+    )
+
     wrong_lane = copy.deepcopy(base_case)
     wrong_lane["id"] = "TRIAL-WRONG-LANE"
     wrong_lane["queue_item"]["id"] = "SDA-QUEUE-TRIAL-WRONG-LANE"

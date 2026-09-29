@@ -642,8 +642,26 @@ def main() -> int:
         expect(report["requested_model"] == "glm-5.3", "report requested model is not the zai default", failures)
         expect(report["copilot_cli_version"] is None, "zai report invented a Copilot CLI version", failures)
         expect(
-            report["report_version"] == "m4-model-extraction-live-trial-v0.5",
-            "report version was not bumped for the IRZ remediation surface",
+            report["report_version"] == "m4-model-extraction-live-trial-v0.6",
+            "report version was not bumped for the contract-revision surface",
+            failures,
+        )
+        # LTR-01: invoked-model quality and policy-gate quality are separate.
+        expect(report["invoked_case_count"] == len(cases) - 1, "invoked case count is wrong", failures)
+        expect(report["policy_gate_case_count"] == 1, "policy-gate case count is wrong", failures)
+        expect(
+            report["invoked_quality_case_pass_count"] == report["invoked_case_count"],
+            "deterministic invoked outputs did not all pass invoked-model quality",
+            failures,
+        )
+        expect(
+            report["invoked_quality_case_pass_rate"] == 1.0,
+            "invoked-model quality rate is not 1.0 for the deterministic corpus",
+            failures,
+        )
+        expect(
+            report["policy_gate_case_pass_count"] == 1 and report["policy_gate_case_pass_rate"] == 1.0,
+            "policy-gate quality metrics are wrong",
             failures,
         )
         edge = report.get("provider_edge", {})
