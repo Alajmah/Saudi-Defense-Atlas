@@ -84,21 +84,38 @@ def cli_version(command: str) -> str:
     return rendered[:128]
 
 
+def copilot_command_args(command: str, model: str, prompt: str) -> list[str]:
+    """Return a prompt-mode command with no usable data-access/action tools.
+
+    ``ask_user`` is the sole tool left in the model-visible availability set and
+    is simultaneously disabled by ``--no-ask-user``. Broad permission denials are
+    retained as defense in depth. Built-in MCPs, remote control/export, custom
+    instructions, experimental features, and auto-update are also disabled.
+    """
+
+    return [
+        command,
+        "-p",
+        prompt,
+        "-s",
+        "--stream=off",
+        "--available-tools=ask_user",
+        "--no-ask-user",
+        "--deny-tool=read,write,shell,url,memory",
+        "--disable-builtin-mcps",
+        "--no-custom-instructions",
+        "--no-remote",
+        "--no-remote-export",
+        "--no-experimental",
+        "--no-auto-update",
+        f"--model={model}",
+    ]
+
+
 def copilot_invoker(command: str, model: str, timeout_seconds: int):
     def invoke(prompt: str) -> str:
         result = subprocess.run(
-            [
-                command,
-                "-p",
-                prompt,
-                "-s",
-                "--stream=off",
-                "--no-ask-user",
-                "--no-custom-instructions",
-                "--disable-builtin-mcps",
-                "--deny-tool=read,write,shell,url,memory",
-                f"--model={model}",
-            ],
+            copilot_command_args(command, model, prompt),
             check=False,
             capture_output=True,
             text=True,
@@ -110,7 +127,9 @@ def copilot_invoker(command: str, model: str, timeout_seconds: int):
             raise RuntimeError(
                 f"Copilot CLI exited {result.returncode}: {stderr[:300] or 'no stderr'}"
             )
-        return result.stdout.strip()
+        # Preserve stdout exactly as captured. AIExtractionRun.raw_output_sha256
+        # hashes this exact string; surrounding whitespace is intentionally kept.
+        return result.stdout
 
     return invoke
 
@@ -131,24 +150,44 @@ def observed_entity_names(run: dict[str, Any]) -> set[str]:
     return result
 
 
-def evaluate_case(case: dict[str, Any], *, invoked: bool, blocked: bool, run: dict[str, Any] | None) -> dict[str, Any]:
+def evaluate_case(
+    case: dict[str, Any],
+    *,
+    invoked: bool,
+    blocked: bool,
+    run: dict[str, Any] | None,
+) -> dict[str, Any]:
     gold = case["gold"]
     expected_status = gold["expected_status"]
     checks: list[dict[str, Any]] = []
 
     if expected_status == "blocked_before_invocation":
-        checks.append({"id": "blocked-before-invocation", "pass": blocked and not invoked and run is None})
+        checks.append(
+            {
+                "id": "blocked-before-invocation",
+                "pass": blocked and not invoked and run is None,
+            }
+        )
         return {"pass": all(check["pass"] for check in checks), "checks": checks}
 
     if run is None:
         return {"pass": False, "checks": [{"id": "run-present", "pass": False}]}
 
     observed_status = run["validation"]["status"]
-    checks.append({"id": "status", "pass": observed_status == expected_status, "observed": observed_status, "expected": expected_status})
+    checks.append(
+        {
+            "id": "status",
+            "pass": observed_status == expected_status,
+            "observed": observed_status,
+            "expected": expected_status,
+        }
+    )
 
     if observed_status == "accepted_for_candidate_review":
         names = observed_entity_names(run)
-        required_names = {normalize_name(value) for value in gold.get("required_entity_names", [])}
+        required_names = {
+            normalize_name(value) for value in gold.get("required_entity_names", [])
+        }
         predicates = {
             claim.get("predicate_id")
             for claim in run["candidates"].get("claims", [])
@@ -163,9 +202,21 @@ def evaluate_case(case: dict[str, Any], *, invoked: bool, blocked: bool, run: di
         required_events = set(gold.get("required_event_types", []))
         checks.extend(
             [
-                {"id": "required-entity-names", "pass": required_names.issubset(names), "missing": sorted(required_names - names)},
-                {"id": "required-predicates", "pass": required_predicates.issubset(predicates), "missing": sorted(required_predicates - predicates)},
-                {"id": "required-event-types", "pass": required_events.issubset(events), "missing": sorted(required_events - events)},
+                {
+                    "id": "required-entity-names",
+                    "pass": required_names.issubset(names),
+                    "missing": sorted(required_names - names),
+                },
+                {
+                    "id": "required-predicates",
+                    "pass": required_predicates.issubset(predicates),
+                    "missing": sorted(required_predicates - predicates),
+                },
+                {
+                    "id": "required-event-types",
+                    "pass": required_events.issubset(events),
+                    "missing": sorted(required_events - events),
+                },
             ]
         )
 
@@ -191,17 +242,23 @@ def main() -> int:
     if args.max_cases:
         cases = cases[: args.max_cases]
 
-    if not any(os.environ.get(name) for name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")):
+    if not any(
+        os.environ.get(name)
+        for name in ("COPILOT_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN")
+    ):
         raise SystemExit(
-            "Copilot CLI credential missing; set COPILOT_GITHUB_TOKEN (preferred for this personal-repository trial), GH_TOKEN, or GITHUB_TOKEN"
+            "Copilot CLI credential missing; set COPILOT_GITHUB_TOKEN "
+            "(preferred for this personal-repository trial), GH_TOKEN, or GITHUB_TOKEN"
         )
 
     version = cli_version(args.copilot_command)
     trace = ModelTrace(
         provider="github-copilot-cli",
         model=args.model,
-        model_version=args.model,
-        adapter_version=f"{ADAPTER_VERSION};copilot-cli={version}",
+        # Copilot exposes the requested model identifier but not a stable provider
+        # checkpoint/version identifier to this harness. Keep unknown explicit.
+        model_version="provider-managed-unknown",
+        adapter_version=ADAPTER_VERSION,
     )
     invoke = copilot_invoker(args.copilot_command, args.model, args.timeout_seconds)
     validator = build_schema_validator()
@@ -210,6 +267,7 @@ def main() -> int:
     latencies: list[float] = []
     total_started = time.monotonic()
     invocation_count = 0
+    validated_run_count = 0
     accepted = 0
     rejected = 0
     blocked = 0
@@ -226,7 +284,10 @@ def main() -> int:
                     "invoked": True,
                     "blocked_reason": None,
                     "execution_error": str(exc)[:512],
-                    "quality": {"pass": False, "checks": [{"id": "execution", "pass": False}]},
+                    "quality": {
+                        "pass": False,
+                        "checks": [{"id": "execution", "pass": False}],
+                    },
                     "run": None,
                 }
             )
@@ -243,25 +304,33 @@ def main() -> int:
 
         run = outcome.run
         schema_failures: list[str] = []
+        run_integrity_valid = False
         if run is not None:
             schema_failures = [error.message for error in validator.iter_errors(run)]
             if schema_failures:
                 run = reject_schema_invalid_run(run, schema_failures)
-                second_pass = [error.message for error in validator.iter_errors(run)]
-                if second_pass:
-                    integrity_failures += 1
-                    schema_failures.extend(f"rejected-run-invalid: {error}" for error in second_pass)
-            if run is not None:
+
+            second_pass = [error.message for error in validator.iter_errors(run)]
+            if second_pass:
+                integrity_failures += 1
+                schema_failures.extend(
+                    f"rejected-run-invalid: {error}" for error in second_pass
+                )
+            else:
                 try:
                     validate_ai_extraction_run(queue_item=case["queue_item"], run=run)
                 except AIExtractionBoundaryError as exc:
                     integrity_failures += 1
                     schema_failures.append(f"boundary: {exc}")
+                else:
+                    run_integrity_valid = True
+                    validated_run_count += 1
 
-            if run["validation"]["status"] == "accepted_for_candidate_review":
-                accepted += 1
-            else:
-                rejected += 1
+            if run_integrity_valid:
+                if run["validation"]["status"] == "accepted_for_candidate_review":
+                    accepted += 1
+                else:
+                    rejected += 1
 
         quality = evaluate_case(
             case,
@@ -275,6 +344,7 @@ def main() -> int:
                 "invoked": outcome.invoked,
                 "blocked_reason": outcome.blocked_reason,
                 "latency_seconds": round(latency, 6),
+                "run_integrity_valid": run_integrity_valid,
                 "schema_or_boundary_failures": schema_failures,
                 "quality": quality,
                 "run": run,
@@ -289,11 +359,13 @@ def main() -> int:
         "report_version": "m4-model-extraction-live-trial-v0.1",
         "corpus_version": corpus_version,
         "provider": "github-copilot-cli",
-        "model": args.model,
+        "requested_model": args.model,
+        "provider_checkpoint_version": None,
         "copilot_cli_version": version,
         "adapter_version": ADAPTER_VERSION,
         "case_count": len(cases),
         "invocation_count": invocation_count,
+        "validated_run_count": validated_run_count,
         "accepted_run_count": accepted,
         "rejected_run_count": rejected,
         "blocked_before_invocation_count": blocked,
@@ -309,10 +381,14 @@ def main() -> int:
         "cost": {
             "measured": False,
             "value": None,
-            "reason": "Copilot CLI trial runner does not expose a stable per-invocation monetary-cost field; no cost claim is made.",
+            "reason": (
+                "Copilot CLI trial runner does not expose a stable per-invocation "
+                "monetary-cost field; no cost claim is made."
+            ),
         },
         "qualification": {
-            "candidate_only_boundary_exercised": invocation_count > 0,
+            "candidate_only_boundary_exercised": validated_run_count > 0,
+            "trial_integrity_clean": integrity_failures == 0,
             "synthetic_corpus_only": True,
             "representative_batch_scale_qualified": False,
             "production_model_pipeline_qualified": False,
@@ -323,13 +399,17 @@ def main() -> int:
     }
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
 
     print(
         json.dumps(
             {
                 "case_count": report["case_count"],
                 "invocation_count": invocation_count,
+                "validated_runs": validated_run_count,
                 "accepted": accepted,
                 "rejected": rejected,
                 "blocked": blocked,
