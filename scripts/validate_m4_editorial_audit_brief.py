@@ -455,6 +455,32 @@ def main() -> int:
         failures,
     )
 
+    duplicate_semantic_action = copy.deepcopy(report)
+    original_source_action = next(
+        item for item in duplicate_semantic_action["findings"]
+        if item["kind"] == "source_monitoring_required"
+        and len(item["reason_codes"]) > 1
+    )
+    duplicate_source_action = copy.deepcopy(original_source_action)
+    duplicate_source_action["reason_codes"] = list(
+        reversed(duplicate_source_action["reason_codes"])
+    )
+    duplicate_semantic_action["findings"].append(duplicate_source_action)
+    duplicate_semantic_action["summary"]["total"] += 1
+    duplicate_semantic_action["summary"][duplicate_source_action["priority"]] += 1
+    duplicate_semantic_action["summary"]["source_monitoring_required"] += 1
+    _rehash_report(duplicate_semantic_action)
+    expect(
+        duplicate_source_action["id"] != original_source_action["id"],
+        "duplicate semantic-action fixture must use distinct content IDs",
+        failures,
+    )
+    expect_raises(
+        "self-consistent duplicate semantic source-monitoring action",
+        lambda: build_daily_editorial_brief(audit_report=duplicate_semantic_action),
+        failures,
+    )
+
     source_deadline_not_after_observation = copy.deepcopy(report)
     source_deadline_finding = next(
         item for item in source_deadline_not_after_observation["findings"]

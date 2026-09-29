@@ -173,6 +173,18 @@ Codex reviewed head `829bec06ee75048a82e9fcccea7c0bf4d78e0a3b` and reported one 
 
 **RESULT:** CONFIRMED and remediated. The semantic brief boundary now requires `next_check_due_at > latest_observed_at` for `due` source-monitoring findings in addition to requiring the deadline to be at or before audit `as_of`. A self-consistent re-hashed equality fixture now fails closed.
 
+## Codex independent second review — pass 5
+
+Codex reviewed head `180dd015de64e0be9eff894816ad99e4d3eba08f` and reported one additional P2 semantic-integrity finding: two otherwise equivalent actions could receive distinct finding IDs when `reason_codes` order differed, allowing duplicate editor actions and inflated summary counts.
+
+### Reconciliation
+
+**CODEX CLAIM:** content-ID uniqueness alone is insufficient because array-order variants can encode the same editorial action under different hashes.
+
+**OUR VERIFICATION:** CONFIRMED and generalized. The invariant is semantic action uniqueness, not merely canonical reason ordering. Claim-review actions are unique per Claim ID; queue actions are unique per queue-item ID; source-monitoring actions are unique per Source + registered `feed_key`, preserving the intentional ability for one Source to expose multiple independent feeds.
+
+**RESULT:** CONFIRMED and remediated. The semantic brief boundary now tracks action keys after kind-specific context validation and rejects duplicate semantic actions even when content-addressed finding IDs differ. A self-consistent re-hashed fixture duplicates one source-monitoring action with reversed `reason_codes`, updates its summary consistently, proves the content IDs differ, and must still fail closed.
+
 ## Final bounded assessment
 
 No architectural scope was expanded while closing these findings. This increment still:

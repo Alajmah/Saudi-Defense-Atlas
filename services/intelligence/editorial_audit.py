@@ -593,6 +593,7 @@ def _validate_audit_report_integrity(audit_report: Mapping[str, Any]) -> tuple[s
 
     findings: list[Mapping[str, Any]] = []
     seen_ids: set[str] = set()
+    seen_action_keys: set[tuple[str, ...]] = set()
     for finding in findings_raw:
         if not isinstance(finding, Mapping):
             raise EditorialAuditError("audit findings must contain objects")
@@ -623,6 +624,12 @@ def _validate_audit_report_integrity(audit_report: Mapping[str, Any]) -> tuple[s
             context=context,
             as_of_dt=as_of_dt,
         )
+        action_key = (str(kind), subject_id)
+        if kind == "source_monitoring_required":
+            action_key = (str(kind), subject_id, str(context["feed_key"]))
+        if action_key in seen_action_keys:
+            raise EditorialAuditError("audit findings contain a duplicate semantic action")
+        seen_action_keys.add(action_key)
         body = {key: value for key, value in finding.items() if key != "id"}
         if finding_id != _stable_id("SDA-AUDIT-FINDING", body):
             raise EditorialAuditError("audit finding content does not match its ID")
