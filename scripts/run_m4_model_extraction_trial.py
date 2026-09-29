@@ -31,6 +31,7 @@ from services.intelligence.ai_extraction_boundary import (  # noqa: E402
 )
 from services.intelligence.model_extraction_trial import (  # noqa: E402
     ADAPTER_VERSION,
+    ModelExtractionTrialError,
     ModelTrace,
     execute_trial_case,
     reject_schema_invalid_run,
@@ -260,6 +261,13 @@ def main() -> int:
         model_version="provider-managed-unknown",
         adapter_version=ADAPTER_VERSION,
     )
+    # Validate all trace fields before a model process can be invoked. This also
+    # bounds user-supplied workflow input such as an overlong model identifier.
+    try:
+        trace.as_dict()
+    except ModelExtractionTrialError as exc:
+        raise SystemExit(f"invalid model trace: {exc}") from exc
+
     invoke = copilot_invoker(args.copilot_command, args.model, args.timeout_seconds)
     validator = build_schema_validator()
 
@@ -277,7 +285,7 @@ def main() -> int:
         case_started = time.monotonic()
         try:
             outcome = execute_trial_case(case=case, model_trace=trace, invoke=invoke)
-        except (RuntimeError, subprocess.SubprocessError) as exc:
+        except (ModelExtractionTrialError, RuntimeError, subprocess.SubprocessError) as exc:
             results.append(
                 {
                     "case_id": case.get("id"),
