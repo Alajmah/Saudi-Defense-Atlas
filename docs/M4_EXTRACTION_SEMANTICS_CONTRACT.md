@@ -17,7 +17,7 @@ For this trial, a participant's role is annotated as follows. These conventions 
 - when the source states that the producing party **manufactured** the equipment, annotate `manufacturer` — including in delivery events, where the source often states both delivery and manufacture (a `supplier` label would discard the stated manufacture relation);
 - the company party to a `contract_signature` or `contract_award` event is annotated `contractor`;
 - `supplier` is used only when supply is all the source states for that participant in that event;
-- exercise and training attendance without a more specific stated relation is annotated `participant`;
+- an organization that conducts or leads an exercise or training event is annotated `participant` (RRV7-02): the canonical predicate registry defines exercise involvement only as `exercise.participant.organization`, no conductor role exists in the vocabulary, and this trial does not invent one. `host` is reserved for a source-stated hosting or venue relation specifically — "conducted" does not state hosting;
 - `buyer`, `seller`, `operator`, `recipient`, `host`, `observer`, `other` — as stated by the source.
 
 One role per participant per event. Where the source supports more than one stated relation, the convention prefers the more specific one; this preference mirrors the ontology's precision discipline (registered, specific predicates over generic labels) without being implied by it.
@@ -28,7 +28,25 @@ One role per participant per event. Where the source supports more than one stat
 
 ### Provenance note
 
-The predicate registry (`contract.awarded_to.company`, `manufacturer.manufactures.equipment`, `exercise.participant.organization`) inspired these mappings and is consistent with them, but the registry relates entities to entities; it does not by itself assign event-participant roles, and the ontology states no role-precedence law. The conventions above were fixed against the pre-existing corpus gold, not against the rerun's `supplier` outputs. They are trial annotation choices and make no claim about canonical SDA semantics; a future ontology-level role semantics would supersede them.
+The predicate registry (`contract.awarded_to.company`, `manufacturer.manufactures.equipment`, `exercise.participant.organization`) inspired these mappings and is consistent with them, but the registry relates entities to entities; it does not by itself assign event-participant roles, and the ontology states no role-precedence law. Unlike the delivery and contract mappings, the conducted fallback is a direct registry consequence: participation is the registry's only exercise relation, so it is the strongest-grounded convention here. The conventions above were fixed against the pre-existing corpus gold, not against the rerun's `supplier` or `host` outputs. They are trial annotation choices and make no claim about canonical SDA semantics; a future ontology-level role semantics would supersede them.
+
+## Equipment typing convention (RRV7-01)
+
+### The designation rule
+
+A **named discrete equipment product** — a specific designation the source uses for a countable, deliverable, or operable item — is annotated `equipment_variant`, whether or not the source uses the word "variant". A generic equipment class or family reference is annotated `equipment`.
+
+### Classification, not inference
+
+The v0.7 review identified a tension: the extraction prompt requires the variant distinction while also forbidding inference of unstated facts, and the trial source calls Falcon-X an aircraft without saying "model" or "variant". This convention resolves it: entity typing is SDA's **classification of the named thing**, not a factual claim about what the source said. The recorded fact remains exactly what the source states (the source names Falcon-X); the type places that named thing in SDA's ontology. No unstated fact is inferred.
+
+### Provenance note
+
+Canonical SDA precedent distinguishes named discrete products as variants of families: F-15SA carries a `variant_of` relation to the F-15 family, and PAC-3 MSE's own designation names a segment enhancement within the PAC-3 family. The ontology defines EquipmentVariant as "a specific model/variant, separated from the equipment family when facts differ materially by variant." The distinguishing signal in canonical data is the presence of a specific product designation, never the literal word "variant". The corpus gold expected `equipment_variant` for Falcon-X before any live run; this convention justifies that expectation independently.
+
+### Status
+
+**Evaluated, not enforced.** Both types remain schema-valid; typing stays prompt-instructed (rule 13 of prompt v0.7 carries the clarified rule) and is scored by the exact-gold evaluator. Mechanical enforcement would require an ontology-external designation classifier and remains out of scope.
 
 ## Numeric-unit normalization (RRV6-03)
 

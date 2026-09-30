@@ -283,6 +283,8 @@ def main() -> int:
     for semantics_fragment in (
         "most specific role the source explicitly states",
         "head noun of the counted-class phrase",
+        "whether or not the source uses the word variant",
+        "conducts or leads an exercise or training",
     ):
         expect(
             semantics_fragment in prompt,
