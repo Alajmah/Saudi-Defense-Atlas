@@ -79,9 +79,7 @@ def main() -> int:
     # not to one platform's checkout bytes.
     corpus_digests = {
         hashlib.sha256(corpus_bytes).hexdigest(),
-        hashlib.sha256(corpus_bytes.replace(b"
-", b"
-")).hexdigest(),
+        hashlib.sha256(corpus_bytes.replace(b"\r\n", b"\n")).hexdigest(),
     }
     expect(
         recorded_corpus_sha in corpus_digests,
