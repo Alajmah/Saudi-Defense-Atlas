@@ -1097,20 +1097,38 @@ def main() -> int:
 
     total_seconds = time.monotonic() - total_started
     quality_passes = sum(1 for result in results if result["quality"]["pass"])
-    # LTR-01: model extraction quality and policy/preflight gate quality are
-    # reported separately; the whole-corpus metric is retained, clearly as such.
-    invoked_results = [result for result in results if result["invoked"]]
+    # LTR-01/RRV6-01: policy-gate, expected-abstention, and substantive cases
+    # are three separate denominators; the whole-corpus and invoked-case rates
+    # are retained, clearly labeled, and neither is semantic accuracy.
+    def _gold_status(result: dict[str, Any]) -> str:
+        gold = next(
+            (case.get("gold") for case in cases if case.get("id") == result.get("case_id")),
+            None,
+        )
+        return gold.get("expected_status") if isinstance(gold, dict) else None
+
     policy_results = [result for result in results if not result["invoked"]]
-    invoked_quality_passes = sum(
-        1 for result in invoked_results if result["quality"]["pass"]
+    abstention_results = [
+        result for result in results if result["invoked"] and _gold_status(result) == "rejected"
+    ]
+    substantive_results = [
+        result
+        for result in results
+        if result["invoked"] and _gold_status(result) == "accepted_for_candidate_review"
+    ]
+    invoked_results = [result for result in results if result["invoked"]]
+    policy_quality_passes = sum(1 for result in policy_results if result["quality"]["pass"])
+    abstention_quality_passes = sum(
+        1 for result in abstention_results if result["quality"]["pass"]
     )
-    policy_quality_passes = sum(
-        1 for result in policy_results if result["quality"]["pass"]
+    substantive_quality_passes = sum(
+        1 for result in substantive_results if result["quality"]["pass"]
     )
+    invoked_quality_passes = substantive_quality_passes + abstention_quality_passes
     throughput = invocation_count / total_seconds if total_seconds > 0 else None
 
     report = {
-        "report_version": "m4-model-extraction-live-trial-v0.6",
+        "report_version": "m4-model-extraction-live-trial-v0.7",
         "corpus_version": corpus_version,
         "provider": trace.provider,
         "requested_model": requested_model,
@@ -1132,6 +1150,20 @@ def main() -> int:
         "invoked_quality_case_pass_count": invoked_quality_passes,
         "invoked_quality_case_pass_rate": (
             invoked_quality_passes / len(invoked_results) if invoked_results else None
+        ),
+        "substantive_case_count": len(substantive_results),
+        "substantive_quality_case_pass_count": substantive_quality_passes,
+        "substantive_quality_case_pass_rate": (
+            substantive_quality_passes / len(substantive_results)
+            if substantive_results
+            else None
+        ),
+        "expected_abstention_case_count": len(abstention_results),
+        "expected_abstention_quality_case_pass_count": abstention_quality_passes,
+        "expected_abstention_quality_case_pass_rate": (
+            abstention_quality_passes / len(abstention_results)
+            if abstention_results
+            else None
         ),
         "policy_gate_case_count": len(policy_results),
         "policy_gate_case_pass_count": policy_quality_passes,
@@ -1197,6 +1229,7 @@ def main() -> int:
                 "integrity_failures": integrity_failures,
                 "quality_pass_rate": report["quality_case_pass_rate"],
                 "invoked_quality_pass_rate": report["invoked_quality_case_pass_rate"],
+                "substantive_quality_pass_rate": report["substantive_quality_case_pass_rate"],
                 "policy_gate_pass_rate": report["policy_gate_case_pass_rate"],
                 "output": str(args.output),
             },

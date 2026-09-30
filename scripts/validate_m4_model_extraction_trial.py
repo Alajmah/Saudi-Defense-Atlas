@@ -278,6 +278,15 @@ def main() -> int:
     base_case = by_id["TRIAL-EN-DELIVERY"]
     prompt = build_trial_prompt(base_case)
     raw = fake_output(base_case)
+    for semantics_fragment in (
+        "most specific role the source explicitly states",
+        "bare counted-class noun with role and type modifiers removed",
+    ):
+        expect(
+            semantics_fragment in prompt,
+            f"prompt lacks the semantics-contract fragment: {semantics_fragment}",
+            failures,
+        )
 
     first = build_extraction_run_from_model_output(
         case=base_case, model_trace=trace, prompt=prompt, raw_output=raw,

@@ -94,7 +94,7 @@ def main() -> int:
         failures,
     )
     expect(
-        PROMPT_TEMPLATE_VERSION == "v0.4",
+        PROMPT_TEMPLATE_VERSION == "v0.5",
         "prompt-template version was not bumped for the changed model contract",
         failures,
     )
@@ -110,6 +110,8 @@ def main() -> int:
         "When you emit any substantive Entity, Claim, or Event, emit exactly one document-level",
         "When you abstain entirely, return all four",
         "permissions, not requirements",
+        "most specific role the source explicitly states",
+        "bare counted-class noun with role and type modifiers removed",
     ):
         expect(
             fragment in delivery_prompt,
