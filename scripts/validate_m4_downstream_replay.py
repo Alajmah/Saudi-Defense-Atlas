@@ -73,8 +73,18 @@ def main() -> int:
     corpus_bytes = FIXTURE.read_bytes()
     corpus = json.loads(corpus_bytes.decode("utf-8"))
     recorded_corpus_sha = report.get("trial_context", {}).get("corpus_sha256")
+    # The report was generated from a CRLF Windows checkout; a Linux CI
+    # checkout holds the same fixture with LF bytes. Accept the digest under
+    # either line-ending representation so the gate binds to corpus content,
+    # not to one platform's checkout bytes.
+    corpus_digests = {
+        hashlib.sha256(corpus_bytes).hexdigest(),
+        hashlib.sha256(corpus_bytes.replace(b"
+", b"
+")).hexdigest(),
+    }
     expect(
-        hashlib.sha256(corpus_bytes).hexdigest() == recorded_corpus_sha,
+        recorded_corpus_sha in corpus_digests,
         "current corpus fixture does not match the report's generation-time corpus_sha256",
         failures,
     )

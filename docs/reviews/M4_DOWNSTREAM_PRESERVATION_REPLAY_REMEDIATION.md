@@ -44,6 +44,10 @@ The replay's zero-authority claim now says no canonical backend is **invoked or 
 - The replay remains a preservation proof on the synthetic corpus, not a quality measurement or canonical execution; the quantity-corroboration policy question remains separately scoped.
 - Fixed-configuration repeatability trials remain sequenced after this increment merges and passes review.
 
+### Post-push correction (before review)
+
+The first push of this remediation failed its own new gate in CI: the report's `corpus_sha256` was recorded from a CRLF Windows working tree, while the Linux CI checkout holds the identical fixture with LF bytes, so a raw-byte comparison is checkout-dependent. The gate now accepts the recorded digest under either line-ending representation of the same fixture bytes, binding the replay to corpus content rather than to one platform's checkout representation. Discovered by the CI run on the remediation commit; corrected before any review of this record.
+
 ## Freeze
 
 This record completes remediation of DRR-01 through DRR-04. The remediated head awaits the next independent review of the new exact SHA.
