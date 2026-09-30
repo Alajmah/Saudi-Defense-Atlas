@@ -1,9 +1,12 @@
 """Public deterministic M4 resolver/verifier boundary.
 
-The v0.2 implementation remains frozen in ``_resolver_verifier_core`` so its
-already-reviewed proposal semantics stay stable. This boundary adds the v0.3
-audit correction that preserves the distinction between ambiguous and unresolved
-entity references downstream in Claim/Event assessments.
+The core implementation in ``_resolver_verifier_core`` carries the reviewed
+proposal semantics (originally v0.2), the v0.3 audit correction that preserves
+the ambiguous-vs-unresolved distinction downstream, and the v0.4 reconciliation
+of ``manufacturer.manufactures.equipment`` target types (equipment or
+equipment_variant, per canonical precedent and the designation-typing
+convention). Each behavior change bumped the version so resolution-run identity
+never reuses a recorded version under different semantics.
 """
 
 from __future__ import annotations
@@ -18,7 +21,7 @@ from ._resolver_verifier_core import (
     build_resolution_verification as _build_core_resolution_verification,
 )
 
-_PUBLIC_RESOLVER_VERSION = "resolver-verifier-v0.3"
+_PUBLIC_RESOLVER_VERSION = "resolver-verifier-v0.4"
 
 
 def _stable_json(value: Any) -> str:

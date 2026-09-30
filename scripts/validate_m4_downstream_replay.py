@@ -35,6 +35,11 @@ from services.governance.proposal_auth import canonical_sha256  # noqa: E402
 from services.intelligence.editorial_review_packet import (  # noqa: E402
     build_editorial_review_packet,
 )
+from services.intelligence.model_extraction_trial import (  # noqa: E402
+    ModelTrace,
+    build_extraction_run_from_model_output,
+    build_trial_prompt,
+)
 from services.intelligence.resolver_verifier import (  # noqa: E402
     ResolverVerifierError,
     build_resolution_verification,
@@ -53,14 +58,28 @@ def expect(condition: bool, message: str, failures: list[str]) -> None:
 def main() -> int:
     failures: list[str] = []
 
-    # Provenance gate: replay only the exact reviewed bytes.
+    # Provenance gate (hard): replay only the frozen reviewed bytes, bound to
+    # the generation-time corpus. The report must equal the preserved frozen
+    # digest, its sidecar, and the corpus_sha256 its trial_context recorded at
+    # generation time - so later drift of the report, sidecar, or fixture
+    # cannot pass the gate together.
+    FROZEN_REPORT_SHA256 = "06d9e8c7a60f70c3098886ae1076966047fef23fd74039df9377cb83380ba463"
     evidence_bytes = EVIDENCE.read_bytes()
     digest = hashlib.sha256(evidence_bytes).hexdigest()
     sidecar_digest = SIDECAR.read_text(encoding="utf-8").split()[0]
     expect(digest == sidecar_digest, "replayed evidence does not match its sidecar digest", failures)
+    expect(digest == FROZEN_REPORT_SHA256, "replayed evidence is not the frozen v0.7 report", failures)
     report = json.loads(evidence_bytes.decode("utf-8"))
-    corpus = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    corpus_bytes = FIXTURE.read_bytes()
+    corpus = json.loads(corpus_bytes.decode("utf-8"))
+    recorded_corpus_sha = report.get("trial_context", {}).get("corpus_sha256")
+    expect(
+        hashlib.sha256(corpus_bytes).hexdigest() == recorded_corpus_sha,
+        "current corpus fixture does not match the report's generation-time corpus_sha256",
+        failures,
+    )
     queue_by_case = {case["id"]: case["queue_item"] for case in corpus["cases"]}
+    case_by_id = {case["id"]: case for case in corpus["cases"]}
 
     schemas, registry = build_registry()
     validators = {
@@ -69,6 +88,7 @@ def main() -> int:
         )
         for name in (
             "ai-extraction-run.schema.json",
+            "ai-resolution-verification-run.schema.json",
             "change-proposal.schema.json",
             "editorial-review-packet.schema.json",
             "review-decision.schema.json",
@@ -144,6 +164,16 @@ def main() -> int:
             canonical_claims=[],
             canonical_events=[],
         )
+        validate("ai-resolution-verification-run.schema.json", resolution)
+        resolution_authority = resolution.get("authority", {})
+        expect(
+            resolution_authority.get("mode") == "proposal_preparation_only"
+            and resolution_authority.get("approval_authority") is False
+            and resolution_authority.get("canonical_mutation_authority") is False
+            and resolution_authority.get("publication_authority") is False,
+            f"{case_id} resolution run carries more than proposal-preparation authority",
+            failures,
+        )
         claim_outcomes[case_id] = {
             str(item["candidate_claim_id"]): str(item["outcome"])
             for item in resolution.get("claim_assessments", [])
@@ -206,18 +236,30 @@ def main() -> int:
         "(the mistyped-Falcon-X consequence must be shown, not hidden)",
         failures,
     )
+    quantity_outcomes = claim_outcomes.get("TRIAL-EN-PROCUREMENT-QUANTITY", {})
+    expect(
+        list(quantity_outcomes.values()) == ["blocked_ambiguous"],
+        f"quantity claim did not hit the resolver's corroboration-policy block: {quantity_outcomes}",
+        failures,
+    )
 
-    # Corrected-typing regression (the PR #36 review obligation): the same run
-    # with Falcon-X typed per the merged designation convention resolves, and
-    # the manufacturer claim survives Resolver/Verifier semantics into the
-    # AMBER human-review proposal under the reconciled predicate signature.
-    corrected = copy.deepcopy(accepted_runs.get("TRIAL-EN-DELIVERY"))
-    expect(corrected is not None, "delivery run missing from v0.7 evidence", failures)
-    if corrected is not None:
+    # Corrected-typing regression (the PR #36 review obligation). The
+    # counterfactual is a clearly labeled DERIVED SYNTHETIC run built through
+    # the deterministic extraction boundary: the preserved delivery run's
+    # candidate envelope with Falcon-X typed per the merged designation
+    # convention, re-processed end to end so the synthetic run carries its own
+    # extraction-run identity, input/raw-output hashes, model trace, and
+    # timestamps - never the preserved run's audit identity.
+    preserved_delivery = accepted_runs.get("TRIAL-EN-DELIVERY")
+    expect(preserved_delivery is not None, "delivery run missing from v0.7 evidence", failures)
+    if preserved_delivery is not None:
+        import copy as _copy
+
+        corrected_envelope = _copy.deepcopy(preserved_delivery["candidates"])
         falcon = next(
             (
                 item
-                for item in corrected["candidates"]["entities"]
+                for item in corrected_envelope["entities"]
                 if "Falcon-X" in (item.get("names") or {}).values()
             ),
             None,
@@ -225,6 +267,35 @@ def main() -> int:
         expect(falcon is not None, "corrected replay could not find the Falcon-X candidate", failures)
         if falcon is not None:
             falcon["entity_type"] = "equipment_variant"
+            delivery_case = case_by_id["TRIAL-EN-DELIVERY"]
+            synthetic_trace = ModelTrace(
+                provider="downstream-replay",
+                model="synthetic-corrected-delivery",
+                model_version="derived-from-v0.7-evidence",
+            )
+            corrected = build_extraction_run_from_model_output(
+                case=delivery_case,
+                model_trace=synthetic_trace,
+                prompt=build_trial_prompt(delivery_case),
+                raw_output=json.dumps(corrected_envelope, ensure_ascii=False, separators=(",", ":")),
+                started_at="2026-10-01T00:00:00Z",
+                completed_at="2026-10-01T00:00:01Z",
+            )
+            expect(
+                corrected["validation"]["status"] == "accepted_for_candidate_review",
+                "derived synthetic corrected run did not pass the extraction boundary",
+                failures,
+            )
+            expect(
+                corrected["id"] != preserved_delivery["id"],
+                "derived synthetic run reused the preserved run's audit identity",
+                failures,
+            )
+            expect(
+                corrected["model_trace"]["provider"] == "downstream-replay",
+                "derived synthetic run lost its synthetic provenance label",
+                failures,
+            )
             validate("ai-extraction-run.schema.json", corrected)
             resolution, proposal = build_resolution_verification(
                 extraction_run=corrected,
@@ -232,13 +303,21 @@ def main() -> int:
                 canonical_claims=[],
                 canonical_events=[],
             )
+            validate("ai-resolution-verification-run.schema.json", resolution)
+            corrected_authority = resolution.get("authority", {})
+            expect(
+                corrected_authority.get("mode") == "proposal_preparation_only"
+                and corrected_authority.get("canonical_mutation_authority") is False,
+                "corrected replay resolution gained authority",
+                failures,
+            )
             corrected_outcomes = {
                 str(item["candidate_claim_id"]): str(item["outcome"])
                 for item in resolution.get("claim_assessments", [])
             }
             manufacturer_outcomes = [
                 outcome
-                for candidate in corrected["candidates"]["claims"]
+                for candidate in corrected_envelope["claims"]
                 if candidate.get("predicate_id") == "manufacturer.manufactures.equipment"
                 for outcome in [corrected_outcomes.get(str(candidate.get("candidate_id")))]
             ]
@@ -262,9 +341,9 @@ def main() -> int:
                     failures,
                 )
 
-    # The replay grants no canonical or publication authority: no backend is
-    # imported or invoked anywhere in this script, and every replayed artifact
-    # remains proposal/decision data bound to human review.
+    # The replay grants no canonical or publication authority: no canonical
+    # backend is invoked or instantiated anywhere in this script, and every
+    # replayed artifact remains proposal/decision data bound to human review.
     expect(
         all(not run["authority"]["canonical_mutation_authority"] for run in accepted_runs.values()),
         "a replayed run claimed canonical mutation authority",

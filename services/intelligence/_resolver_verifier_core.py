@@ -21,7 +21,10 @@ class ResolverVerifierError(ValueError):
     """Raised when resolution/verification cannot proceed safely."""
 
 
-_RESOLVER_VERSION = "resolver-verifier-v0.2"
+# v0.4: v0.2 proposal semantics plus the reconciled manufacturer predicate
+# target types (equipment | equipment_variant) adopted in the downstream-
+# preservation replay increment.
+_RESOLVER_VERSION = "resolver-verifier-v0.4"
 _CANDIDATE_RE = re.compile(r"^CAND-[A-Z0-9][A-Z0-9._-]{0,63}$")
 _RESOLUTION_ALIAS_KINDS = {"official", "abbreviation", "designation", "common"}
 _EVENT_ROLES = {

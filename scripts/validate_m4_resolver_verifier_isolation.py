@@ -58,7 +58,7 @@ def main() -> int:
     )
 
     expect(
-        run["resolver_version"] == "resolver-verifier-v0.3",
+        run["resolver_version"] == "resolver-verifier-v0.4",
         "ambiguity hardening did not bump resolver version",
         failures,
     )
