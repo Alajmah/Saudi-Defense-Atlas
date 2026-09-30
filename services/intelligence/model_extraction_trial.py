@@ -21,7 +21,7 @@ from services.intelligence.ai_extraction_boundary import (
 
 ADAPTER_VERSION = "m4-model-trial-v0.3"
 PROMPT_TEMPLATE_ID = "m4-bounded-candidate-extraction"
-PROMPT_TEMPLATE_VERSION = "v0.6"
+PROMPT_TEMPLATE_VERSION = "v0.7"
 # Canonical SDA participant-role vocabulary, identical to the canonical Event
 # schema enum and the Resolver/Verifier _EVENT_ROLES set. The candidate
 # boundary enforces it so unsupported roles fail here, not downstream.
@@ -66,8 +66,10 @@ Rules:
 11. Do not add keys outside the record shapes below.
 12. Event participant roles must be exactly one of ALLOWED_EVENT_ROLES. Do not invent
     role terms or substitute near-synonyms.
-13. Type a specific named model or variant of an equipment family as equipment_variant;
-    type the family or design itself as equipment.
+13. Type a named discrete equipment product - a specific designation for a countable,
+    deliverable, or operable item, whether or not the source uses the word variant - as
+    equipment_variant, and type a generic equipment class or family as equipment. This
+    typing classifies the named thing; it does not infer any fact the source did not state.
 14. For a numeric quantity the source states exactly, set value and leave lower_bound and
     upper_bound null. Set bounds only when the source states a genuine range; never mirror
     an exact value into the bounds.
@@ -84,8 +86,11 @@ Rules:
 17. Event participant roles: use the most specific role the source explicitly states for
     that participant in this event - manufacturer when it states manufacture, contractor
     for the company party to a contract signature or award, supplier only when supply is
-    all the source states, participant for exercise or training attendance. Generic roles
-    are fallbacks, not defaults, and a participant carries one role per event.
+    all the source states. An organization that conducts or leads an exercise or training
+    event is a participant, because participation is the only relation the canonical model
+    defines for exercise involvement; reserve host for a source-stated hosting or venue
+    relation. Generic roles are fallbacks, not defaults, and a participant carries one role
+    per event.
 18. A numeric unit is the head noun of the counted-class phrase the source itself
     states, with role and type modifiers removed: 12 trainer aircraft yields unit
     "aircraft". When the source counts by designation only, with no class noun, use the

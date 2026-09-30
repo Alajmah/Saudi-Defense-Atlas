@@ -94,7 +94,7 @@ def main() -> int:
         failures,
     )
     expect(
-        PROMPT_TEMPLATE_VERSION == "v0.6",
+        PROMPT_TEMPLATE_VERSION == "v0.7",
         "prompt-template version was not bumped for the changed model contract",
         failures,
     )
@@ -104,7 +104,7 @@ def main() -> int:
     # permissions-not-obligations abstention rule.
     for fragment in (
         "ALLOWED_EVENT_ROLES",
-        "Type a specific named model or variant of an equipment family as equipment_variant",
+        "a specific designation for a countable,",
         "leave lower_bound and",
     "upper_bound null",
         "When you emit any substantive Entity, Claim, or Event, emit exactly one document-level",
@@ -112,6 +112,8 @@ def main() -> int:
         "permissions, not requirements",
         "most specific role the source explicitly states",
         "head noun of the counted-class phrase",
+        "whether or not the source uses the word variant",
+        "conducts or leads an exercise or training",
     ):
         expect(
             fragment in delivery_prompt,
