@@ -21,7 +21,7 @@ from services.intelligence.ai_extraction_boundary import (
 
 ADAPTER_VERSION = "m4-model-trial-v0.3"
 PROMPT_TEMPLATE_ID = "m4-bounded-candidate-extraction"
-PROMPT_TEMPLATE_VERSION = "v0.3"
+PROMPT_TEMPLATE_VERSION = "v0.4"
 # Canonical SDA participant-role vocabulary, identical to the canonical Event
 # schema enum and the Resolver/Verifier _EVENT_ROLES set. The candidate
 # boundary enforces it so unsupported roles fail here, not downstream.
@@ -71,9 +71,11 @@ Rules:
 14. For a numeric quantity the source states exactly, set value and leave lower_bound and
     upper_bound null. Set bounds only when the source states a genuine range; never mirror
     an exact value into the bounds.
-15. Emit exactly one document-level Evidence record for the source document. Its locator
-    must be the object exactly {{"fragment": "source-text"}} - the literal token, never a
-    quotation from the source. Do not create additional Evidence records.
+15. When you emit any substantive Entity, Claim, or Event, emit exactly one document-level
+    Evidence record for the source document, with locator the object exactly
+    {{"fragment": "source-text"}} - the literal token, never a quotation from the source.
+    Do not create additional Evidence records. When you abstain entirely, return all four
+    arrays empty, including evidence.
 16. ALLOWED_CLAIM_PREDICATES and ALLOWED_EVENT_TYPES are permissions, not requirements.
     If a supported proposition cannot be represented without changing its subject, value,
     or meaning - for example a relation whose real subject has no representable entity
@@ -84,7 +86,7 @@ OUTPUT RECORD CONTRACT FOR THIS BOUNDED TRIAL:
 Evidence record fields:
 - candidate_id: CAND-* string
 - document_id: exactly SOURCE_DOCUMENT_ID
-- locator: object exactly {{"fragment": "source-text"}}
+- locator: object exactly {{"fragment": "source-text"}} (required when any substantive record is emitted; absent on complete abstention)
 - excerpt_sha256: null
 - capture_assessment: explicit_text or ambiguous_text
 

@@ -530,6 +530,64 @@ def main() -> int:
         failures,
     )
 
+    # Conditional-Evidence wording and abstention path: rule 15 applies only
+    # to substantive output, and a complete abstention must land exactly on
+    # the no-substantive-candidates path.
+    abstain_prompt = build_trial_prompt(by_id["TRIAL-INSUFFICIENT"])
+    for fragment in (
+        "When you emit any substantive Entity, Claim, or Event, emit exactly one document-level",
+        "When you abstain entirely, return all four",
+    ):
+        expect(
+            fragment in abstain_prompt,
+            f"prompt lacks the conditional-Evidence wording: {fragment}",
+            failures,
+        )
+    abstain_failed = {
+        check.get("check_id")
+        for check in insufficient_diag.get("evaluation_trace", {}).get("checks", [])
+        if isinstance(check, dict) and check.get("status") == "fail"
+    }
+    expect(
+        abstain_failed == {"no-substantive-candidates"},
+        "complete abstention did not land exactly on the no-substantive-candidates path",
+        failures,
+    )
+
+    # A model that violates the conditional rule by emitting Evidence without
+    # any substantive record is rejected diagnosably on the candidate-boundary
+    # path, with counts showing the evidence-only shape.
+    evidence_only = json.loads(fake_output(base_case))
+    evidence_only["entities"] = []
+    evidence_only["claims"] = []
+    evidence_only["events"] = []
+    evidence_only_run = build_extraction_run_from_model_output(
+        case=base_case, model_trace=trace, prompt=prompt,
+        raw_output=json.dumps(evidence_only, ensure_ascii=False, separators=(",", ":")),
+        started_at=clock(), completed_at=clock(),
+    )
+    expect(
+        evidence_only_run["validation"]["status"] == "rejected",
+        "evidence-only output was not rejected",
+        failures,
+    )
+    evidence_only_failed = {
+        check.get("check_id")
+        for check in evidence_only_run.get("evaluation_trace", {}).get("checks", [])
+        if isinstance(check, dict) and check.get("status") == "fail"
+    }
+    expect(
+        "candidate-boundary" in evidence_only_failed,
+        "evidence-only output is not diagnosably on the candidate-boundary path",
+        failures,
+    )
+    expect(
+        evidence_only_run.get("rejection_diagnostics", {}).get("pre_clear_candidate_counts")
+        == {"evidence": 1, "entities": 0, "claims": 0, "events": 0},
+        "evidence-only rejection lacks pre-clear counts showing its shape",
+        failures,
+    )
+
     wrong_lane = copy.deepcopy(base_case)
     wrong_lane["id"] = "TRIAL-WRONG-LANE"
     wrong_lane["queue_item"]["id"] = "SDA-QUEUE-TRIAL-WRONG-LANE"

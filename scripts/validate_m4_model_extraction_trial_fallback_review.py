@@ -94,7 +94,7 @@ def main() -> int:
         failures,
     )
     expect(
-        PROMPT_TEMPLATE_VERSION == "v0.3",
+        PROMPT_TEMPLATE_VERSION == "v0.4",
         "prompt-template version was not bumped for the changed model contract",
         failures,
     )
@@ -107,7 +107,8 @@ def main() -> int:
         "Type a specific named model or variant of an equipment family as equipment_variant",
         "leave lower_bound and",
     "upper_bound null",
-        "exactly one document-level Evidence record",
+        "When you emit any substantive Entity, Claim, or Event, emit exactly one document-level",
+        "When you abstain entirely, return all four",
         "permissions, not requirements",
     ):
         expect(
