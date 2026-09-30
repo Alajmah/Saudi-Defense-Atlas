@@ -353,10 +353,11 @@ def _enforce_candidate_conventions(
 ) -> tuple[str | None, list[str]]:
     """Enforce the documented representation conventions (LTR-02/C2R-02).
 
-    Conventions are derived from the canonical SDA contracts, not from observed
-    model output. Checks run in a fixed order and only when the model returned
-    substantive candidates, so a fully abstaining envelope still reaches the
-    no-substantive-candidates path.
+    The Event-role vocabulary is the canonical SDA contract; the exact-bounds
+    and one-Evidence rules are bounded-trial normalizations (see the trial
+    document). None are derived from observed model output. Checks run in a
+    fixed order and only when the model returned substantive candidates, so a
+    fully abstaining envelope still reaches the no-substantive-candidates path.
     """
 
     errors: list[str] = []

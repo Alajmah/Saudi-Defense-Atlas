@@ -318,8 +318,8 @@ The assistant must answer from approved data/evidence rather than treat web sear
 
 After the merged M4 editorial-control increments:
 
-1. merge the preserved Z.ai live-trial evidence and its review records (PR #30) after a fresh Codex re-review of the documentation-only second-review reconciliation;
-2. rerun the same synthetic scenarios under the revised candidate/prompt/evaluator contract (prompt/adapter v0.3, report v0.6; gold expectations unchanged — never fitted to observed model output);
+1. merge the candidate/prompt/evaluator contract revision (PR #31) after the final fresh Codex re-review — the Z.ai live-trial evidence and review records (PR #30) are already merged and supply this increment's base;
+2. rerun the same synthetic scenarios under the revised contract (prompt v0.4, adapter v0.3, report v0.6; gold expectations unchanged — never fitted to observed model output), recording a fresh run-specific operator entitlement attestation for the live run;
 3. evaluate real-model candidate Claim/Event/Evidence quality, rejection behavior, provenance closure, latency/cost observability, downstream Resolver/Verifier and human-review preservation, and representative batch throughput before making any model-quality or “at scale” claim;
 4. define a bounded bilingual drafting projection over approved Claim/Evidence records, with no truth, canonical-mutation, or publication authority;
 5. define model/prompt/evaluator observability and evaluation projections over the metadata already captured by AI extraction artifacts before selecting any dashboard framework;
