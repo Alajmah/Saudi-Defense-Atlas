@@ -87,6 +87,13 @@ def main() -> int:
         "current corpus fixture does not match the report's generation-time corpus_sha256",
         failures,
     )
+    if failures:
+        # Fail fast: the replay refuses to run on any provenance-gate failure
+        # rather than accumulating findings while replaying unverified bytes.
+        print("M4 downstream-preservation replay FAILED (provenance gate):")
+        for failure in failures:
+            print(f"- {failure}")
+        return 1
     queue_by_case = {case["id"]: case["queue_item"] for case in corpus["cases"]}
     case_by_id = {case["id"]: case for case in corpus["cases"]}
 

@@ -48,6 +48,16 @@ The replay's zero-authority claim now says no canonical backend is **invoked or 
 
 The first push of this remediation failed its own new gate in CI: the report's `corpus_sha256` was recorded from a CRLF Windows working tree, while the Linux CI checkout holds the identical fixture with LF bytes, so a raw-byte comparison is checkout-dependent. The gate now accepts the recorded digest under either line-ending representation of the same fixture bytes, binding the replay to corpus content rather than to one platform's checkout representation. Discovered by the CI run on the remediation commit; corrected before any review of this record.
 
+### DRR-01B — HIGH — core/public identity divergence under one version — REMEDIATED
+
+The second review (`5371251550`) found the v0.4 bump incomplete: the core and the public boundary both identified as v0.4 and both derived the run ID from the same `(extraction_id, version)` pair, yet only the wrapper applied ambiguity preservation — so one extraction could produce two different resolution payloads under one version and audit identity, reintroducing the invariant PR #20 established by minting v0.3 separately.
+
+Remediation: v0.4 semantics are unified in the core. Ambiguity preservation moved into `_resolver_verifier_core.build_resolution_verification` (applied in-core before run assembly, using the already-indexed candidate records), the wrapper's divergent postprocessing and its helper functions were removed, and the wrapper is now the public entry and identity stamp computing exactly what the core computes. Adversarial regression added to the isolation validator: the ambiguous fixture runs through both paths and the full resolution payload, proposal, run ID, and version must be byte-identical — one version implies one payload.
+
+### Precision fix — provenance gate now fails fast
+
+The gate's wording and behavior now match: any provenance-gate failure returns immediately before the replay proceeds, instead of accumulating findings while replaying unverified bytes.
+
 ## Freeze
 
 This record completes remediation of DRR-01 through DRR-04. The remediated head awaits the next independent review of the new exact SHA.
