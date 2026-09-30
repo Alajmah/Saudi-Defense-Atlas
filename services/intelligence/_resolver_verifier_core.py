@@ -21,7 +21,13 @@ class ResolverVerifierError(ValueError):
     """Raised when resolution/verification cannot proceed safely."""
 
 
-_RESOLVER_VERSION = "resolver-verifier-v0.2"
+# v0.4 unifies resolver semantics: the v0.2 proposal semantics, the v0.3
+# ambiguity-preservation audit correction (moved into this core so the core
+# and the public boundary are behaviorally identical under one version), and
+# the reconciled manufacturer predicate target types (equipment |
+# equipment_variant). One version implies one resolution payload for one
+# extraction, whichever path computes it.
+_RESOLVER_VERSION = "resolver-verifier-v0.4"
 _CANDIDATE_RE = re.compile(r"^CAND-[A-Z0-9][A-Z0-9._-]{0,63}$")
 _RESOLUTION_ALIAS_KINDS = {"official", "abbreviation", "designation", "common"}
 _EVENT_ROLES = {
@@ -44,7 +50,10 @@ _ENTITY_PREDICATES: dict[str, tuple[set[str], set[str]]] = {
     "organization.operates.equipment_variant": ({"organization"}, {"equipment_variant"}),
     "military_unit.part_of.organization": ({"military_unit"}, {"organization"}),
     "military_unit.operates.equipment_variant": ({"military_unit"}, {"equipment_variant"}),
-    "manufacturer.manufactures.equipment": ({"organization"}, {"equipment"}),
+    # The manufacturer predicate targets the manufactured item: canonical
+    # precedent (M1 F-15SA) and the designation typing convention point it at
+    # equipment_variant as well as family-level equipment.
+    "manufacturer.manufactures.equipment": ({"organization"}, {"equipment", "equipment_variant"}),
     "company.participates_in.procurement_program": ({"organization"}, {"procurement_program"}),
     "equipment_variant.variant_of.equipment": ({"equipment_variant"}, {"equipment"}),
     "procurement_program.acquires.equipment_variant": ({"procurement_program"}, {"equipment_variant"}),
@@ -498,6 +507,62 @@ def _materialize_evidence(
     return materialized, id_map
 
 
+def _candidate_ref_ids(value: Any) -> set[str]:
+    if not isinstance(value, Mapping) or value.get("kind") != "candidate_entity":
+        return set()
+    candidate_id = value.get("candidate_id")
+    return {candidate_id} if isinstance(candidate_id, str) and candidate_id else set()
+
+
+def _claim_entity_refs(candidate: Mapping[str, Any]) -> set[str]:
+    return _candidate_ref_ids(candidate.get("subject")) | _candidate_ref_ids(
+        candidate.get("value")
+    )
+
+
+def _event_entity_refs(candidate: Mapping[str, Any]) -> set[str]:
+    refs: set[str] = set()
+    for participant in _sequence(candidate.get("participants", []), "Event participants"):
+        if isinstance(participant, Mapping):
+            refs |= _candidate_ref_ids(participant.get("entity"))
+    for reference in _sequence(candidate.get("related_entities", []), "Event related entities"):
+        refs |= _candidate_ref_ids(reference)
+    return refs
+
+
+def _preserve_ambiguity(
+    run: dict[str, Any],
+    claim_candidates: Mapping[str, Mapping[str, Any]],
+    event_candidates: Mapping[str, Mapping[str, Any]],
+) -> None:
+    """Keep ambiguous-vs-unresolved distinct downstream (unified v0.4 core).
+
+    A blocked Claim/Event that references an entity with ``outcome =
+    ambiguous`` is reported as ``blocked_ambiguous``; genuinely unmatched
+    mentions remain ``blocked_unresolved``.
+    """
+
+    ambiguous_ids = {
+        str(item.get("candidate_entity_id"))
+        for item in run.get("entity_resolutions", [])
+        if isinstance(item, Mapping) and item.get("outcome") == "ambiguous"
+    }
+    if not ambiguous_ids:
+        return
+    for assessment in run.get("claim_assessments", []):
+        if not isinstance(assessment, dict) or assessment.get("outcome") != "blocked_unresolved":
+            continue
+        candidate = claim_candidates.get(assessment.get("candidate_claim_id"))
+        if candidate is not None and _claim_entity_refs(candidate) & ambiguous_ids:
+            assessment["outcome"] = "blocked_ambiguous"
+    for assessment in run.get("event_assessments", []):
+        if not isinstance(assessment, dict) or assessment.get("outcome") != "blocked_unresolved":
+            continue
+        candidate = event_candidates.get(assessment.get("candidate_event_id"))
+        if candidate is not None and _event_entity_refs(candidate) & ambiguous_ids:
+            assessment["outcome"] = "blocked_ambiguous"
+
+
 def build_resolution_verification(
     *,
     extraction_run: Mapping[str, Any],
@@ -649,6 +714,18 @@ def build_resolution_verification(
             "supersedes_proposal_id": None,
             "mutations": mutations,
         }
+
+    # Unified v0.4 semantics: apply ambiguity preservation in-core so the
+    # core path and the public boundary produce identical payloads.
+    _preserve_ambiguity(
+        {
+            "entity_resolutions": entity_resolutions,
+            "claim_assessments": claim_assessments,
+            "event_assessments": event_assessments,
+        },
+        claim_candidates,
+        event_candidates,
+    )
 
     run = {
         "id": _stable_id("SDA-AIRV", extraction_id, _RESOLVER_VERSION),
