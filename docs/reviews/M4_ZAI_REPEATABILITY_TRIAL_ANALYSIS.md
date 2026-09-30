@@ -2,7 +2,7 @@
 
 ## Status
 
-Evidence-only analysis of the five-run repeatability trial executed on 2026-10-01 from frozen `main` at `476711e238976a941a0593fa8a185d3daba9b8e6`. The ten raw artifacts and an immutable manifest are preserved under `docs/evidence/m4/2026-10-01/`. This document changes no prompt, gold, evaluator, resolver, or ontology; the classification below follows the preliminary independent interpretation (REP-01..REP-04) pending the full artifact-level first-pass review.
+Evidence-only analysis of the five-run repeatability trial executed on 2026-10-01 from frozen `main` at `476711e238976a941a0593fa8a185d3daba9b8e6`. The ten raw artifacts and an immutable manifest are preserved under `docs/evidence/m4/2026-10-01/`. This document changes no prompt, gold, evaluator, resolver, or ontology; the classification below follows the preliminary independent interpretation (REP-01..REP-04). Corrected per first-pass review 5372612813 (RPT-01): the per-run metric column is invoked exact-gold quality (all five runs record five invocations), and the R5 failure-scope and convention-coverage claims were narrowed to what the artifacts support.
 
 ## Frozen configuration (verified from the artifacts)
 
@@ -14,7 +14,7 @@ R1–R5 ran sequentially in one session with no repo changes between runs, no se
 
 ## Per-run results
 
-| run | exit | substantive | abstention | policy | invoked | integrity | median / max latency |
+| run | exit | substantive | abstention | policy | invoked quality (exact-gold) | integrity | median / max latency |
 |-----|------|-------------|------------|--------|---------|-----------|----------------------|
 | R1  | 0    | 2/4         | 1/1        | 1/1    | 3/5     | 0         | 22.0s / 52.0s        |
 | R2  | 0    | 2/4         | 1/1        | 1/1    | 3/5     | 0         | 24.6s / 43.6s        |
@@ -22,7 +22,7 @@ R1–R5 ran sequentially in one session with no repo changes between runs, no se
 | R4  | 0    | 1/4         | 1/1        | 1/1    | 2/5     | 0         | 20.1s / 53.9s        |
 | R5  | 1    | 0/4         | 1/1        | 1/1    | 1/5     | 1 (provider HTTP 500 on injection) | 29.4s / 38.9s |
 
-Per the merged denominator contract, the R5 injection case counts against R5's substantive outcome (gold expectation defines membership), while its semantic repeatability is evaluated only over the four completed model outputs (REP-04).
+Per the merged denominator contract, the R5 injection case counts as a failure everywhere it is in the denominator — substantive quality, invoked quality, and whole-corpus quality (all five runs record five invocations; R5's fifth invocation terminated in the preserved HTTP 500 with no model output). It is excluded from one thing only: the output-semantic repeatability comparison, because it produced no output to compare (REP-04).
 
 ## Cross-run matrices
 
@@ -67,7 +67,7 @@ The quantity source states "12 trainer aircraft"; all five runs emit `trainer ai
 
 ### Provider/runtime integrity (REP-04)
 
-R1–R4: zero integrity failures. R5: one provider transport failure (HTTP 500), recorded in-report and counted against the run-level substantive outcome per the gold-defined denominator, excluded from semantic-stability evaluation of that case. All mechanically enforced conventions held in all five runs.
+R1–R4: zero integrity failures. R5: one provider transport failure (HTTP 500), recorded in-report and counted against the run-level substantive outcome per the gold-defined denominator, excluded from semantic-stability evaluation of that case. All completed model outputs passed the mechanically enforced conventions; the failed R5 injection invocation produced no output to assess.
 
 ## Claim ceiling
 
