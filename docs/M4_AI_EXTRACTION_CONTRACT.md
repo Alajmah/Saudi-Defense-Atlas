@@ -38,7 +38,7 @@ Every extraction run records:
 - raw model-output hash;
 - structural validation result;
 - evaluator/validator version and named checks;
-- candidate Evidence/Entity/Claim/Event records or, for rejected runs, validation errors only.
+- candidate Evidence/Entity/Claim/Event records or, for rejected runs, validation errors plus bounded counts-only `rejection_diagnostics.pre_clear_candidate_counts` (per-array record counts captured before candidates were cleared; never candidate content, never raw model text). Accepted runs must not carry `rejection_diagnostics`.
 
 ## Evidence discipline
 

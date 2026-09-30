@@ -89,15 +89,33 @@ def main() -> int:
             failures,
         )
     expect(
-        ADAPTER_VERSION == "m4-model-trial-v0.2",
+        ADAPTER_VERSION == "m4-model-trial-v0.3",
         "adapter version was not bumped for the changed model contract",
         failures,
     )
     expect(
-        PROMPT_TEMPLATE_VERSION == "v0.2",
+        PROMPT_TEMPLATE_VERSION == "v0.4",
         "prompt-template version was not bumped for the changed model contract",
         failures,
     )
+    # The v0.3 contract revision adds the canonical role vocabulary, the
+    # equipment/equipment_variant typing rule, the exact-quantity bounds
+    # convention, document-level Evidence cardinality, and the
+    # permissions-not-obligations abstention rule.
+    for fragment in (
+        "ALLOWED_EVENT_ROLES",
+        "Type a specific named model or variant of an equipment family as equipment_variant",
+        "leave lower_bound and",
+    "upper_bound null",
+        "When you emit any substantive Entity, Claim, or Event, emit exactly one document-level",
+        "When you abstain entirely, return all four",
+        "permissions, not requirements",
+    ):
+        expect(
+            fragment in delivery_prompt,
+            f"live prompt lacks the v0.3 contract-revision fragment: {fragment}",
+            failures,
+        )
 
     # The prompt still carries the exact case-specific authority/provenance inputs.
     expect(

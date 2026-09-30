@@ -1097,10 +1097,20 @@ def main() -> int:
 
     total_seconds = time.monotonic() - total_started
     quality_passes = sum(1 for result in results if result["quality"]["pass"])
+    # LTR-01: model extraction quality and policy/preflight gate quality are
+    # reported separately; the whole-corpus metric is retained, clearly as such.
+    invoked_results = [result for result in results if result["invoked"]]
+    policy_results = [result for result in results if not result["invoked"]]
+    invoked_quality_passes = sum(
+        1 for result in invoked_results if result["quality"]["pass"]
+    )
+    policy_quality_passes = sum(
+        1 for result in policy_results if result["quality"]["pass"]
+    )
     throughput = invocation_count / total_seconds if total_seconds > 0 else None
 
     report = {
-        "report_version": "m4-model-extraction-live-trial-v0.5",
+        "report_version": "m4-model-extraction-live-trial-v0.6",
         "corpus_version": corpus_version,
         "provider": trace.provider,
         "requested_model": requested_model,
@@ -1118,6 +1128,16 @@ def main() -> int:
         "integrity_failure_count": integrity_failures,
         "quality_case_pass_count": quality_passes,
         "quality_case_pass_rate": quality_passes / len(results) if results else None,
+        "invoked_case_count": len(invoked_results),
+        "invoked_quality_case_pass_count": invoked_quality_passes,
+        "invoked_quality_case_pass_rate": (
+            invoked_quality_passes / len(invoked_results) if invoked_results else None
+        ),
+        "policy_gate_case_count": len(policy_results),
+        "policy_gate_case_pass_count": policy_quality_passes,
+        "policy_gate_case_pass_rate": (
+            policy_quality_passes / len(policy_results) if policy_results else None
+        ),
         "latency_seconds": {
             "median": statistics.median(latencies) if latencies else None,
             "p95_observed": percentile(latencies, 0.95),
@@ -1176,6 +1196,8 @@ def main() -> int:
                 "blocked": blocked,
                 "integrity_failures": integrity_failures,
                 "quality_pass_rate": report["quality_case_pass_rate"],
+                "invoked_quality_pass_rate": report["invoked_quality_case_pass_rate"],
+                "policy_gate_pass_rate": report["policy_gate_case_pass_rate"],
                 "output": str(args.output),
             },
             sort_keys=True,

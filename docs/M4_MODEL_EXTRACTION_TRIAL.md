@@ -2,7 +2,7 @@
 
 ## Status
 
-Trial harness implemented with two reviewed provider edges (a pinned Copilot CLI driver and a local Z.ai OpenAI-compatible HTTP driver). The first bounded live Z.ai trial was executed on 2026-09-29 from clean `main` and reviewed; the report and SHA-256 sidecar are preserved as immutable evidence under `docs/evidence/m4/2026-09-29/`. Live provider mechanics and pre-invocation sensitivity gating are evidenced. Extraction quality remains unqualified; downstream Resolver/Verifier preservation is not yet demonstrated (three accepted candidates carry participant roles outside the canonical Event vocabulary); the served model checkpoint is unknown (the requested model `glm-5.3` is what the evidence traces).
+Trial harness implemented with two reviewed provider edges (a pinned Copilot CLI driver and a local Z.ai OpenAI-compatible HTTP driver). The first bounded live Z.ai trial was executed on 2026-09-29 from clean `main` and reviewed; the report and SHA-256 sidecar are preserved as immutable evidence under `docs/evidence/m4/2026-09-29/`. Live provider mechanics and pre-invocation sensitivity gating are evidenced. Extraction quality remains unqualified; downstream Resolver/Verifier preservation is not yet demonstrated for the first live run (three accepted candidates carried participant roles outside the canonical Event vocabulary — the v0.3 candidate contract now enforces that vocabulary at the boundary, and the corpus rerun under the revised contract is pending); the served model checkpoint is unknown (the requested model `glm-5.3` is what the evidence traces).
 
 ## Purpose
 
@@ -86,6 +86,14 @@ The prompt treats source text as untrusted data and explicitly instructs the mod
 
 The prompt also supplies a case-specific allowlist for Claim predicates and Event types. Output outside those allowlists is rejected before candidate review.
 
+Prompt template `v0.4` additionally fixes the representation conventions that the first live trial showed were under-specified. The role vocabulary is a canonical contract; the remaining rules are **bounded-trial normalizations** — grounded in the canonical model where it speaks, and chosen for this single-document synthetic corpus where it is silent. None were derived from observed model output. Rules noted as enforced fail closed at the candidate boundary with a dedicated check; rules noted as prompt-instructed are guidance the evaluator scores but the boundary does not mechanically police:
+
+- Event participant roles must come from the canonical SDA role vocabulary (`buyer`, `seller`, `contractor`, `operator`, `recipient`, `manufacturer`, `host`, `participant`, `observer`, `supplier`, `other`), supplied to the model as `ALLOWED_EVENT_ROLES` and enforced at the candidate boundary with the dedicated `event-role-vocabulary` rejection check; a malformed `participants` value (scalar, string, or non-object entries) is rejected as `event-participants-shape` rather than aborting the run;
+- a specific named model or variant of an equipment family is typed `equipment_variant`, the family or design itself `equipment` (prompt-instructed; both types remain schema-valid, so the boundary does not enforce typing);
+- an exact numeric quantity sets `value` and leaves `lower_bound`/`upper_bound` null (`exact-quantity-bounds` rejection) — a trial normalization consistent with the ontology's precision-or-bounds concept; the canonical `number_value` schema defines nullable bounds and does not by itself encode this rule;
+- when any substantive Entity, Claim, or Event is emitted, exactly one document-level Evidence record with the locator object exactly `{"fragment": "source-text"}` and no additional keys (`evidence-cardinality` and `evidence-locator` rejections); complete abstention returns all four arrays empty, including evidence, and reaches the intended `no-substantive-candidates` path — a trial normalization for this bounded single-document corpus; the canonical ontology and Evidence schema do not impose one record per Document and permit multiple Evidence records and one-or-more evidence links;
+- allowlisted predicates and event types are permissions, not requirements: when a proposition cannot be represented without changing its subject, value, or meaning, the model must omit the record (prompt-instructed; scored by the evaluator, not mechanically enforced).
+
 Trace semantics are exact at the adapter boundary:
 
 - `prompt_trace.template_sha256` hashes the immutable prompt template;
@@ -123,7 +131,10 @@ The fixtures exist only to evaluate extraction mechanics and do not assert facts
 9. model-produced canonical entity references are rejected;
 10. existing `AIExtractionRun` candidate/reference closure remains authoritative;
 11. downstream JSON-Schema failure is isolated into a rejected run with zero candidate leakage;
-12. accepted and rejected runs retain zero canonical-mutation and publication authority.
+12. accepted and rejected runs retain zero canonical-mutation and publication authority;
+13. non-canonical participant roles, malformed `participants` values (including scalars), mirrored exact-quantity bounds, extra Evidence records, quoted or extended locators, and candidate-boundary rejections each fail closed with a dedicated check id, empty candidates, and bounded pre-clear count diagnostics, and an accepted run carrying `rejection_diagnostics` is schema-invalid;
+14. the canonical Event-role vocabulary, the Resolver/Verifier role set, the candidate schema enum, and the trial's `CANONICAL_EVENT_ROLES` are asserted identical, so vocabulary drift fails CI;
+15. a fully abstaining envelope still reaches the `no-substantive-candidates` path with all-zero pre-clear diagnostics, never a convention rejection.
 
 `scripts/validate_m4_model_extraction_trial_zai_provider.py` adds deterministic coverage for the Z.ai provider edge, again with no network access and no model-credit consumption. It injects a fake HTTP transport and verifies: the exact rendered prompt is the request payload input; the request carries no tool surface and pins the reasoning configuration; the environment-only credential is character-rejected and redacted from errors, stdout, report, and sidecar; explicit coding-plan/prepaid endpoint selection with no silent default and base-URL validation restricted to official `api.z.ai` routes; strict duplicate-key/non-finite provider-envelope parsing; the bounded response size; git-bound report provenance with a matching SHA-256 sidecar; fail-closed HTTP/timeout/malformed-response behavior; the identical strict JSON/candidate boundary as the Copilot path; backward compatibility of the Copilot path; and the absence of any governance/mutation import in the runner.
 
@@ -139,7 +150,8 @@ The fixtures exist only to evaluate extraction mechanics and do not assert facts
 - invocation and schema/boundary-validated-run counts;
 - accepted/rejected/blocked counts only for integrity-valid typed runs;
 - per-case `AIExtractionRun` artifacts or preflight block reasons;
-- deterministic quality checks against the synthetic gold expectations;
+- deterministic quality checks against the synthetic gold expectations, reported three ways (report version v0.6): the whole-corpus case pass rate, the invoked-model quality rate over invoked cases only, and the policy-gate rate over pre-invocation-blocked cases only — the whole-corpus figure must never be described as the model's extraction-quality rate;
+- bounded rejection diagnostics on rejected runs (`rejection_diagnostics.pre_clear_candidate_counts`): per-array candidate record counts before clearing, with no candidate content and no raw model text;
 - observed per-case latency and aggregate throughput for the bounded run;
 - integrity failure count;
 - explicit qualification flags.

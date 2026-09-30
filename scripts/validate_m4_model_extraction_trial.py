@@ -23,6 +23,7 @@ from services.intelligence.ai_extraction_boundary import (  # noqa: E402
     validate_ai_extraction_run,
 )
 from services.intelligence.model_extraction_trial import (  # noqa: E402
+    CANONICAL_EVENT_ROLES,
     ModelExtractionTrialError,
     ModelTrace,
     build_extraction_run_from_model_output,
@@ -30,6 +31,9 @@ from services.intelligence.model_extraction_trial import (  # noqa: E402
     execute_trial_case,
     prompt_template_sha256,
     reject_schema_invalid_run,
+)
+from services.intelligence._resolver_verifier_core import (  # noqa: E402
+    _EVENT_ROLES as RESOLVER_EVENT_ROLES,
 )
 
 FIXTURE = ROOT / "tests" / "fixtures" / "m4-model-extraction-eval.json"
@@ -354,6 +358,235 @@ def main() -> int:
     expect(isolated["validation"]["status"] == "rejected", "schema failure was not isolated", failures)
     expect(not any(isolated["candidates"].values()), "schema failure leaked candidates", failures)
     expect(not schema_errors(isolated), "schema-isolated rejection is invalid", failures)
+
+    # v0.3 contract conventions: violations fail closed at the candidate
+    # boundary with a dedicated check id, empty candidates, and bounded
+    # pre-clear count diagnostics; conforming output still passes.
+    def mutated_run(label: str, mutate: Any) -> dict[str, Any]:
+        payload = json.loads(fake_output(base_case))
+        mutate(payload)
+        return build_extraction_run_from_model_output(
+            case=base_case, model_trace=trace, prompt=prompt,
+            raw_output=json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
+            started_at=clock(), completed_at=clock(),
+        )
+
+    def expect_rejected(label: str, run: dict[str, Any], check_id: str) -> None:
+        expect(run["validation"]["status"] == "rejected", f"{label} was not rejected", failures)
+        failed = {
+            check.get("check_id")
+            for check in run.get("evaluation_trace", {}).get("checks", [])
+            if isinstance(check, dict) and check.get("status") == "fail"
+        }
+        expect(check_id in failed, f"{label} lacks the {check_id} rejection reason", failures)
+        expect(not any(run["candidates"].values()), f"{label} leaked candidates", failures)
+        expect(not schema_errors(run), f"{label} rejection is not schema-valid", failures)
+        counts = run.get("rejection_diagnostics", {}).get("pre_clear_candidate_counts")
+        expect(
+            isinstance(counts, dict) and set(counts) == {"evidence", "entities", "claims", "events"},
+            f"{label} lacks bounded pre-clear count diagnostics",
+            failures,
+        )
+
+    def set_role(payload: dict[str, Any]) -> None:
+        payload["events"][0]["participants"][0]["role"] = "deliverer"
+
+    def set_mirrored_bounds(payload: dict[str, Any]) -> None:
+        claim = payload["claims"][0]
+        if claim.get("value", {}).get("kind") == "number":
+            claim["value"]["lower_bound"] = claim["value"]["value"]
+            claim["value"]["upper_bound"] = claim["value"]["value"]
+
+    def duplicate_evidence(payload: dict[str, Any]) -> None:
+        extra = dict(payload["evidence"][0])
+        extra["candidate_id"] = "CAND-EVID-EXTRA"
+        payload["evidence"].append(extra)
+
+    def set_quoted_locator(payload: dict[str, Any]) -> None:
+        payload["evidence"][0]["locator"] = {"fragment": "a quoted sentence"}
+
+    def set_extended_locator(payload: dict[str, Any]) -> None:
+        payload["evidence"][0]["locator"] = {"fragment": "source-text", "page": 1}
+
+    def set_scalar_participants(payload: dict[str, Any]) -> None:
+        payload["events"][0]["participants"] = 1
+
+    def set_string_participants(payload: dict[str, Any]) -> None:
+        payload["events"][0]["participants"] = "manufacturer"
+
+    def set_non_object_participant(payload: dict[str, Any]) -> None:
+        payload["events"][0]["participants"] = ["manufacturer"]
+
+    quantity_case = by_id["TRIAL-EN-PROCUREMENT-QUANTITY"]
+    quantity_prompt = build_trial_prompt(quantity_case)
+    quantity_run = build_extraction_run_from_model_output(
+        case=quantity_case, model_trace=trace, prompt=quantity_prompt,
+        raw_output=fake_output(quantity_case), started_at=clock(), completed_at=clock(),
+    )
+    expect(
+        quantity_run["validation"]["status"] == "accepted_for_candidate_review",
+        "conforming exact-quantity output stopped passing the convention checks",
+        failures,
+    )
+    expect(
+        "rejection_diagnostics" not in quantity_run,
+        "accepted run carries rejection diagnostics",
+        failures,
+    )
+    mirrored = build_extraction_run_from_model_output(
+        case=quantity_case, model_trace=trace, prompt=quantity_prompt,
+        raw_output=json.dumps(
+            {
+                **json.loads(fake_output(quantity_case)),
+                "claims": [
+                    {
+                        **json.loads(fake_output(quantity_case))["claims"][0],
+                        "value": {
+                            **json.loads(fake_output(quantity_case))["claims"][0]["value"],
+                            "lower_bound": 12,
+                            "upper_bound": 12,
+                        },
+                    }
+                ],
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ),
+        started_at=clock(), completed_at=clock(),
+    )
+    expect_rejected("mirrored exact bounds", mirrored, "exact-quantity-bounds")
+    role_run = mutated_run("non-canonical role", set_role)
+    expect_rejected("non-canonical role", role_run, "event-role-vocabulary")
+    card_run = mutated_run("duplicate evidence", duplicate_evidence)
+    expect_rejected("duplicate evidence", card_run, "evidence-cardinality")
+    locator_run = mutated_run("quoted locator", set_quoted_locator)
+    expect_rejected("quoted locator", locator_run, "evidence-locator")
+    extended_locator_run = mutated_run("extended locator", set_extended_locator)
+    expect_rejected("extended locator", extended_locator_run, "evidence-locator")
+    for label, mutator in (
+        ("scalar participants", set_scalar_participants),
+        ("string participants", set_string_participants),
+        ("non-object participant entry", set_non_object_participant),
+    ):
+        shape_run = mutated_run(label, mutator)
+        expect_rejected(label, shape_run, "event-participants-shape")
+
+    # The candidate-boundary rejection path carries pre-clear diagnostics too.
+    canonical_diag = build_extraction_run_from_model_output(
+        case=base_case, model_trace=trace, prompt=prompt,
+        raw_output=json.dumps(canonical_subject),
+        started_at=clock(), completed_at=clock(),
+    )
+    expect(
+        canonical_diag.get("rejection_diagnostics", {}).get("pre_clear_candidate_counts")
+        == {"evidence": 1, "entities": 3, "claims": 1, "events": 1},
+        "candidate-boundary rejection lacks pre-clear diagnostics",
+        failures,
+    )
+
+    # An accepted run must be schema-invalid if it carries rejection diagnostics.
+    with_diagnostics = json.loads(json.dumps(quantity_run))
+    with_diagnostics["rejection_diagnostics"] = {
+        "pre_clear_candidate_counts": {"evidence": 1, "entities": 1, "claims": 1, "events": 0}
+    }
+    expect(
+        bool(schema_errors(with_diagnostics)),
+        "accepted run carrying rejection_diagnostics passed the shared schema",
+        failures,
+    )
+
+    # R7: the role vocabulary must not drift across its four normative copies.
+    canonical_enum = set(
+        json.loads(
+            (ROOT / "schemas" / "v0.1" / "event.schema.json").read_text(encoding="utf-8")
+        )["properties"]["participants"]["items"]["properties"]["role"]["enum"]
+    )
+    candidate_enum = set(
+        json.loads(
+            (ROOT / "schemas" / "v0.1" / "ai-extraction-run.schema.json").read_text(
+                encoding="utf-8"
+            )
+        )["$defs"]["candidate_event"]["properties"]["participants"]["items"]["properties"][
+            "role"
+        ]["enum"]
+    )
+    expect(
+        canonical_enum == set(RESOLVER_EVENT_ROLES) == candidate_enum == set(CANONICAL_EVENT_ROLES),
+        "event-role vocabulary drifted between canonical schema, Resolver, candidate "
+        "schema, and the trial constant",
+        failures,
+    )
+
+    insufficient_diag = build_extraction_run_from_model_output(
+        case=by_id["TRIAL-INSUFFICIENT"], model_trace=trace,
+        prompt=build_trial_prompt(by_id["TRIAL-INSUFFICIENT"]),
+        raw_output=fake_output(by_id["TRIAL-INSUFFICIENT"]),
+        started_at=clock(), completed_at=clock(),
+    )
+    expect(
+        insufficient_diag.get("rejection_diagnostics", {}).get("pre_clear_candidate_counts")
+        == {"evidence": 0, "entities": 0, "claims": 0, "events": 0},
+        "structured abstention lacks all-zero pre-clear diagnostics",
+        failures,
+    )
+
+    # Conditional-Evidence wording and abstention path: rule 15 applies only
+    # to substantive output, and a complete abstention must land exactly on
+    # the no-substantive-candidates path.
+    abstain_prompt = build_trial_prompt(by_id["TRIAL-INSUFFICIENT"])
+    for fragment in (
+        "When you emit any substantive Entity, Claim, or Event, emit exactly one document-level",
+        "When you abstain entirely, return all four",
+    ):
+        expect(
+            fragment in abstain_prompt,
+            f"prompt lacks the conditional-Evidence wording: {fragment}",
+            failures,
+        )
+    abstain_failed = {
+        check.get("check_id")
+        for check in insufficient_diag.get("evaluation_trace", {}).get("checks", [])
+        if isinstance(check, dict) and check.get("status") == "fail"
+    }
+    expect(
+        abstain_failed == {"no-substantive-candidates"},
+        "complete abstention did not land exactly on the no-substantive-candidates path",
+        failures,
+    )
+
+    # A model that violates the conditional rule by emitting Evidence without
+    # any substantive record is rejected diagnosably on the candidate-boundary
+    # path, with counts showing the evidence-only shape.
+    evidence_only = json.loads(fake_output(base_case))
+    evidence_only["entities"] = []
+    evidence_only["claims"] = []
+    evidence_only["events"] = []
+    evidence_only_run = build_extraction_run_from_model_output(
+        case=base_case, model_trace=trace, prompt=prompt,
+        raw_output=json.dumps(evidence_only, ensure_ascii=False, separators=(",", ":")),
+        started_at=clock(), completed_at=clock(),
+    )
+    expect(
+        evidence_only_run["validation"]["status"] == "rejected",
+        "evidence-only output was not rejected",
+        failures,
+    )
+    evidence_only_failed = {
+        check.get("check_id")
+        for check in evidence_only_run.get("evaluation_trace", {}).get("checks", [])
+        if isinstance(check, dict) and check.get("status") == "fail"
+    }
+    expect(
+        "candidate-boundary" in evidence_only_failed,
+        "evidence-only output is not diagnosably on the candidate-boundary path",
+        failures,
+    )
+    expect(
+        evidence_only_run.get("rejection_diagnostics", {}).get("pre_clear_candidate_counts")
+        == {"evidence": 1, "entities": 0, "claims": 0, "events": 0},
+        "evidence-only rejection lacks pre-clear counts showing its shape",
+        failures,
+    )
 
     wrong_lane = copy.deepcopy(base_case)
     wrong_lane["id"] = "TRIAL-WRONG-LANE"
