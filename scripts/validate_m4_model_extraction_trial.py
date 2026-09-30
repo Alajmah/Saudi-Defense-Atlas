@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import scripts.run_m4_model_extraction_trial as trial_runner  # noqa: E402
 from scripts.run_m4_model_extraction_trial import copilot_command_args  # noqa: E402
 from scripts.validate_schemas import build_registry  # noqa: E402
 from services.intelligence.ai_extraction_boundary import (  # noqa: E402
@@ -280,7 +281,7 @@ def main() -> int:
     raw = fake_output(base_case)
     for semantics_fragment in (
         "most specific role the source explicitly states",
-        "bare counted-class noun with role and type modifiers removed",
+        "head noun of the counted-class phrase",
     ):
         expect(
             semantics_fragment in prompt,
@@ -612,6 +613,30 @@ def main() -> int:
     blocked = execute_trial_case(case=wrong_lane, model_trace=trace, invoke=should_not_invoke, clock=clock)
     expect(not blocked.invoked and blocked.run is None, "non-candidate lane was not blocked", failures)
     expect(wrong_invocations == 0, "non-candidate lane reached invoker", failures)
+
+    # FSR-01: bucket membership comes from gold expectation alone. An
+    # unexpectedly blocked substantive case must stay in the substantive
+    # denominator (as a failure), never disappear into the policy bucket.
+    adversarial_results = [
+        {"case_id": "TRIAL-EN-DELIVERY", "invoked": False, "run": None,
+         "quality": {"pass": False}},
+        {"case_id": "TRIAL-RESTRICTED-LIVE", "invoked": False, "run": None,
+         "quality": {"pass": True}},
+    ]
+    adv_substantive, adv_abstention, adv_policy = trial_runner.classify_quality_buckets(
+        adversarial_results, cases
+    )
+    expect(
+        [r["case_id"] for r in adv_substantive] == ["TRIAL-EN-DELIVERY"],
+        "unexpectedly blocked substantive case left the substantive denominator",
+        failures,
+    )
+    expect(
+        [r["case_id"] for r in adv_policy] == ["TRIAL-RESTRICTED-LIVE"],
+        "unexpectedly blocked substantive case leaked into the policy denominator",
+        failures,
+    )
+    expect(not adv_abstention, "unexpected buckets appeared in abstention", failures)
 
     args = copilot_command_args("copilot", "gpt-5.4", "synthetic prompt")
     required_cli_controls = {

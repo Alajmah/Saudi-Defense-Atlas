@@ -490,6 +490,34 @@ def zai_invoker(
     return invoke
 
 
+def classify_quality_buckets(
+    results: list[dict[str, Any]], cases: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Bucket every case by its gold expectation alone (FSR-01).
+
+    Substantive, expected-abstention, and policy-gate membership come solely
+    from ``gold.expected_status``. Observed invocation is a separate metric:
+    a substantive-gold case that is unexpectedly blocked stays in the
+    substantive denominator, where it counts as a failure rather than
+    disappearing into the policy bucket.
+    """
+
+    gold_by_id = {
+        case.get("id"): (case.get("gold") or {}).get("expected_status")
+        for case in cases
+    }
+
+    def _bucket(result: dict[str, Any]) -> Any:
+        return gold_by_id.get(result.get("case_id"))
+
+    substantive = [
+        result for result in results if _bucket(result) == "accepted_for_candidate_review"
+    ]
+    abstention = [result for result in results if _bucket(result) == "rejected"]
+    policy = [result for result in results if _bucket(result) == "blocked_before_invocation"]
+    return substantive, abstention, policy
+
+
 def normalize_name(value: str) -> str:
     return " ".join(value.casefold().split())
 
@@ -1100,22 +1128,9 @@ def main() -> int:
     # LTR-01/RRV6-01: policy-gate, expected-abstention, and substantive cases
     # are three separate denominators; the whole-corpus and invoked-case rates
     # are retained, clearly labeled, and neither is semantic accuracy.
-    def _gold_status(result: dict[str, Any]) -> str:
-        gold = next(
-            (case.get("gold") for case in cases if case.get("id") == result.get("case_id")),
-            None,
-        )
-        return gold.get("expected_status") if isinstance(gold, dict) else None
-
-    policy_results = [result for result in results if not result["invoked"]]
-    abstention_results = [
-        result for result in results if result["invoked"] and _gold_status(result) == "rejected"
-    ]
-    substantive_results = [
-        result
-        for result in results
-        if result["invoked"] and _gold_status(result) == "accepted_for_candidate_review"
-    ]
+    substantive_results, abstention_results, policy_results = classify_quality_buckets(
+        results, cases
+    )
     invoked_results = [result for result in results if result["invoked"]]
     policy_quality_passes = sum(1 for result in policy_results if result["quality"]["pass"])
     abstention_quality_passes = sum(

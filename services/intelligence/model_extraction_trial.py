@@ -21,7 +21,7 @@ from services.intelligence.ai_extraction_boundary import (
 
 ADAPTER_VERSION = "m4-model-trial-v0.3"
 PROMPT_TEMPLATE_ID = "m4-bounded-candidate-extraction"
-PROMPT_TEMPLATE_VERSION = "v0.5"
+PROMPT_TEMPLATE_VERSION = "v0.6"
 # Canonical SDA participant-role vocabulary, identical to the canonical Event
 # schema enum and the Resolver/Verifier _EVENT_ROLES set. The candidate
 # boundary enforces it so unsupported roles fail here, not downstream.
@@ -86,9 +86,10 @@ Rules:
     for the company party to a contract signature or award, supplier only when supply is
     all the source states, participant for exercise or training attendance. Generic roles
     are fallbacks, not defaults, and a participant carries one role per event.
-18. A numeric unit is the bare counted-class noun with role and type modifiers removed:
-    a source stating 12 trainer aircraft yields unit "aircraft". Use null when the source
-    states no countable unit.
+18. A numeric unit is the head noun of the counted-class phrase the source itself
+    states, with role and type modifiers removed: 12 trainer aircraft yields unit
+    "aircraft". When the source counts by designation only, with no class noun, use the
+    designation exactly as stated. Use null when the source states no countable unit.
 
 OUTPUT RECORD CONTRACT FOR THIS BOUNDED TRIAL:
 Evidence record fields:

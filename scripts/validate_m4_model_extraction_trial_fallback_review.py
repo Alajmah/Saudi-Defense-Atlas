@@ -94,7 +94,7 @@ def main() -> int:
         failures,
     )
     expect(
-        PROMPT_TEMPLATE_VERSION == "v0.5",
+        PROMPT_TEMPLATE_VERSION == "v0.6",
         "prompt-template version was not bumped for the changed model contract",
         failures,
     )
@@ -111,7 +111,7 @@ def main() -> int:
         "When you abstain entirely, return all four",
         "permissions, not requirements",
         "most specific role the source explicitly states",
-        "bare counted-class noun with role and type modifiers removed",
+        "head noun of the counted-class phrase",
     ):
         expect(
             fragment in delivery_prompt,
