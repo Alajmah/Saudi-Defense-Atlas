@@ -63,14 +63,14 @@ Bucket membership comes **solely from each case's gold expectation**, never from
 
 - `substantive_quality_case_pass_count` / `substantive_quality_case_pass_rate` over `substantive_case_count`;
 - `expected_abstention_quality_case_pass_count` / `expected_abstention_quality_case_pass_rate` over `expected_abstention_case_count`;
-- `policy_gate_case_pass_count` / `policy_gate_case_pass_rate` (unchanged from v0.6);
-- the retained `invoked_quality_case_pass_rate` (substantive + expected-abstention) and whole-corpus rate, each labeled as such.
+- `policy_gate_case_count` / `policy_gate_case_pass_count` / `policy_gate_case_pass_rate` (field names from v0.6; membership is now gold-based);
+- the retained `invoked_quality_case_pass_rate`, computed directly over **all observed invocations** regardless of gold expectation (an unexpectedly invoked policy-gate case counts here as a failure as well as in the policy denominator), and the whole-corpus rate, each labeled as such.
 
 `invoked_quality_case_pass_rate` is an invoked-case outcome metric and must never be described as semantic extraction accuracy. **`substantive_quality_case_pass_rate` is the only figure that measures extraction against substantive gold.**
 
 ### Status
 
-**Enforced** (report mechanics): computed by the runner from gold expectations; deterministic validators assert the split.
+**Enforced** (report mechanics): computed by the runner from gold expectations, which are validated before any model invocation — unique non-empty case IDs, object-valued gold, and exactly one of the three legal expected statuses per case; deterministic validators assert the split and the preflight rejections.
 
 ## Claim ceiling
 

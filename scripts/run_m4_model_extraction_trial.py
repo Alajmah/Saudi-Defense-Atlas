@@ -137,6 +137,41 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+LEGAL_EXPECTED_STATUSES = (
+    "accepted_for_candidate_review",
+    "rejected",
+    "blocked_before_invocation",
+)
+
+
+def validate_metric_contract(cases: list[dict[str, Any]]) -> None:
+    """Fail closed on metric-contract inputs before any model invocation (FSR2-01).
+
+    Quality denominators are defined by each case's gold expectation, so a
+    malformed expectation must be rejected up front: a truthy non-object gold
+    or an unrecognized status would otherwise crash or silently shrink the
+    denominators only after live invocations have run, and duplicate IDs would
+    collapse the gold lookup.
+    """
+
+    seen_ids: set[str] = set()
+    for index, case in enumerate(cases):
+        case_id = case.get("id") if isinstance(case, dict) else None
+        if not isinstance(case_id, str) or not case_id.strip():
+            raise RuntimeError(f"fixture case {index} lacks a non-empty string id")
+        if case_id in seen_ids:
+            raise RuntimeError(f"fixture contains duplicate case id: {case_id}")
+        seen_ids.add(case_id)
+        gold = case.get("gold")
+        if not isinstance(gold, dict):
+            raise RuntimeError(f"case {case_id} gold must be an object")
+        if gold.get("expected_status") not in LEGAL_EXPECTED_STATUSES:
+            raise RuntimeError(
+                f"case {case_id} expected_status must be one of: "
+                + ", ".join(LEGAL_EXPECTED_STATUSES)
+            )
+
+
 def load_cases(path: Path) -> tuple[str, list[dict[str, Any]]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     version = payload.get("version")
@@ -145,6 +180,7 @@ def load_cases(path: Path) -> tuple[str, list[dict[str, Any]]]:
         raise RuntimeError("evaluation fixture requires version")
     if not isinstance(cases, list) or not cases:
         raise RuntimeError("evaluation fixture requires non-empty cases")
+    validate_metric_contract(cases)
     return version, cases
 
 
@@ -1139,7 +1175,13 @@ def main() -> int:
     substantive_quality_passes = sum(
         1 for result in substantive_results if result["quality"]["pass"]
     )
-    invoked_quality_passes = substantive_quality_passes + abstention_quality_passes
+    # FSR2-02: the invoked-case rate is computed directly over observed
+    # invocations, whatever the gold expectation - an unexpectedly invoked
+    # policy-gate case appears here as a failure as well as in the policy
+    # denominator, rather than vanishing from a reconstructed numerator.
+    invoked_quality_passes = sum(
+        1 for result in invoked_results if result["quality"]["pass"]
+    )
     throughput = invocation_count / total_seconds if total_seconds > 0 else None
 
     report = {

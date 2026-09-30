@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -637,6 +638,73 @@ def main() -> int:
         failures,
     )
     expect(not adv_abstention, "unexpected buckets appeared in abstention", failures)
+
+    # FSR2-02 symmetric case: an unexpectedly invoked policy-gate case stays
+    # in the policy denominator (failing it) and counts in the observed-
+    # invocation rate; it never enters substantive or abstention buckets.
+    invoked_policy = [
+        {"case_id": "TRIAL-RESTRICTED-LIVE", "invoked": True, "run": {"x": 1},
+         "quality": {"pass": False}},
+        {"case_id": "TRIAL-EN-DELIVERY", "invoked": True, "run": {"x": 1},
+         "quality": {"pass": True}},
+    ]
+    ip_substantive, ip_abstention, ip_policy = trial_runner.classify_quality_buckets(
+        invoked_policy, cases
+    )
+    expect(
+        [r["case_id"] for r in ip_policy] == ["TRIAL-RESTRICTED-LIVE"],
+        "unexpectedly invoked policy case left the policy denominator",
+        failures,
+    )
+    expect(
+        not any(
+            r["case_id"] == "TRIAL-RESTRICTED-LIVE"
+            for r in ip_substantive + ip_abstention
+        ),
+        "unexpectedly invoked policy case leaked into substantive or abstention",
+        failures,
+    )
+    invoked_passes = sum(
+        1 for r in invoked_policy if r["invoked"] and r["quality"]["pass"]
+    )
+    expect(
+        invoked_passes == 1,
+        "observed-invocation pass count must include the policy case failure directly",
+        failures,
+    )
+
+    # FSR2-01: the gold/ID metric contract is enforced before any invocation.
+    def _metric_case(case_id="TRIAL-X", gold=None):
+        return {"id": case_id, "gold": gold}
+
+    legal_gold = {"expected_status": "rejected"}
+    trial_runner.validate_metric_contract([_metric_case(gold=legal_gold)])
+    for label, bad in (
+        ("blank case id", [_metric_case(case_id="  ", gold=legal_gold)]),
+        ("non-string case id", [{"id": 7, "gold": legal_gold}]),
+        ("duplicate case ids", [_metric_case(gold=legal_gold), _metric_case(gold=legal_gold)]),
+        ("non-object gold", [_metric_case(gold="rejected")]),
+        ("missing expected_status", [_metric_case(gold={})]),
+        ("unknown expected_status", [_metric_case(gold={"expected_status": "maybe"})]),
+    ):
+        try:
+            trial_runner.validate_metric_contract(bad)
+            failures.append(f"metric-contract preflight accepted {label}")
+        except RuntimeError:
+            pass
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bad_fixture = Path(tmpdir) / "bad-fixture.json"
+        bad_fixture.write_text(
+            json.dumps(
+                {"version": "x", "cases": [{"id": "TRIAL-X", "gold": "rejected"}]}
+            ),
+            encoding="utf-8",
+        )
+        try:
+            trial_runner.load_cases(bad_fixture)
+            failures.append("load_cases accepted a fixture with non-object gold")
+        except RuntimeError:
+            pass
 
     args = copilot_command_args("copilot", "gpt-5.4", "synthetic prompt")
     required_cli_controls = {
