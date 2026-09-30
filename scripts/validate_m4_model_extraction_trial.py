@@ -7,6 +7,7 @@ import copy
 import hashlib
 import json
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import scripts.run_m4_model_extraction_trial as trial_runner  # noqa: E402
 from scripts.run_m4_model_extraction_trial import copilot_command_args  # noqa: E402
 from scripts.validate_schemas import build_registry  # noqa: E402
 from services.intelligence.ai_extraction_boundary import (  # noqa: E402
@@ -278,6 +280,15 @@ def main() -> int:
     base_case = by_id["TRIAL-EN-DELIVERY"]
     prompt = build_trial_prompt(base_case)
     raw = fake_output(base_case)
+    for semantics_fragment in (
+        "most specific role the source explicitly states",
+        "head noun of the counted-class phrase",
+    ):
+        expect(
+            semantics_fragment in prompt,
+            f"prompt lacks the semantics-contract fragment: {semantics_fragment}",
+            failures,
+        )
 
     first = build_extraction_run_from_model_output(
         case=base_case, model_trace=trace, prompt=prompt, raw_output=raw,
@@ -603,6 +614,97 @@ def main() -> int:
     blocked = execute_trial_case(case=wrong_lane, model_trace=trace, invoke=should_not_invoke, clock=clock)
     expect(not blocked.invoked and blocked.run is None, "non-candidate lane was not blocked", failures)
     expect(wrong_invocations == 0, "non-candidate lane reached invoker", failures)
+
+    # FSR-01: bucket membership comes from gold expectation alone. An
+    # unexpectedly blocked substantive case must stay in the substantive
+    # denominator (as a failure), never disappear into the policy bucket.
+    adversarial_results = [
+        {"case_id": "TRIAL-EN-DELIVERY", "invoked": False, "run": None,
+         "quality": {"pass": False}},
+        {"case_id": "TRIAL-RESTRICTED-LIVE", "invoked": False, "run": None,
+         "quality": {"pass": True}},
+    ]
+    adv_substantive, adv_abstention, adv_policy = trial_runner.classify_quality_buckets(
+        adversarial_results, cases
+    )
+    expect(
+        [r["case_id"] for r in adv_substantive] == ["TRIAL-EN-DELIVERY"],
+        "unexpectedly blocked substantive case left the substantive denominator",
+        failures,
+    )
+    expect(
+        [r["case_id"] for r in adv_policy] == ["TRIAL-RESTRICTED-LIVE"],
+        "unexpectedly blocked substantive case leaked into the policy denominator",
+        failures,
+    )
+    expect(not adv_abstention, "unexpected buckets appeared in abstention", failures)
+
+    # FSR2-02 symmetric case: an unexpectedly invoked policy-gate case stays
+    # in the policy denominator (failing it) and counts in the observed-
+    # invocation rate; it never enters substantive or abstention buckets.
+    invoked_policy = [
+        {"case_id": "TRIAL-RESTRICTED-LIVE", "invoked": True, "run": {"x": 1},
+         "quality": {"pass": False}},
+        {"case_id": "TRIAL-EN-DELIVERY", "invoked": True, "run": {"x": 1},
+         "quality": {"pass": True}},
+    ]
+    ip_substantive, ip_abstention, ip_policy = trial_runner.classify_quality_buckets(
+        invoked_policy, cases
+    )
+    expect(
+        [r["case_id"] for r in ip_policy] == ["TRIAL-RESTRICTED-LIVE"],
+        "unexpectedly invoked policy case left the policy denominator",
+        failures,
+    )
+    expect(
+        not any(
+            r["case_id"] == "TRIAL-RESTRICTED-LIVE"
+            for r in ip_substantive + ip_abstention
+        ),
+        "unexpectedly invoked policy case leaked into substantive or abstention",
+        failures,
+    )
+    invoked_passes = sum(
+        1 for r in invoked_policy if r["invoked"] and r["quality"]["pass"]
+    )
+    expect(
+        invoked_passes == 1,
+        "observed-invocation pass count must include the policy case failure directly",
+        failures,
+    )
+
+    # FSR2-01: the gold/ID metric contract is enforced before any invocation.
+    def _metric_case(case_id="TRIAL-X", gold=None):
+        return {"id": case_id, "gold": gold}
+
+    legal_gold = {"expected_status": "rejected"}
+    trial_runner.validate_metric_contract([_metric_case(gold=legal_gold)])
+    for label, bad in (
+        ("blank case id", [_metric_case(case_id="  ", gold=legal_gold)]),
+        ("non-string case id", [{"id": 7, "gold": legal_gold}]),
+        ("duplicate case ids", [_metric_case(gold=legal_gold), _metric_case(gold=legal_gold)]),
+        ("non-object gold", [_metric_case(gold="rejected")]),
+        ("missing expected_status", [_metric_case(gold={})]),
+        ("unknown expected_status", [_metric_case(gold={"expected_status": "maybe"})]),
+    ):
+        try:
+            trial_runner.validate_metric_contract(bad)
+            failures.append(f"metric-contract preflight accepted {label}")
+        except RuntimeError:
+            pass
+    with tempfile.TemporaryDirectory() as tmpdir:
+        bad_fixture = Path(tmpdir) / "bad-fixture.json"
+        bad_fixture.write_text(
+            json.dumps(
+                {"version": "x", "cases": [{"id": "TRIAL-X", "gold": "rejected"}]}
+            ),
+            encoding="utf-8",
+        )
+        try:
+            trial_runner.load_cases(bad_fixture)
+            failures.append("load_cases accepted a fixture with non-object gold")
+        except RuntimeError:
+            pass
 
     args = copilot_command_args("copilot", "gpt-5.4", "synthetic prompt")
     required_cli_controls = {

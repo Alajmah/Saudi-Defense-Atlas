@@ -137,6 +137,41 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
+LEGAL_EXPECTED_STATUSES = (
+    "accepted_for_candidate_review",
+    "rejected",
+    "blocked_before_invocation",
+)
+
+
+def validate_metric_contract(cases: list[dict[str, Any]]) -> None:
+    """Fail closed on metric-contract inputs before any model invocation (FSR2-01).
+
+    Quality denominators are defined by each case's gold expectation, so a
+    malformed expectation must be rejected up front: a truthy non-object gold
+    or an unrecognized status would otherwise crash or silently shrink the
+    denominators only after live invocations have run, and duplicate IDs would
+    collapse the gold lookup.
+    """
+
+    seen_ids: set[str] = set()
+    for index, case in enumerate(cases):
+        case_id = case.get("id") if isinstance(case, dict) else None
+        if not isinstance(case_id, str) or not case_id.strip():
+            raise RuntimeError(f"fixture case {index} lacks a non-empty string id")
+        if case_id in seen_ids:
+            raise RuntimeError(f"fixture contains duplicate case id: {case_id}")
+        seen_ids.add(case_id)
+        gold = case.get("gold")
+        if not isinstance(gold, dict):
+            raise RuntimeError(f"case {case_id} gold must be an object")
+        if gold.get("expected_status") not in LEGAL_EXPECTED_STATUSES:
+            raise RuntimeError(
+                f"case {case_id} expected_status must be one of: "
+                + ", ".join(LEGAL_EXPECTED_STATUSES)
+            )
+
+
 def load_cases(path: Path) -> tuple[str, list[dict[str, Any]]]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     version = payload.get("version")
@@ -145,6 +180,7 @@ def load_cases(path: Path) -> tuple[str, list[dict[str, Any]]]:
         raise RuntimeError("evaluation fixture requires version")
     if not isinstance(cases, list) or not cases:
         raise RuntimeError("evaluation fixture requires non-empty cases")
+    validate_metric_contract(cases)
     return version, cases
 
 
@@ -488,6 +524,34 @@ def zai_invoker(
             raise RuntimeError(redacted[:512]) from exc
 
     return invoke
+
+
+def classify_quality_buckets(
+    results: list[dict[str, Any]], cases: list[dict[str, Any]]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    """Bucket every case by its gold expectation alone (FSR-01).
+
+    Substantive, expected-abstention, and policy-gate membership come solely
+    from ``gold.expected_status``. Observed invocation is a separate metric:
+    a substantive-gold case that is unexpectedly blocked stays in the
+    substantive denominator, where it counts as a failure rather than
+    disappearing into the policy bucket.
+    """
+
+    gold_by_id = {
+        case.get("id"): (case.get("gold") or {}).get("expected_status")
+        for case in cases
+    }
+
+    def _bucket(result: dict[str, Any]) -> Any:
+        return gold_by_id.get(result.get("case_id"))
+
+    substantive = [
+        result for result in results if _bucket(result) == "accepted_for_candidate_review"
+    ]
+    abstention = [result for result in results if _bucket(result) == "rejected"]
+    policy = [result for result in results if _bucket(result) == "blocked_before_invocation"]
+    return substantive, abstention, policy
 
 
 def normalize_name(value: str) -> str:
@@ -1097,20 +1161,31 @@ def main() -> int:
 
     total_seconds = time.monotonic() - total_started
     quality_passes = sum(1 for result in results if result["quality"]["pass"])
-    # LTR-01: model extraction quality and policy/preflight gate quality are
-    # reported separately; the whole-corpus metric is retained, clearly as such.
+    # LTR-01/RRV6-01: policy-gate, expected-abstention, and substantive cases
+    # are three separate denominators; the whole-corpus and invoked-case rates
+    # are retained, clearly labeled, and neither is semantic accuracy.
+    substantive_results, abstention_results, policy_results = classify_quality_buckets(
+        results, cases
+    )
     invoked_results = [result for result in results if result["invoked"]]
-    policy_results = [result for result in results if not result["invoked"]]
+    policy_quality_passes = sum(1 for result in policy_results if result["quality"]["pass"])
+    abstention_quality_passes = sum(
+        1 for result in abstention_results if result["quality"]["pass"]
+    )
+    substantive_quality_passes = sum(
+        1 for result in substantive_results if result["quality"]["pass"]
+    )
+    # FSR2-02: the invoked-case rate is computed directly over observed
+    # invocations, whatever the gold expectation - an unexpectedly invoked
+    # policy-gate case appears here as a failure as well as in the policy
+    # denominator, rather than vanishing from a reconstructed numerator.
     invoked_quality_passes = sum(
         1 for result in invoked_results if result["quality"]["pass"]
-    )
-    policy_quality_passes = sum(
-        1 for result in policy_results if result["quality"]["pass"]
     )
     throughput = invocation_count / total_seconds if total_seconds > 0 else None
 
     report = {
-        "report_version": "m4-model-extraction-live-trial-v0.6",
+        "report_version": "m4-model-extraction-live-trial-v0.7",
         "corpus_version": corpus_version,
         "provider": trace.provider,
         "requested_model": requested_model,
@@ -1132,6 +1207,20 @@ def main() -> int:
         "invoked_quality_case_pass_count": invoked_quality_passes,
         "invoked_quality_case_pass_rate": (
             invoked_quality_passes / len(invoked_results) if invoked_results else None
+        ),
+        "substantive_case_count": len(substantive_results),
+        "substantive_quality_case_pass_count": substantive_quality_passes,
+        "substantive_quality_case_pass_rate": (
+            substantive_quality_passes / len(substantive_results)
+            if substantive_results
+            else None
+        ),
+        "expected_abstention_case_count": len(abstention_results),
+        "expected_abstention_quality_case_pass_count": abstention_quality_passes,
+        "expected_abstention_quality_case_pass_rate": (
+            abstention_quality_passes / len(abstention_results)
+            if abstention_results
+            else None
         ),
         "policy_gate_case_count": len(policy_results),
         "policy_gate_case_pass_count": policy_quality_passes,
@@ -1197,6 +1286,7 @@ def main() -> int:
                 "integrity_failures": integrity_failures,
                 "quality_pass_rate": report["quality_case_pass_rate"],
                 "invoked_quality_pass_rate": report["invoked_quality_case_pass_rate"],
+                "substantive_quality_pass_rate": report["substantive_quality_case_pass_rate"],
                 "policy_gate_pass_rate": report["policy_gate_case_pass_rate"],
                 "output": str(args.output),
             },
