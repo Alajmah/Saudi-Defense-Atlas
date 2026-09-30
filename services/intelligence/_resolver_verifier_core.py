@@ -44,7 +44,10 @@ _ENTITY_PREDICATES: dict[str, tuple[set[str], set[str]]] = {
     "organization.operates.equipment_variant": ({"organization"}, {"equipment_variant"}),
     "military_unit.part_of.organization": ({"military_unit"}, {"organization"}),
     "military_unit.operates.equipment_variant": ({"military_unit"}, {"equipment_variant"}),
-    "manufacturer.manufactures.equipment": ({"organization"}, {"equipment"}),
+    # The manufacturer predicate targets the manufactured item: canonical
+    # precedent (M1 F-15SA) and the designation typing convention point it at
+    # equipment_variant as well as family-level equipment.
+    "manufacturer.manufactures.equipment": ({"organization"}, {"equipment", "equipment_variant"}),
     "company.participates_in.procurement_program": ({"organization"}, {"procurement_program"}),
     "equipment_variant.variant_of.equipment": ({"equipment_variant"}, {"equipment"}),
     "procurement_program.acquires.equipment_variant": ({"procurement_program"}, {"equipment_variant"}),
