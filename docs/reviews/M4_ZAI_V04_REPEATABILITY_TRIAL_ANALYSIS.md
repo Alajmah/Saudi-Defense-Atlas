@@ -2,7 +2,7 @@
 
 ## Status
 
-Evidence-only analysis of the five-run S-series executed on 2026-10-01 from frozen `main` at `e61b6c6f1367805050f39e7ff9bf6cdd90c667db`. The ten raw artifacts and a new S-series manifest are preserved under `docs/evidence/m4/2026-10-01/`; the R-series evidence and its original manifest are untouched. This document changes no prompt, gold, evaluator, resolver, or ontology.
+Evidence-only analysis of the five-run S-series executed on 2026-10-01 from frozen `main` at `e61b6c6f1367805050f39e7ff9bf6cdd90c667db`. The ten raw artifacts and a new S-series manifest are preserved under `docs/evidence/m4/2026-10-01/`; the R-series evidence and its original manifest are untouched. This document changes no prompt, gold, evaluator, resolver, or ontology. Corrected per first-pass review 5378708381 (SREP-01): the S4 characterization no longer asserts the absence of a contract defect, since the prompt/schema permit both assessment values without defining their selection semantics; the distinction is left open.
 
 ## Comparability boundary (frozen wording constraint)
 
@@ -65,7 +65,7 @@ The delivery Atlas role was `supplier` in S1–S4 and `manufacturer` in S5, with
 
 ### 3. S4 quantity `extraction_assessment`: one observation
 
-S4's quantity claim failed `claims-semantics` on `extraction_assessment` alone: the model emitted `normalized_from_explicit_text` (its rationale explicitly cites the head-noun unit normalization) where gold expects `explicit_text`. The claim value, unit, bounds, and entity set were perfect. This is **one observation, not a new semantic finding or contract defect**; whether assessment-verb behavior is itself variable awaits more data.
+S4's quantity claim failed `claims-semantics` on `extraction_assessment` alone: the model emitted `normalized_from_explicit_text` (its rationale explicitly cites the head-noun unit normalization) where gold expects `explicit_text`. The claim value, unit, bounds, and entity set were perfect. This is **one observation. No contract or gold change is proposed in this evidence-preservation increment.** The current prompt/schema allow both `explicit_text` and `normalized_from_explicit_text` but do not define their selection semantics; whether that distinction needs independent adjudication remains open.
 
 ## Provider/runtime integrity
 
