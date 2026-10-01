@@ -1,0 +1,82 @@
+# M4 Terminology Registry Delivery Design — Remediation Record
+
+## Protocol
+
+This additive record remediates the frozen maintainer first-pass findings in `M4_TERMINOLOGY_DELIVERY_FIRST_PASS.md`. The first-pass file is not modified. No Codex or fallback result was consulted before the first pass was frozen. No live model call was made and no entitlement was consumed.
+
+Frozen first-pass reviewed design head: `203184221b42af8d1aa264bd62a6fa2cf2b7fd77`.
+
+## TRD-01 — digest wording overstated the bound surface — REMEDIATED
+
+The design now uses the exact current contract: `load_terminology()` accepts `version` + complete term records, and `terminology_digest()` hashes that validated acceptance payload. It explicitly records that top-level descriptive registry `scope` is not accepted into the runtime registry object, is not digest-bound, and is not delivered to the model.
+
+All references to “full source registry” were replaced with “validated registry acceptance payload” or equivalent.
+
+## TRD-02 — Entity-name precedence lacked a deterministic collision rule — REMEDIATED
+
+The design now requires a pre-invocation registry/context collision gate. Any English registry rendering that case-insensitively equals a context Entity English name, or any Arabic registry rendering that exactly equals a context Entity Arabic name, fails closed before rendering/invocation.
+
+The rule rejects even a fully matching bilingual pair because the terminology registry is explicitly non-entity terminology and does not need to duplicate context-owned Entity names. Fuzzy/substring matching remains out of scope.
+
+The broader statement that official Entity names outrank terminology remains a prompt + human-review rule; the design no longer claims a generic mechanical semantic theorem beyond exact collisions.
+
+## TRD-03 — renderer ownership/binding was underspecified — REMEDIATED
+
+The design now freezes the renderer boundary conceptually as `render_draft_prompt(context, terminology) -> str`. The renderer must load/validate the supplied registry, verify its version and digest against the context, run delivery gates, derive the least-privilege delivery payload internally, canonically serialize both data blocks, and return the exact complete string supplied to the invoker.
+
+There is no global/default registry, caller-supplied pre-rendered terminology block, or rendering path over registry bytes that have not been checked against the context binding.
+
+## TRD-04 — delivery sensitivity gate missed PW-01 vocabulary — REMEDIATED
+
+The design no longer proposes reusing only the older drafting-eligibility marker set. It requires one shared model-input-forbidden vocabulary covering:
+
+- existing English restricted markers;
+- existing Arabic restricted markers;
+- `availability`;
+- `posture`;
+- `movement`;
+- `coordinate`;
+- `coordinates`.
+
+Wrapper checks and terminology-delivery checks must consume the same underlying pinned vocabulary, plus the existing coordinate-like numeric pattern. This prevents terminology delivery from reopening the lexical-priming surface closed by PW-01.
+
+## TRD-05 — lexical-only delivery dropped registry category semantics — REMEDIATED
+
+Fallback review `5386641700` identified that the first remediated design projected only `en` / `ar` and treated `category` as unnecessary metadata. That was too aggressive: `category` is part of every validated registry term and distinguishes procurement-state, rank, equipment-category, and technical-term mappings. Removing it can broaden the apparent applicability of ambiguous renderings such as `approved` or `delivered`.
+
+The delivery projection now preserves `category` + `en` + `ar` for every registry term, in registry order. Registry version, `term_id`, and top-level descriptive `scope` remain outside the model-facing payload. The design explicitly states that category narrows lexical applicability but does not authorize a fact or prove relevance to a particular Claim.
+
+Validator requirements now include exact category preservation and same-version category mutation refusal through the existing registry digest mismatch.
+
+## TRD-06 — model-visible category was still an arbitrary string channel — REMEDIATED
+
+Exact-head re-review `5386657270` found that making `category` model-visible exposed a new gap: current `load_terminology()` accepts any non-empty category string, while the proposed delivery sensitivity gate scanned only `en` / `ar` renderings.
+
+The design now freezes the allowed model-visible category vocabulary to exactly:
+
+- `equipment_category`
+- `procurement_state`
+- `rank`
+- `technical_term`
+
+Implementation must fail closed on any other category before rendering/invocation. Extending this set becomes an explicit reviewed contract change.
+
+The design also now requires the shared model-input-forbidden vocabulary and coordinate-like scan to cover **every delivered string field**, including `category`, `en`, and `ar`. This prevents category from becoming a bypass around the wrapper/rendering lexical guard.
+
+Validator requirements now include unknown-category refusal before invoker and construction-level proof that category participates in the same delivery scan.
+
+## Additional precision added during remediation
+
+The design explicitly distinguishes static-wrapper properties from whole-input properties after terminology delivery. Arabic registry renderings and bounded categories are intentionally present in the typed TERMINOLOGY block, and future terminology data may contain digits; neither fact changes the context-only factual-number allowlist.
+
+The model-facing payload is the least-privilege **bounded categorized lexical projection**: ordered `terms[].category` / `terms[].en` / `terms[].ar`. Registry version, term IDs, and descriptive scope remain outside the model-facing payload.
+
+## Status after remediation
+
+TRD-01 through TRD-04 were addressed at design commit `713691c3b9c0744a6a050ed59ec628631e5014ae`.
+
+TRD-05 was addressed at design commit `c82eaaba8352ed2125a4b28b5fe0fa5763b3a6ed` after the Codex-quota fallback review.
+
+TRD-06 was addressed at design commit `6e06e8b30c59c20c1f5beaa91ce66e2cfda6d125` after exact-head re-review. The frozen first-pass file and all prior frozen reviews are not rewritten.
+
+Implementation remains intentionally absent. Template v0.2, adapter v0.8, schema changes, validators, and any live run are future work gated on exact-head re-review of this design.
