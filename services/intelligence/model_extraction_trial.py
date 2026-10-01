@@ -21,7 +21,7 @@ from services.intelligence.ai_extraction_boundary import (
 
 ADAPTER_VERSION = "m4-model-trial-v0.3"
 PROMPT_TEMPLATE_ID = "m4-bounded-candidate-extraction"
-PROMPT_TEMPLATE_VERSION = "v0.7"
+PROMPT_TEMPLATE_VERSION = "v0.8"
 # Canonical SDA participant-role vocabulary, identical to the canonical Event
 # schema enum and the Resolver/Verifier _EVENT_ROLES set. The candidate
 # boundary enforces it so unsupported roles fail here, not downstream.
@@ -95,6 +95,10 @@ Rules:
     states, with role and type modifiers removed: 12 trainer aircraft yields unit
     "aircraft". When the source counts by designation only, with no class noun, use the
     designation exactly as stated. Use null when the source states no countable unit.
+19. Emit an Entity record only when that entity fills a role in this extraction - as
+    the subject or value of an emitted Claim, or as a participant or related entity of
+    an emitted Event. Do not emit entities that no emitted Claim or Event uses, even
+    when the source names them.
 
 OUTPUT RECORD CONTRACT FOR THIS BOUNDED TRIAL:
 Evidence record fields:

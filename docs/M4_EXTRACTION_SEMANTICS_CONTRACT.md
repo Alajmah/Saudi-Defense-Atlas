@@ -42,11 +42,27 @@ The v0.7 review identified a tension: the extraction prompt requires the variant
 
 ### Provenance note
 
-Canonical SDA precedent distinguishes named discrete products as variants of families: F-15SA carries a `variant_of` relation to the F-15 family, and PAC-3 MSE's own designation names a segment enhancement within the PAC-3 family. The ontology defines EquipmentVariant as "a specific model/variant, separated from the equipment family when facts differ materially by variant." The distinguishing signal in canonical data is the presence of a specific product designation, never the literal word "variant". The corpus gold expected `equipment_variant` for Falcon-X before any live run; this convention justifies that expectation independently.
+Canonical SDA precedent distinguishes named discrete products as variants of families: F-15SA carries a `variant_of` relation to the F-15 family, and PAC-3 MSE's own designation names a segment enhancement within the PAC-3 family. The ontology defines EquipmentVariant as "a specific model/variant, separated from the equipment family when facts differ materially by variant." The distinguishing signal in canonical data is the presence of a specific product designation, never the literal word "variant". The corpus gold expected `equipment_variant` for Falcon-X before any live run; this convention justifies that expectation independently. **Adjudicated 2026-10-01 (REP-01):** the Arabic corpus entity "منظومة التدريب ألفا" (Alpha training system) carries the specific designation "ألفا" and appears in explicit supply context ("لتوريد", to supply), so under this rule it is a named discrete deliverable and `equipment_variant` is the correct type; corpus gold was updated accordingly in fixture `m4-model-extraction-eval-v0.4` (the single gold change in that bump, with the historical scores' non-comparability recorded in the adjudication decision record).
 
 ### Status
 
 **Evaluated, not enforced.** Both types remain schema-valid; typing stays prompt-instructed (rule 13 of prompt v0.7 carries the clarified rule) and is scored by the exact-gold evaluator. Mechanical enforcement would require an ontology-external designation classifier and remains out of scope.
+
+## Entity-set rule (REP-02)
+
+### The claim/event-driven rule
+
+An Entity record is expected **only when that entity fills a role in the same extraction** — as the subject or value of an emitted Claim, or as a participant or related entity of an emitted Event. Source-supported noun phrases that no emitted Claim or Event uses are not emitted, even when representable.
+
+Neither exhaustive nor abstractly minimal, the rule is claim/event-driven: entities are the bearers of relationships, and this trial's downstream architecture admits entity semantics into proposals exclusively through Claims and Events — the resolver/verifier materializes evidence, claim, and event mutations and never a standalone entity mutation. An entity record with no propositional role has no downstream representation.
+
+### Status
+
+**Evaluated, not enforced.** The boundary does not reject an extraction for an unused entity: an extra source-grounded entity is a scoring miss, not an integrity violation. The exact-gold evaluator scores the entity set exactly, and prompt template v0.8 instructs the rule.
+
+### Reconciliation with gold
+
+The quantity case's gold (Project Cedar only) was already minimal and required no change; the rule independently justifies the expectation that gold previously enforced without stating. The observed `trainer aircraft` outputs from the repeatability trial (R1-R5, all five runs emitting the counted-class phrase as an extra `equipment` entity) remain exact-gold failures under this rule, now grounded in a stated convention rather than an unstated one.
 
 ## Numeric-unit normalization (RRV6-03)
 

@@ -149,7 +149,7 @@ def fake_output(case: dict[str, Any]) -> str:
             "entities": [
                 entity("CAND-NOOR", "organization", "شركة النور للصناعات", evid),
                 entity("CAND-SAQER", "procurement_program", "برنامج الصقر", evid),
-                entity("CAND-ALPHA", "equipment", "منظومة التدريب ألفا", evid),
+                entity("CAND-ALPHA", "equipment_variant", "منظومة التدريب ألفا", evid),
             ],
             "claims": [],
             "events": [
@@ -285,6 +285,7 @@ def main() -> int:
         "head noun of the counted-class phrase",
         "whether or not the source uses the word variant",
         "conducts or leads an exercise or training",
+        "only when that entity fills a role in this extraction",
     ):
         expect(
             semantics_fragment in prompt,
