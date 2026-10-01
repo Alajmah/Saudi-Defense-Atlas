@@ -47,7 +47,19 @@ from services.intelligence.resolver_verifier import (  # noqa: E402
 
 EVIDENCE = ROOT / "docs" / "evidence" / "m4" / "2026-09-30" / "m4-zai-live-rerun-v0.7.json"
 SIDECAR = EVIDENCE.with_name(EVIDENCE.name + ".sha256")
-FIXTURE = ROOT / "tests" / "fixtures" / "m4-model-extraction-eval.json"
+# The v0.7 report was generated from corpus fixture v0.3. The live fixture has
+# since moved on (semantics adjudication, corpus v0.4), so the replay binds to
+# the frozen generation-time corpus bytes preserved beside the evidence.
+FIXTURE = (
+    ROOT
+    / "docs"
+    / "evidence"
+    / "m4"
+    / "2026-09-30"
+    / "corpus"
+    / "m4-model-extraction-eval-v0.3.json"
+)
+FIXTURE_SIDECAR = FIXTURE.with_name(FIXTURE.name + ".sha256")
 
 
 def expect(condition: bool, message: str, failures: list[str]) -> None:
@@ -71,6 +83,12 @@ def main() -> int:
     expect(digest == FROZEN_REPORT_SHA256, "replayed evidence is not the frozen v0.7 report", failures)
     report = json.loads(evidence_bytes.decode("utf-8"))
     corpus_bytes = FIXTURE.read_bytes()
+    frozen_fixture_digest = hashlib.sha256(corpus_bytes).hexdigest()
+    expect(
+        frozen_fixture_digest == FIXTURE_SIDECAR.read_text(encoding="utf-8").split()[0],
+        "frozen historical corpus copy does not match its own sidecar digest",
+        failures,
+    )
     corpus = json.loads(corpus_bytes.decode("utf-8"))
     recorded_corpus_sha = report.get("trial_context", {}).get("corpus_sha256")
     # The report was generated from a CRLF Windows checkout; a Linux CI

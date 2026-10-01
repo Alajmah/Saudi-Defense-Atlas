@@ -254,6 +254,27 @@ def main() -> int:
         failures,
     )
 
+    # REP-02: the claim/event-driven entity-set rule is enforced by the exact
+    # scorer - an extra source-grounded entity that no emitted Claim or Event
+    # uses is an entities-semantics failure, now grounded in the stated rule.
+    import copy as _copy
+    extra_entity = _copy.deepcopy(good_quantity)
+    unused = _copy.deepcopy(extra_entity["candidates"]["entities"][0])
+    unused["candidate_id"] = "CAND-ENT-UNUSED-TRAINER-AIRCRAFT"
+    unused["names"] = {"en": "trainer aircraft"}
+    extra_entity["candidates"]["entities"].append(unused)
+    extra_entity_quality = quality(quantity_case, extra_entity)
+    expect(
+        extra_entity_quality["pass"] is False,
+        "unused extra entity passed the exact entity-set scorer",
+        failures,
+    )
+    expect(
+        any(check.get("id") == "entities-semantics" and not check.get("pass") for check in extra_entity_quality["checks"]),
+        "unused extra entity did not fail specifically the entities-semantics check",
+        failures,
+    )
+
     # Codex P2: the insufficient-evidence gold case means a valid empty JSON
     # envelope rejected specifically for no substantive candidates. Malformed
     # JSON must not receive the same quality pass.

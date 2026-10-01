@@ -94,7 +94,7 @@ def main() -> int:
         failures,
     )
     expect(
-        PROMPT_TEMPLATE_VERSION == "v0.7",
+        PROMPT_TEMPLATE_VERSION == "v0.8",
         "prompt-template version was not bumped for the changed model contract",
         failures,
     )
@@ -114,6 +114,7 @@ def main() -> int:
         "head noun of the counted-class phrase",
         "whether or not the source uses the word variant",
         "conducts or leads an exercise or training",
+        "only when that entity fills a role in this extraction",
     ):
         expect(
             fragment in delivery_prompt,
