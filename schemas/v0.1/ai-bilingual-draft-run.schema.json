@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/ai-bilingual-draft-run.schema.json",
+  "title": "SDA AI Bilingual Draft Run",
+  "description": "Candidate-only bilingual draft artifact. Each factual content unit carries ONE shared support set (claim_ids + evidence_ids) with paired ar/en prose: locales may phrase a fact differently, but neither locale can introduce a fact with a different support set.",
+  "type": "object",
+  "required": [
+    "id",
+    "drafting_context_id",
+    "started_at",
+    "completed_at",
+    "model_trace",
+    "input_context_sha256",
+    "adapter_version",
+    "validation",
+    "units",
+    "undrafted_claim_ids",
+    "unknowns_rendered",
+    "omitted_unknown_ids",
+    "authority"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^SDA-AIDRAFT-[A-Z0-9]{8,32}$"
+    },
+    "drafting_context_id": {
+      "type": "string",
+      "pattern": "^SDA-DRAFTCTX-[A-Z0-9]{8,32}$"
+    },
+    "started_at": { "type": "string", "format": "date-time" },
+    "completed_at": { "type": "string", "format": "date-time" },
+    "model_trace": {
+      "type": "object",
+      "required": ["provider", "model", "model_version", "adapter_version"],
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "model": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "model_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+        "adapter_version": { "type": "string", "minLength": 1, "maxLength": 128 }
+      }
+    },
+    "input_context_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "adapter_version": { "type": "string", "minLength": 1, "maxLength": 128 },
+    "validation": {
+      "type": "object",
+      "required": ["status", "errors"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["accepted_for_editorial_review", "rejected"]
+        },
+        "errors": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1, "maxLength": 512 }
+        }
+      }
+    },
+    "units": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["unit_id", "claim_ids", "evidence_ids", "prose"],
+        "additionalProperties": false,
+        "properties": {
+          "unit_id": {
+            "type": "string",
+            "pattern": "^UNIT-[A-Z0-9-]+$"
+          },
+          "claim_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^SDA-CLAIM-[A-Z0-9-]+$"
+            }
+          },
+          "evidence_ids": {
+            "type": "array",
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^SDA-EVID-[A-Z0-9-]+$"
+            }
+          },
+          "prose": {
+            "type": "object",
+            "required": ["en", "ar"],
+            "additionalProperties": false,
+            "properties": {
+              "en": { "type": "string", "minLength": 1, "maxLength": 2000 },
+              "ar": { "type": "string", "minLength": 1, "maxLength": 2000 }
+            }
+          }
+        }
+      }
+    },
+    "undrafted_claim_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^SDA-CLAIM-[A-Z0-9-]+$"
+      }
+    },
+    "unknowns_rendered": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["unknown_id", "prose"],
+        "additionalProperties": false,
+        "properties": {
+          "unknown_id": {
+            "type": "string",
+            "pattern": "^UNK-[A-Z0-9-]+$"
+          },
+          "prose": {
+            "type": "object",
+            "required": ["en", "ar"],
+            "additionalProperties": false,
+            "properties": {
+              "en": { "type": "string", "minLength": 1, "maxLength": 1000 },
+              "ar": { "type": "string", "minLength": 1, "maxLength": 1000 }
+            }
+          }
+        }
+      }
+    },
+    "omitted_unknown_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^UNK-[A-Z0-9-]+$"
+      }
+    },
+    "authority": {
+      "type": "object",
+      "required": [
+        "mode",
+        "canonical_mutation_authority",
+        "publication_authority"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mode": { "const": "candidate_only" },
+        "canonical_mutation_authority": { "const": false },
+        "publication_authority": { "const": false }
+      }
+    }
+  },
+  "additionalProperties": false
+}

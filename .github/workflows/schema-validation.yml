@@ -123,6 +123,12 @@ jobs:
       - name: Validate M4 downstream-preservation replay
         run: python scripts/validate_m4_downstream_replay.py
 
+      - name: Validate M4 bounded bilingual drafting
+        run: python scripts/validate_m4_bilingual_drafting.py
+
+      - name: Validate M4 bilingual drafting isolation
+        run: python scripts/validate_m4_bilingual_drafting_isolation.py
+
       - name: Validate M4 resolver verifier boundary
         run: python scripts/validate_m4_resolver_verifier.py
 
