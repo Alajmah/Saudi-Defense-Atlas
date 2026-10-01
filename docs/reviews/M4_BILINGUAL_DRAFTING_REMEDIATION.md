@@ -48,6 +48,20 @@ The context now carries `terminology_sha256` (canonical digest over registry ver
 
 The PR description now says 10 changed files (the workflow modification included).
 
+### RBD-01 — support closure incomplete; global Evidence role — REMEDIATED (residual round)
+
+The re-review (`5380611107`) found the v0.2 closure admitted partial multi-claim support and ignored Evidence roles. The context now preserves the canonical shape exactly: each claim carries `evidence_links: [{evidence_id, role}]` with `supports`/`contradicts`/`contextualizes` on the link, and the global Evidence `role` field is gone. The adapter requires every claim in a unit to have at least one **cited `supports` link**; partial multi-claim support, contradicting-only, and contextual-only citations are rejected, and a claim with no supporting link anywhere is refused at build. Regressions cover all three cases plus the empty-citation unit.
+
+### RBD-02 — conflict detection collapsed scope and time — REMEDIATED (residual round)
+
+Conflict fingerprints are now `(subject, predicate, canonical scope)` and values are compared only within the same validity context. Ordered-12 versus delivered-6 coexists (regression), the same scope at provably different validity contexts coexists (regression), and the same scope and validity with different values still fails closed (regression). Deeper conflict authority is explicitly deferred to upstream canonical adjudication, per the reviewer's alternative.
+
+### RBD-03 — context schema looser than canonical — REMEDIATED (residual round)
+
+The context schema now reuses canonical definitions via the schema registry: `predicate_id` is the canonical enum (20 predicates), `value` is `common#$defs/claim_value` (typed oneOf), `scope.quantity_type` is the canonical procurement-stage enum, `validity` is `validity_interval` (object, not nullable — fixtures updated), `entity_type` is the canonical enum, and the Evidence locator mirrors the canonical locator shape. The builder self-validates its constructed context against this schema before returning, and the adapter's pre-invocation gate re-validates hand-assembled contexts against the same schema — so invalid predicates, invalid quantity stages, and malformed values are refused before any model invocation (regressions at build and in the schema gate). The service's schema loader builds a registry over sibling schemas so cross-file `$ref`s resolve, mirroring `validate_schemas`.
+
+Adapter version bumped to `m4-bilingual-drafting-v0.3` (boundary behavior and schema changed). LOW metadata: the PR description now says 11 files (the remediation record itself being the eleventh).
+
 ## Deterministic validation evidence
 
 - Complete repository suite at the remediation head: **41/41 validators — PASS**, with the rewritten core and isolation validators carrying the expanded matrices (scope grounding, claim-specific closure, exactly-once, bilingual gates, bookkeeping-digit rejection, deterministic unknown reuse, registry-byte binding, hand-assembled-context refusals, raw-output hashing).

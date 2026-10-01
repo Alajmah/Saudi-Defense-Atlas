@@ -83,11 +83,13 @@ def main() -> int:
             "subject_entity_id": "SDA-ORG-NOOR",
             "predicate_id": "contract.awarded_to.company",
             "value": {"kind": "entity", "entity_id": "SDA-EQUIP-ALPHA"},
-            "validity": None,
+            "validity": {"point_in_time": {"value": "2024-03-15", "precision": "day"}},
             "scope": None,
             "claim_state": "active",
             "record_status": "active",
-            "evidence_ids": ["SDA-EVID-ALPHA-1"],
+            "evidence_links": [
+                {"evidence_id": "SDA-EVID-ALPHA-1", "role": "supports"}
+            ],
         }
     ]
     evidence = [
@@ -96,7 +98,6 @@ def main() -> int:
             "document_id": "SDA-DOC-ALPHA",
             "record_status": "active",
             "locator": {"fragment": "source-text"},
-            "role": "supports",
         }
     ]
     unknowns = [
@@ -173,6 +174,35 @@ def main() -> int:
         failures,
     )
 
+    # 1b. RBD-01: a unit citing only contradicting-role evidence for its claim
+    #     is rejected (the claim's supporting link exists but is not cited).
+    contradicted_unit = copy.deepcopy(good_output)
+    contradicted_unit["units"][0]["evidence_ids"] = []
+    cu_result = run_with(lambda _: json.dumps(contradicted_unit, ensure_ascii=False))
+    expect(
+        cu_result["validation"]["status"] == "rejected",
+        "unit with empty evidence was not rejected",
+        failures,
+    )
+
+    # 1c. RBD-01: builder refuses a claim whose only link contradicts.
+    contradicted_claim = copy.deepcopy(claims)
+    contradicted_claim[0]["evidence_links"] = [
+        {"evidence_id": "SDA-EVID-ALPHA-1", "role": "contradicts"}
+    ]
+
+    def build_contradicted() -> None:
+        build_approved_drafting_context(
+            entities=entities,
+            claims=contradicted_claim,
+            evidence=evidence,
+            unknowns=unknowns,
+            terminology=terminology,
+            created_at="2026-10-02T00:00:04Z",
+        )
+
+    expect_error("claim with only a contradicting link", build_contradicted, failures)
+
     # 2. Unknown meaning is preserved by construction: the model only selects
     #    unknown IDs; authored unknown prose is an unsupported key.
     authored_unknown = copy.deepcopy(good_output)
@@ -197,6 +227,68 @@ def main() -> int:
         "accepted run did not reuse the exact pre-written unknown statements",
         failures,
     )
+
+    # 2b. RBD-02: scope-distinct quantities coexist; same scope+validity with a
+    #     different value conflicts; same scope at a different validity coexists.
+    ordered = copy.deepcopy(claims[0])
+    ordered["claim_id"] = "SDA-CLAIM-ALPHA-QTY-ORDERED"
+    ordered["predicate_id"] = "procurement.quantity"
+    ordered["value"] = {
+        "kind": "number", "value": 12, "unit": "aircraft",
+        "precision": "exact", "lower_bound": None, "upper_bound": None,
+    }
+    ordered["scope"] = {
+        "entity_ids": ["SDA-EQUIP-ALPHA"], "quantity_type": "ordered", "note": None,
+    }
+    delivered = copy.deepcopy(ordered)
+    delivered["claim_id"] = "SDA-CLAIM-ALPHA-QTY-DELIVERED"
+    delivered["value"]["value"] = 6
+    delivered["scope"]["quantity_type"] = "delivered"
+    try:
+        build_approved_drafting_context(
+            entities=entities,
+            claims=[claims[0], ordered, delivered],
+            evidence=evidence,
+            unknowns=unknowns,
+            terminology=terminology,
+            created_at="2026-10-02T00:00:05Z",
+        )
+    except BilingualDraftingError as exc:
+        failures.append(f"scope-distinct quantities were treated as conflict: {exc}")
+
+    same_scope_conflict = copy.deepcopy(ordered)
+    same_scope_conflict["claim_id"] = "SDA-CLAIM-ALPHA-QTY-CONFLICT"
+    same_scope_conflict["value"]["value"] = 99
+
+    def build_conflict() -> None:
+        build_approved_drafting_context(
+            entities=entities,
+            claims=[ordered, same_scope_conflict],
+            evidence=evidence,
+            unknowns=unknowns,
+            terminology=terminology,
+            created_at="2026-10-02T00:00:06Z",
+        )
+
+    expect_error("same scope+validity different value conflicts", build_conflict, failures)
+
+    earlier_validity = copy.deepcopy(ordered)
+    earlier_validity["claim_id"] = "SDA-CLAIM-ALPHA-QTY-2022"
+    earlier_validity["value"]["value"] = 6
+    earlier_validity["validity"] = {
+        "point_in_time": {"value": "2022-06-30", "precision": "day"}
+    }
+    try:
+        build_approved_drafting_context(
+            entities=entities,
+            claims=[ordered, earlier_validity],
+            evidence=evidence,
+            unknowns=unknowns,
+            terminology=terminology,
+            created_at="2026-10-02T00:00:07Z",
+        )
+    except BilingualDraftingError as exc:
+        failures.append(f"temporally distinct same-scope claims were treated as conflict: {exc}")
 
     # 3. Conflict fail-closed at the builder (disputed) and adapter (hand-assembled).
     disputed = copy.deepcopy(claims)

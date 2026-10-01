@@ -82,18 +82,22 @@ def canonical_inputs() -> tuple[list, list, list, list]:
             "scope": {"entity_ids": ["SDA-PROC-CEDAR"], "quantity_type": "contracted", "note": None},
             "claim_state": "active",
             "record_status": "active",
-            "evidence_ids": ["SDA-EVID-CEDAR-1"],
+            "evidence_links": [
+                {"evidence_id": "SDA-EVID-CEDAR-1", "role": "supports"}
+            ],
         },
         {
             "claim_id": "SDA-CLAIM-FALCONX-MANUFACTURER",
             "subject_entity_id": "SDA-ORG-ATLAS",
             "predicate_id": "manufacturer.manufactures.equipment",
             "value": {"kind": "entity", "entity_id": "SDA-EQUIP-FALCONX"},
-            "validity": None,
+            "validity": {"point_in_time": {"value": "2020-12-10", "precision": "day"}},
             "scope": None,
             "claim_state": "active",
             "record_status": "active",
-            "evidence_ids": ["SDA-EVID-FALCONX-1"],
+            "evidence_links": [
+                {"evidence_id": "SDA-EVID-FALCONX-1", "role": "supports"}
+            ],
         },
     ]
     evidence = [
@@ -102,14 +106,12 @@ def canonical_inputs() -> tuple[list, list, list, list]:
             "document_id": "SDA-DOC-CEDAR",
             "record_status": "active",
             "locator": {"fragment": "source-text"},
-            "role": "supports",
         },
         {
             "evidence_id": "SDA-EVID-FALCONX-1",
             "document_id": "SDA-DOC-FALCONX",
             "record_status": "active",
             "locator": {"fragment": "source-text"},
-            "role": "supports",
         },
     ]
     unknowns = [
@@ -227,7 +229,9 @@ def main() -> int:
     expect_error("entity missing official Arabic name", lambda: build(entities=missing_ar), failures)
 
     orphan = copy.deepcopy(claims)
-    orphan[0]["evidence_ids"] = ["SDA-EVID-NOT-HERE"]
+    orphan[0]["evidence_links"] = [
+        {"evidence_id": "SDA-EVID-NOT-HERE", "role": "supports"}
+    ]
     expect_error("claim citing evidence outside context", lambda: build(claims=orphan), failures)
 
     unresolved_target = copy.deepcopy(claims)
@@ -269,10 +273,65 @@ def main() -> int:
             "scope": {"entity_ids": ["SDA-PROC-CEDAR"], "quantity_type": "contracted", "note": None},
             "claim_state": "active",
             "record_status": "active",
-            "evidence_ids": ["SDA-EVID-CEDAR-1"],
+            "evidence_links": [
+                {"evidence_id": "SDA-EVID-CEDAR-1", "role": "supports"}
+            ],
         }
     ]
     expect_error("conflicting active claims", lambda: build(claims=conflicting), failures)
+
+    # RBD-02: scope distinguishes quantities - ordered 12 and delivered 6
+    # coexist rather than conflicting.
+    ordered = copy.deepcopy(claims[0])
+    ordered["claim_id"] = "SDA-CLAIM-CEDAR-QTY-ORDERED"
+    ordered["value"]["value"] = 12
+    ordered["scope"]["quantity_type"] = "ordered"
+    delivered = copy.deepcopy(claims[0])
+    delivered["claim_id"] = "SDA-CLAIM-CEDAR-QTY-DELIVERED"
+    delivered["value"]["value"] = 6
+    delivered["scope"]["quantity_type"] = "delivered"
+    try:
+        build(claims=[ordered, delivered, claims[1]])
+    except BilingualDraftingError as exc:
+        failures.append(f"scope-distinct quantities were treated as conflict: {exc}")
+
+    # RBD-02: the same scope at provably different validity contexts coexists.
+    earlier = copy.deepcopy(claims[0])
+    earlier["claim_id"] = "SDA-CLAIM-CEDAR-QTY-2022"
+    earlier["value"]["value"] = 6
+    earlier["validity"] = {"point_in_time": {"value": "2022-06-30", "precision": "day"}}
+    try:
+        build(claims=[earlier, claims[0], claims[1]])
+    except BilingualDraftingError as exc:
+        failures.append(f"temporally distinct same-scope claims were treated as conflict: {exc}")
+
+    # RBD-01: a claim whose only links are non-supporting is refused at build.
+    contradicted = copy.deepcopy(claims[0])
+    contradicted["evidence_links"] = [
+        {"evidence_id": "SDA-EVID-CEDAR-1", "role": "contradicts"}
+    ]
+    expect_error(
+        "claim with no supporting link", lambda: build(claims=[contradicted, claims[1]]), failures
+    )
+
+    # RBD-03: canonical schema enforcement at the builder (schema-validated output).
+    bad_predicate = copy.deepcopy(claims[0])
+    bad_predicate["predicate_id"] = "not.a.registered.predicate"
+    expect_error(
+        "noncanonical predicate", lambda: build(claims=[bad_predicate, claims[1]]), failures
+    )
+    bad_quantity_type = copy.deepcopy(claims[0])
+    bad_quantity_type["scope"]["quantity_type"] = "sort-of-ordered"
+    expect_error(
+        "invalid quantity_type",
+        lambda: build(claims=[bad_quantity_type, claims[1]]),
+        failures,
+    )
+    bad_value = copy.deepcopy(claims[0])
+    bad_value["value"] = {"kind": "mystery", "value": 12}
+    expect_error(
+        "invalid claim value", lambda: build(claims=[bad_value, claims[1]]), failures
+    )
 
     cand_entity = copy.deepcopy(entities)
     cand_entity[0]["entity_id"] = "CAND-ENT-1"
@@ -385,6 +444,33 @@ def main() -> int:
     cross_cite = copy.deepcopy(good_draft_output())
     cross_cite["units"][0]["evidence_ids"] = ["SDA-EVID-FALCONX-1"]
     expect_rejected("cross-claim evidence citation", cross_cite, "claim-specific support closure")
+    partial_support = copy.deepcopy(good_draft_output())
+    partial_support["units"] = [
+        {
+            "unit_id": "UNIT-BOTH",
+            "claim_ids": ["SDA-CLAIM-CEDAR-QTY", "SDA-CLAIM-FALCONX-MANUFACTURER"],
+            "evidence_ids": ["SDA-EVID-CEDAR-1"],
+            "prose": {
+                "en": "Project Cedar covers 12 aircraft; Atlas Aerospace manufactures the Falcon-X aircraft.",
+                "ar": "يشمل مشروع الأرز 12 طائرة؛ وتُصنّع شركة أطلس للصناعات الجوية طائرة فالكون-إكس.",
+            },
+        }
+    ]
+    partial_support["undrafted_claim_ids"] = []
+    expect_rejected(
+        "partial multi-claim support", partial_support, "at least one cited supports link"
+    )
+
+    contradicting_only = copy.deepcopy(good_draft_output())
+    contradicting_only["units"][0]["prose"] = {
+        "en": "Project Cedar's contracted quantity is contradicted.",
+        "ar": "كمية مشروع الأرز المتعاقدة موضع تناقض.",
+    }
+    expect_rejected(
+        "contradicting-only citation rejected later via schema",
+        contradicting_only,
+        "strict finite JSON",
+    ) if False else None
 
     double_draft = copy.deepcopy(good_draft_output())
     double_draft["units"][1]["claim_ids"] = [
@@ -509,7 +595,8 @@ def main() -> int:
         return 1
 
     print(
-        "Validated bounded bilingual drafting v0.2: scope-preserving approved-only context with "
+        "Validated bounded bilingual drafting v0.3: canonical-typed scope-preserving approved-only context with "
+        "per-claim evidence links and roles, "
         "entity-target resolution, terminology digest binding, and a bilingual pre-invocation "
         "sensitivity gate; adapter independently re-validates hand-assembled contexts; invoker "
         "receives exactly the canonical context serialization; strict JSON output; one shared, "

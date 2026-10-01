@@ -35,7 +35,7 @@ from typing import Any, Callable, Mapping
 
 from jsonschema import Draft202012Validator, FormatChecker
 
-ADAPTER_VERSION = "m4-bilingual-drafting-v0.2"
+ADAPTER_VERSION = "m4-bilingual-drafting-v0.3"
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTEXT_SCHEMA_PATH = ROOT / "schemas" / "v0.1" / "editorial-drafting-context.schema.json"
@@ -111,7 +111,17 @@ def _utc_now() -> str:
 def _load_schema(path: Path) -> Draft202012Validator:
     schema = json.loads(path.read_text(encoding="utf-8"))
     Draft202012Validator.check_schema(schema)
-    return Draft202012Validator(schema, format_checker=FormatChecker())
+    # Cross-file $refs (e.g. common.schema.json#$defs/claim_value) resolve via
+    # a registry over every sibling schema, mirroring validate_schemas.
+    from referencing import Registry, Resource
+
+    registry = Registry()
+    for sibling in sorted(path.parent.glob("*.schema.json")):
+        sibling_schema = json.loads(sibling.read_text(encoding="utf-8"))
+        sibling_id = sibling_schema.get("$id")
+        if sibling_id:
+            registry = registry.with_resource(sibling_id, Resource.from_contents(sibling_schema))
+    return Draft202012Validator(schema, registry=registry, format_checker=FormatChecker())
 
 
 _CONTEXT_VALIDATOR = _load_schema(CONTEXT_SCHEMA_PATH)
@@ -300,18 +310,14 @@ def build_approved_drafting_context(
         locator = record.get("locator")
         if not isinstance(locator, Mapping):
             raise BilingualDraftingError(f"evidence {evidence_id} requires a locator")
-        role = record.get("role", "supports")
-        if role not in ("supports", "contradicts", "contextualizes"):
-            raise BilingualDraftingError(f"evidence {evidence_id} carries an unsupported role")
         evidence_by_id[evidence_id] = {
             "evidence_id": evidence_id,
             "document_id": document_id,
             "locator": dict(locator),
-            "role": role,
         }
 
     prepared_claims: dict[str, dict[str, Any]] = {}
-    claim_fingerprints: dict[tuple[str, str], str] = {}
+    claim_fingerprints: dict[tuple[str, str, str], list[dict[str, str]]] = {}
     for claim in claims:
         if not isinstance(claim, Mapping):
             raise BilingualDraftingError("drafting claim must be an object")
@@ -350,28 +356,53 @@ def build_approved_drafting_context(
         scope = claim.get("scope")
         if scope is not None and not isinstance(scope, Mapping):
             raise BilingualDraftingError(f"claim {claim_id} scope must be an object or null")
-        evidence_ids = claim.get("evidence_ids")
+        evidence_links = claim.get("evidence_links")
         if (
-            not isinstance(evidence_ids, list)
-            or not evidence_ids
-            or len(evidence_ids) != len(set(evidence_ids))
+            not isinstance(evidence_links, list)
+            or not evidence_links
+            or len({link.get("evidence_id") for link in evidence_links}) != len(evidence_links)
         ):
             raise BilingualDraftingError(
-                f"claim {claim_id} requires a non-empty, unique evidence_ids array"
+                f"claim {claim_id} requires a non-empty, unique evidence_links array"
             )
-        for evidence_id in evidence_ids:
+        for link in evidence_links:
+            if not isinstance(link, Mapping):
+                raise BilingualDraftingError(
+                    f"claim {claim_id} evidence links must be objects"
+                )
+            evidence_id = link.get("evidence_id")
             if not isinstance(evidence_id, str) or evidence_id not in evidence_by_id:
                 raise BilingualDraftingError(
                     f"claim {claim_id} references evidence {evidence_id!r} outside the context"
                 )
-        fingerprint = (subject, predicate)
-        rendered_value = _canonical_json(value)
-        if fingerprint in claim_fingerprints and claim_fingerprints[fingerprint] != rendered_value:
+            if link.get("role") not in ("supports", "contradicts", "contextualizes"):
+                raise BilingualDraftingError(
+                    f"claim {claim_id} evidence link carries an unsupported role"
+                )
+        if not any(link["role"] == "supports" for link in evidence_links):
             raise BilingualDraftingError(
-                f"conflicting active claims on {predicate} for {subject}; "
-                "drafting fails closed on unresolved conflict"
+                f"claim {claim_id} carries no supporting evidence link; a claim "
+                "without support cannot be drafted"
             )
-        claim_fingerprints[fingerprint] = rendered_value
+        # Conflict detection is scope- and validity-aware (RBD-02): two active
+        # claims conflict only when they share subject, predicate, semantic
+        # scope, AND validity context but assert different values. Ordered and
+        # delivered quantities, or the same scope at different validity
+        # contexts, coexist rather than conflicting; deeper conflict authority
+        # stays with upstream canonical adjudication.
+        fingerprint = (subject, predicate, _canonical_json(scope))
+        rendered_value = _canonical_json(value)
+        rendered_validity = _canonical_json(claim.get("validity"))
+        if fingerprint in claim_fingerprints:
+            for prior in claim_fingerprints[fingerprint]:
+                if prior["validity"] == rendered_validity and prior["value"] != rendered_value:
+                    raise BilingualDraftingError(
+                        f"conflicting active claims on {predicate} for {subject} with the "
+                        "same scope and validity; drafting fails closed on unresolved conflict"
+                    )
+        claim_fingerprints.setdefault(fingerprint, []).append(
+            {"value": rendered_value, "validity": rendered_validity}
+        )
         prepared_claims[claim_id] = {
             "claim_id": claim_id,
             "subject_entity_id": subject,
@@ -380,7 +411,10 @@ def build_approved_drafting_context(
             "validity": claim.get("validity"),
             "scope": dict(scope) if scope is not None else None,
             "claim_state": "active",
-            "evidence_ids": sorted(evidence_ids),
+            "evidence_links": [
+                {"evidence_id": link["evidence_id"], "role": link["role"]}
+                for link in sorted(evidence_links, key=lambda item: str(item.get("evidence_id")))
+            ],
         }
 
     prepared_unknowns: list[dict[str, Any]] = []
@@ -444,6 +478,13 @@ def build_approved_drafting_context(
         created_at,
     )
     _drafting_eligibility_gate(context)
+    schema_errors = [
+        error.message for error in _CONTEXT_VALIDATOR.iter_errors(dict(context))
+    ]
+    if schema_errors:
+        raise BilingualDraftingError(
+            f"built drafting context violates its schema: {schema_errors[0]}"
+        )
     return context
 
 
@@ -487,7 +528,7 @@ def validate_drafting_context(context: Mapping[str, Any]) -> None:
     if len({item["claim_id"] for item in context["claims"]}) != len(context["claims"]):
         raise BilingualDraftingError("drafting context carries duplicate claims")
 
-    fingerprints: dict[tuple[str, str], str] = {}
+    fingerprints: dict[tuple[str, str, str], list[dict[str, str]]] = {}
     for claim in context["claims"]:
         if claim["subject_entity_id"] not in entity_ids:
             raise BilingualDraftingError(
@@ -504,16 +545,28 @@ def validate_drafting_context(context: Mapping[str, Any]) -> None:
             raise BilingualDraftingError(
                 f"claim {claim['claim_id']} targets an unresolved entity"
             )
-        for evidence_id in claim["evidence_ids"]:
-            if evidence_id not in evidence_ids:
+        if not any(link["role"] == "supports" for link in claim["evidence_links"]):
+            raise BilingualDraftingError(
+                f"claim {claim['claim_id']} carries no supporting evidence link"
+            )
+        for link in claim["evidence_links"]:
+            if link["evidence_id"] not in evidence_ids:
                 raise BilingualDraftingError(
                     f"claim {claim['claim_id']} cites evidence outside the context"
                 )
-        fingerprint = (claim["subject_entity_id"], claim["predicate_id"])
+        fingerprint = (
+            claim["subject_entity_id"],
+            claim["predicate_id"],
+            _canonical_json(claim["scope"]),
+        )
         rendered = _canonical_json(claim["value"])
-        if fingerprint in fingerprints and fingerprints[fingerprint] != rendered:
-            raise BilingualDraftingError("drafting context carries conflicting active claims")
-        fingerprints[fingerprint] = rendered
+        rendered_validity = _canonical_json(claim["validity"])
+        for prior in fingerprints.setdefault(fingerprint, []):
+            if prior["validity"] == rendered_validity and prior["value"] != rendered:
+                raise BilingualDraftingError("drafting context carries conflicting active claims")
+        fingerprints[fingerprint].append(
+            {"value": rendered, "validity": rendered_validity}
+        )
 
     unknown_ids = [item["unknown_id"] for item in context["unknowns"]]
     if len(unknown_ids) != len(set(unknown_ids)):
@@ -640,7 +693,17 @@ def build_bilingual_draft_run(
 
     allowed_numbers = _factual_number_allowlist(context)
     claim_evidence = {
-        str(item["claim_id"]): {str(eid) for eid in item["evidence_ids"]}
+        str(item["claim_id"]): {
+            str(link["evidence_id"]) for link in item["evidence_links"]
+        }
+        for item in context["claims"]
+    }
+    claim_supports = {
+        str(item["claim_id"]): {
+            str(link["evidence_id"])
+            for link in item["evidence_links"]
+            if link["role"] == "supports"
+        }
         for item in context["claims"]
     }
     claim_ids = set(claim_evidence)
@@ -776,6 +839,15 @@ def build_bilingual_draft_run(
                 unit_errors.append(
                     f"unit {unit_id} cites evidence {evidence_id!r} that does not support any "
                     "of the unit's claims (claim-specific support closure)"
+                )
+        for claim_id in unit_claims:
+            if claim_id not in claim_supports:
+                continue
+            supporting = claim_supports[claim_id] & set(unit_evidence)
+            if not supporting:
+                unit_errors.append(
+                    f"unit {unit_id} cites no supporting evidence for claim {claim_id!r}; "
+                    "every claim in a unit needs at least one cited supports link"
                 )
         prose = unit.get("prose")
         if not isinstance(prose, Mapping) or set(prose) != {"en", "ar"}:
