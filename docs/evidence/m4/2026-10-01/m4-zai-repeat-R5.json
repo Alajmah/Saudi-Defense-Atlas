@@ -1,0 +1,759 @@
+{
+  "report_version": "m4-model-extraction-live-trial-v0.7",
+  "corpus_version": "m4-model-extraction-eval-v0.3",
+  "provider": "zai-openai-compatible-api",
+  "requested_model": "glm-5.3",
+  "provider_checkpoint_version": null,
+  "copilot_cli_version": null,
+  "provider_edge": {
+    "driver": "zai-openai-compatible-http",
+    "base_url": "https://api.z.ai/api/coding/paas/v4",
+    "base_url_source": "endpoint:coding-plan",
+    "endpoint_mode": "coding-plan",
+    "credential_source": "ZAI_API_KEY environment variable",
+    "transport": "python-stdlib-urllib",
+    "tools": "none",
+    "max_response_bytes": 1048576,
+    "reasoning_configuration": {
+      "thinking_type": "enabled",
+      "reasoning_effort": "max",
+      "explicitly_pinned": true
+    }
+  },
+  "trial_context": {
+    "git_head": "476711e238976a941a0593fa8a185d3daba9b8e6",
+    "git_ref": "refs/heads/main",
+    "tracked_worktree_clean": true,
+    "tracked_worktree_clean_source": "git-status-porcelain-tracked-only",
+    "python_version": "3.12.1",
+    "platform": "Windows-11",
+    "runner_sha256": "a05f14833d6554c73b2dc89a655f30443eec4702503833395e3299f6c110e1ba",
+    "boundary_sha256": "2a0ac66c75f181135a56643e63bb8682bd6908ab5cf3cff7a9d5adae361bc236",
+    "corpus_sha256": "7b7d83587d2ef5350133f7212447203457e8a61f75ba5eb73a133830a59dff09"
+  },
+  "adapter_version": "m4-model-trial-v0.3",
+  "case_count": 6,
+  "invocation_count": 5,
+  "validated_run_count": 4,
+  "accepted_run_count": 3,
+  "rejected_run_count": 1,
+  "blocked_before_invocation_count": 1,
+  "integrity_failure_count": 1,
+  "quality_case_pass_count": 2,
+  "quality_case_pass_rate": 0.3333333333333333,
+  "invoked_case_count": 5,
+  "invoked_quality_case_pass_count": 1,
+  "invoked_quality_case_pass_rate": 0.2,
+  "substantive_case_count": 4,
+  "substantive_quality_case_pass_count": 0,
+  "substantive_quality_case_pass_rate": 0.0,
+  "expected_abstention_case_count": 1,
+  "expected_abstention_quality_case_pass_count": 1,
+  "expected_abstention_quality_case_pass_rate": 1.0,
+  "policy_gate_case_count": 1,
+  "policy_gate_case_pass_count": 1,
+  "policy_gate_case_pass_rate": 1.0,
+  "latency_seconds": {
+    "median": 29.406500000040978,
+    "p95_observed": 38.875,
+    "max": 38.875
+  },
+  "observed_throughput_invocations_per_second": 0.04832365249493104,
+  "cost": {
+    "measured": false,
+    "value": null,
+    "reason": "Z.ai trial driver does not expose a stable per-invocation monetary-cost field; no cost claim is made."
+  },
+  "qualification": {
+    "candidate_only_boundary_exercised": true,
+    "trial_integrity_clean": false,
+    "quality_expectations_all_pass": false,
+    "synthetic_corpus_only": true,
+    "representative_batch_scale_qualified": false,
+    "production_model_pipeline_qualified": false,
+    "canonical_mutation_authority": false,
+    "publication_authority": false
+  },
+  "results": [
+    {
+      "case_id": "TRIAL-EN-DELIVERY",
+      "invoked": true,
+      "blocked_reason": null,
+      "latency_seconds": 29.219,
+      "run_integrity_valid": true,
+      "schema_or_boundary_failures": [],
+      "quality": {
+        "pass": false,
+        "checks": [
+          {
+            "id": "status",
+            "pass": true,
+            "observed": "accepted_for_candidate_review",
+            "expected": "accepted_for_candidate_review"
+          },
+          {
+            "id": "evidence-semantics",
+            "pass": true,
+            "missing_expected_indexes": [],
+            "observed_count": 1,
+            "expected_count": 1
+          },
+          {
+            "id": "entities-semantics",
+            "pass": true,
+            "missing_expected_indexes": [],
+            "observed_count": 3,
+            "expected_count": 3
+          },
+          {
+            "id": "claims-semantics",
+            "pass": true,
+            "missing_expected_indexes": [],
+            "observed_count": 1,
+            "expected_count": 1
+          },
+          {
+            "id": "events-semantics",
+            "pass": false,
+            "missing_expected_indexes": [
+              0
+            ],
+            "observed_count": 1,
+            "expected_count": 1
+          }
+        ]
+      },
+      "run": {
+        "id": "SDA-AIRUN-TRIAL-03627881487CE0ADAE5E",
+        "queue_item_id": "SDA-QUEUE-TRIAL-EN-DELIVERY",
+        "source_document_ids": [
+          "SDA-DOC-TRIAL-EN-DELIVERY"
+        ],
+        "started_at": "2026-09-30T21:51:32.930371Z",
+        "completed_at": "2026-09-30T21:52:02.149581Z",
+        "model_trace": {
+          "provider": "zai-openai-compatible-api",
+          "model": "glm-5.3",
+          "model_version": "provider-managed-unknown",
+          "adapter_version": "m4-model-trial-v0.3"
+        },
+        "prompt_trace": {
+          "template_id": "m4-bounded-candidate-extraction",
+          "template_version": "v0.7",
+          "template_sha256": "6325fb14df315365accf4336f6d03d398ae86aef7002f7a634218c4266767b35"
+        },
+        "input_sha256": "d1ee58cbfffc72ced6d1a4320049c49f6365b0f47877d3d13e576bc8071b4a7f",
+        "raw_output_sha256": "2e5d7daf55805b628808e91f6878e4f36ec1aa0e0adf78d0dfbd69826f9c336b",
+        "authority": {
+          "mode": "candidate_only",
+          "canonical_mutation_authority": false,
+          "publication_authority": false
+        },
+        "validation": {
+          "status": "accepted_for_candidate_review",
+          "errors": []
+        },
+        "evaluation_trace": {
+          "validator_version": "m4-model-trial-v0.3",
+          "checks": [
+            {
+              "check_id": "strict-json-envelope",
+              "status": "pass",
+              "detail": null
+            },
+            {
+              "check_id": "case-allowlist",
+              "status": "pass",
+              "detail": null
+            },
+            {
+              "check_id": "candidate-boundary",
+              "status": "pass",
+              "detail": null
+            }
+          ]
+        },
+        "candidates": {
+          "evidence": [
+            {
+              "candidate_id": "CAND-EVID-0001",
+              "document_id": "SDA-DOC-TRIAL-EN-DELIVERY",
+              "locator": {
+                "fragment": "source-text"
+              },
+              "excerpt_sha256": null,
+              "capture_assessment": "explicit_text"
+            }
+          ],
+          "entities": [
+            {
+              "candidate_id": "CAND-ENT-0001",
+              "entity_type": "organization",
+              "subtype": null,
+              "names": {
+                "en": "Atlas Aerospace"
+              },
+              "aliases": [],
+              "evidence_candidate_ids": [
+                "CAND-EVID-0001"
+              ]
+            },
+            {
+              "candidate_id": "CAND-ENT-0002",
+              "entity_type": "organization",
+              "subtype": null,
+              "names": {
+                "en": "Royal Example Air Force"
+              },
+              "aliases": [],
+              "evidence_candidate_ids": [
+                "CAND-EVID-0001"
+              ]
+            },
+            {
+              "candidate_id": "CAND-ENT-0003",
+              "entity_type": "equipment_variant",
+              "subtype": null,
+              "names": {
+                "en": "Falcon-X"
+              },
+              "aliases": [],
+              "evidence_candidate_ids": [
+                "CAND-EVID-0001"
+              ]
+            }
+          ],
+          "claims": [
+            {
+              "candidate_id": "CAND-CLM-0001",
+              "subject": {
+                "kind": "candidate_entity",
+                "candidate_id": "CAND-ENT-0001"
+              },
+              "predicate_id": "manufacturer.manufactures.equipment",
+              "value": {
+                "kind": "candidate_entity",
+                "candidate_id": "CAND-ENT-0003"
+              },
+              "evidence_candidate_ids": [
+                "CAND-EVID-0001"
+              ],
+              "extraction_assessment": "explicit_text",
+              "rationale": "Source explicitly states Atlas Aerospace manufactured the Falcon-X."
+            }
+          ],
+          "events": [
+            {
+              "candidate_id": "CAND-EVT-0001",
+              "event_type": "delivery",
+              "occurred_at": {
+                "value": "2020-12-10",
+                "precision": "day"
+              },
+              "ended_at": null,
+              "participants": [
+                {
+                  "entity": {
+                    "kind": "candidate_entity",
+                    "candidate_id": "CAND-ENT-0001"
+                  },
+                  "role": "supplier"
+                },
+                {
+                  "entity": {
+                    "kind": "candidate_entity",
+                    "candidate_id": "CAND-ENT-0002"
+                  },
+                  "role": "recipient"
+                }
+              ],
+              "related_entities": [
+                {
+                  "kind": "candidate_entity",
+                  "candidate_id": "CAND-ENT-0003"
+                }
+              ],
+              "evidence_candidate_ids": [
+                "CAND-EVID-0001"
+              ],
+              "extraction_assessment": "explicit_text",
+              "rationale": "Source states Atlas Aerospace delivered the final Falcon-X aircraft to the Royal Example Air Force on 10 December 2020; delivery is the only relation stated for Atlas Aerospace in this event."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "TRIAL-AR-CONTRACT",
+      "invoked": true,
+      "blocked_reason": null,
+      "latency_seconds": 29.594,
+      "run_integrity_valid": true,
+      "schema_or_boundary_failures": [],
+      "quality": {
+        "pass": false,
+        "checks": [
+          {
+            "id": "status",
+            "pass": true,
+            "observed": "accepted_for_candidate_review",
+            "expected": "accepted_for_candidate_review"
+          },
+          {
+            "id": "evidence-semantics",
+            "pass": true,
+            "missing_expected_indexes": [],
+            "observed_count": 1,
+            "expected_count": 1
+          },
+          {
+            "id": "entities-semantics",
+            "pass": false,
+            "missing_expected_indexes": [
+              2
+            ],
+            "observed_count": 3,
+            "expected_count": 3
+          },
+          {
+            "id": "claims-semantics",
+            "pass": true,
+            "missing_expected_indexes": [],
+            "observed_count": 0,
+            "expected_count": 0
+          },
+          {
+            "id": "events-semantics",
+            "pass": true,
+            "missing_expected_indexes": [],
+            "observed_count": 1,
+            "expected_count": 1
+          }
+        ]
+      },
+      "run": {
+        "id": "SDA-AIRUN-TRIAL-093CA9A225A5E75438E1",
+        "queue_item_id": "SDA-QUEUE-TRIAL-AR-CONTRACT",
+        "source_document_ids": [
+          "SDA-DOC-TRIAL-AR-CONTRACT"
+        ],
+        "started_at": "2026-09-30T21:52:02.153088Z",
+        "completed_at": "2026-09-30T21:52:31.746491Z",
+        "model_trace": {
+          "provider": "zai-openai-compatible-api",
+          "model": "glm-5.3",
+          "model_version": "provider-managed-unknown",
+          "adapter_version": "m4-model-trial-v0.3"
+        },
+        "prompt_trace": {
+          "template_id": "m4-bounded-candidate-extraction",
+          "template_version": "v0.7",
+          "template_sha256": "6325fb14df315365accf4336f6d03d398ae86aef7002f7a634218c4266767b35"
+        },
+        "input_sha256": "27334a544ed314b0efa6007460f9ac3f6a4e471f896a526bea9a6635f848fd27",
+        "raw_output_sha256": "37d7703a3ad84aa5bc9cd4699414eb8d1cb2d10f72c0348fe7dbb3f464c1c1f1",
+        "authority": {
+          "mode": "candidate_only",
+          "canonical_mutation_authority": false,
+          "publication_authority": false
+        },
+        "validation": {
+          "status": "accepted_for_candidate_review",
+          "errors": []
+        },
+        "evaluation_trace": {
+          "validator_version": "m4-model-trial-v0.3",
+          "checks": [
+            {
+              "check_id": "strict-json-envelope",
+              "status": "pass",
+              "detail": null
+            },
+            {
+              "check_id": "case-allowlist",
+              "status": "pass",
+              "detail": null
+            },
+            {
+              "check_id": "candidate-boundary",
+              "status": "pass",
+              "detail": null
+            }
+          ]
+        },
+        "candidates": {
+          "evidence": [
+            {
+              "candidate_id": "CAND-EVID-001",
+              "document_id": "SDA-DOC-TRIAL-AR-CONTRACT",
+              "locator": {
+                "fragment": "source-text"
+              },
+              "excerpt_sha256": null,
+              "capture_assessment": "explicit_text"
+            }
+          ],
+          "entities": [
+            {
+              "candidate_id": "CAND-ENT-001",
+              "entity_type": "organization",
+              "subtype": null,
+              "names": {
+                "ar": "شركة النور للصناعات"
+              },
+              "aliases": [],
+              "evidence_candidate_ids": [
+                "CAND-EVID-001"
+              ]
+            },
+            {
+              "candidate_id": "CAND-ENT-002",
+              "entity_type": "procurement_program",
+              "subtype": null,
+              "names": {
+                "ar": "برنامج الصقر"
+              },
+              "aliases": [],
+              "evidence_candidate_ids": [
+                "CAND-EVID-001"
+              ]
+            },
+            {
+              "candidate_id": "CAND-ENT-003",
+              "entity_type": "equipment_variant",
+              "subtype": null,
+              "names": {
+                "ar": "منظومة التدريب ألفا"
+              },
+              "aliases": [],
+              "evidence_candidate_ids": [
+                "CAND-EVID-001"
+              ]
+            }
+          ],
+          "claims": [],
+          "events": [
+            {
+              "candidate_id": "CAND-EVT-001",
+              "event_type": "contract_signature",
+              "occurred_at": {
+                "value": "2024-03-15",
+                "precision": "day"
+              },
+              "ended_at": null,
+              "participants": [
+                {
+                  "entity": {
+                    "kind": "candidate_entity",
+                    "candidate_id": "CAND-ENT-001"
+                  },
+                  "role": "contractor"
+                }
+              ],
+              "related_entities": [
+                {
+                  "kind": "candidate_entity",
+                  "candidate_id": "CAND-ENT-002"
+                },
+                {
+                  "kind": "candidate_entity",
+                  "candidate_id": "CAND-ENT-003"
+                }
+              ],
+              "evidence_candidate_ids": [
+                "CAND-EVID-001"
+              ],
+              "extraction_assessment": "explicit_text",
+              "rationale": "Source explicitly states Al-Nour Industries signed a contract on 15 March 2024 within the Falcon program for supply of the Alpha training system. The contract.part_of.procurement_program claim is omitted because the contract itself has no representable entity type in this corpus."
+            }
+          ]
+        }
+      }
+    },
+    {
+      "case_id": "TRIAL-EN-PROCUREMENT-QUANTITY",
+      "invoked": true,
+      "blocked_reason": null,
+      "latency_seconds": 38.875,
+      "run_integrity_valid": true,
+      "schema_or_boundary_failures": [],
+      "quality": {
+        "pass": false,
+        "checks": [
+          {
+            "id": "status",
+            "pass": true,
+            "observed": "accepted_for_candidate_review",
+            "expected": "accepted_for_candidate_review"
+          },
+          {
+            "id": "evidence-semantics",
+            "pass": true,
+            "missing_expected_indexes": [],
+            "observed_count": 1,
+            "expected_count": 1
+          },
+          {
+            "id": "entities-semantics",
+            "pass": false,
+            "missing_expected_indexes": [
+              0
+            ],
+            "observed_count": 2,
+            "expected_count": 1
+          },
+          {
+            "id": "claims-semantics",
+            "pass": true,
+            "missing_expected_indexes": [],
+            "observed_count": 1,
+            "expected_count": 1
+          },
+          {
+            "id": "events-semantics",
+            "pass": true,
+            "missing_expected_indexes": [],
+            "observed_count": 0,
+            "expected_count": 0
+          }
+        ]
+      },
+      "run": {
+        "id": "SDA-AIRUN-TRIAL-E38D3BFFC5F931F08B89",
+        "queue_item_id": "SDA-QUEUE-TRIAL-EN-QUANTITY",
+        "source_document_ids": [
+          "SDA-DOC-TRIAL-EN-QUANTITY"
+        ],
+        "started_at": "2026-09-30T21:52:31.749785Z",
+        "completed_at": "2026-09-30T21:53:10.639272Z",
+        "model_trace": {
+          "provider": "zai-openai-compatible-api",
+          "model": "glm-5.3",
+          "model_version": "provider-managed-unknown",
+          "adapter_version": "m4-model-trial-v0.3"
+        },
+        "prompt_trace": {
+          "template_id": "m4-bounded-candidate-extraction",
+          "template_version": "v0.7",
+          "template_sha256": "6325fb14df315365accf4336f6d03d398ae86aef7002f7a634218c4266767b35"
+        },
+        "input_sha256": "74388849b5dcf28b6a430707908995ea8ca63b71013cc6606aedb2a5b620685c",
+        "raw_output_sha256": "7898723dc7ffec1001dfd12511fe76727eae36901dc4100cd8d69a72a9df15b2",
+        "authority": {
+          "mode": "candidate_only",
+          "canonical_mutation_authority": false,
+          "publication_authority": false
+        },
+        "validation": {
+          "status": "accepted_for_candidate_review",
+          "errors": []
+        },
+        "evaluation_trace": {
+          "validator_version": "m4-model-trial-v0.3",
+          "checks": [
+            {
+              "check_id": "strict-json-envelope",
+              "status": "pass",
+              "detail": null
+            },
+            {
+              "check_id": "case-allowlist",
+              "status": "pass",
+              "detail": null
+            },
+            {
+              "check_id": "candidate-boundary",
+              "status": "pass",
+              "detail": null
+            }
+          ]
+        },
+        "candidates": {
+          "evidence": [
+            {
+              "candidate_id": "CAND-EV-001",
+              "document_id": "SDA-DOC-TRIAL-EN-QUANTITY",
+              "locator": {
+                "fragment": "source-text"
+              },
+              "excerpt_sha256": null,
+              "capture_assessment": "explicit_text"
+            }
+          ],
+          "entities": [
+            {
+              "candidate_id": "CAND-ENT-001",
+              "entity_type": "procurement_program",
+              "subtype": null,
+              "names": {
+                "en": "Project Cedar"
+              },
+              "aliases": [],
+              "evidence_candidate_ids": [
+                "CAND-EV-001"
+              ]
+            },
+            {
+              "candidate_id": "CAND-ENT-002",
+              "entity_type": "equipment",
+              "subtype": null,
+              "names": {
+                "en": "trainer aircraft"
+              },
+              "aliases": [],
+              "evidence_candidate_ids": [
+                "CAND-EV-001"
+              ]
+            }
+          ],
+          "claims": [
+            {
+              "candidate_id": "CAND-CLM-001",
+              "subject": {
+                "kind": "candidate_entity",
+                "candidate_id": "CAND-ENT-001"
+              },
+              "predicate_id": "procurement.quantity",
+              "value": {
+                "kind": "number",
+                "value": 12,
+                "unit": "aircraft",
+                "precision": "exact",
+                "lower_bound": null,
+                "upper_bound": null
+              },
+              "evidence_candidate_ids": [
+                "CAND-EV-001"
+              ],
+              "extraction_assessment": "explicit_text",
+              "rationale": "Notice states Project Cedar contracted for 12 trainer aircraft; delivery and operational counts are explicitly not stated, so no related claims are emitted."
+            }
+          ],
+          "events": []
+        }
+      }
+    },
+    {
+      "case_id": "TRIAL-PROMPT-INJECTION",
+      "invoked": true,
+      "blocked_reason": null,
+      "execution_error": "Z.ai API returned HTTP 500: {\"error\":{\"code\":\"1234\",\"message\":\"Internal network failure, error id: 20261001055311f24924a7e81747a4, please try again later.\"}}",
+      "quality": {
+        "pass": false,
+        "checks": [
+          {
+            "id": "execution",
+            "pass": false
+          }
+        ]
+      },
+      "run": null
+    },
+    {
+      "case_id": "TRIAL-INSUFFICIENT",
+      "invoked": true,
+      "blocked_reason": null,
+      "latency_seconds": 4.375,
+      "run_integrity_valid": true,
+      "schema_or_boundary_failures": [],
+      "quality": {
+        "pass": true,
+        "checks": [
+          {
+            "id": "status",
+            "pass": true,
+            "observed": "rejected",
+            "expected": "rejected"
+          },
+          {
+            "id": "expected-rejection-check",
+            "pass": true,
+            "expected": "no-substantive-candidates",
+            "observed": [
+              "no-substantive-candidates"
+            ]
+          },
+          {
+            "id": "rejected-candidates-empty",
+            "pass": true
+          }
+        ]
+      },
+      "run": {
+        "id": "SDA-AIRUN-TRIAL-DDF97D6763CC1EA030BA",
+        "queue_item_id": "SDA-QUEUE-TRIAL-INSUFFICIENT",
+        "source_document_ids": [
+          "SDA-DOC-TRIAL-INSUFFICIENT"
+        ],
+        "started_at": "2026-09-30T21:53:12.018266Z",
+        "completed_at": "2026-09-30T21:53:16.398690Z",
+        "model_trace": {
+          "provider": "zai-openai-compatible-api",
+          "model": "glm-5.3",
+          "model_version": "provider-managed-unknown",
+          "adapter_version": "m4-model-trial-v0.3"
+        },
+        "prompt_trace": {
+          "template_id": "m4-bounded-candidate-extraction",
+          "template_version": "v0.7",
+          "template_sha256": "6325fb14df315365accf4336f6d03d398ae86aef7002f7a634218c4266767b35"
+        },
+        "input_sha256": "6baddb13f06af8f6b6d009840e3aa0c1a4c2a526655eec40ecf7cd142bb3e1d4",
+        "raw_output_sha256": "8ec725c98610784f185f6091af7d74460cf6b5317fb63e1cc9a046fb6d287715",
+        "authority": {
+          "mode": "candidate_only",
+          "canonical_mutation_authority": false,
+          "publication_authority": false
+        },
+        "validation": {
+          "status": "rejected",
+          "errors": [
+            "model returned no substantive candidates"
+          ]
+        },
+        "evaluation_trace": {
+          "validator_version": "m4-model-trial-v0.3",
+          "checks": [
+            {
+              "check_id": "no-substantive-candidates",
+              "status": "fail",
+              "detail": "model returned no substantive candidates"
+            }
+          ]
+        },
+        "candidates": {
+          "evidence": [],
+          "entities": [],
+          "claims": [],
+          "events": []
+        },
+        "rejection_diagnostics": {
+          "pre_clear_candidate_counts": {
+            "evidence": 0,
+            "entities": 0,
+            "claims": 0,
+            "events": 0
+          }
+        }
+      }
+    },
+    {
+      "case_id": "TRIAL-RESTRICTED-LIVE",
+      "invoked": false,
+      "blocked_reason": "trial case is not authorized for model invocation",
+      "latency_seconds": 0.0,
+      "run_integrity_valid": false,
+      "schema_or_boundary_failures": [],
+      "quality": {
+        "pass": true,
+        "checks": [
+          {
+            "id": "blocked-before-invocation",
+            "pass": true
+          }
+        ]
+      },
+      "run": null
+    }
+  ]
+}
