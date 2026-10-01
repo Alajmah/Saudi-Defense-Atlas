@@ -78,13 +78,19 @@ Every `scope.entity_ids` entry must now resolve to a context Entity at both the 
 
 ### RBD-07 — context identity not content-bound on the adapter path — REMEDIATED (residual round 3)
 
-The deterministic ID derivation is factored into `_derive_context_id`, used by the builder and recomputed by `validate_drafting_context`: a hand-built context whose ID does not match its content is refused before invocation. Regression: a valid context with modified content under the original ID is refused.
+The deterministic ID derivation is factored into `_derive_context_id`, used by the builder and recomputed by `validate_drafting_context`: a hand-built context whose ID does not match its content is refused before invocation. Regression: a valid context with modified content under the original ID is refused. (RBD-09 later narrowed this round's guarantee: the original derivation bound unknown records by ID only, so statement/aspect/entity-reference modifications could keep a stale ID; round 5 closed that - see below.)
 
 ### RBD-08 — caller-settable adapter-version trace — REMEDIATED (residual round 3)
 
 `DraftModelTrace` no longer accepts an adapter version: the field is removed from the constructor and derived from the module constant, so the nested trace and the top-level run field cannot disagree. Regressions: constructing a trace with a `adapter_version` kwarg raises; emitted runs assert both fields equal the module version.
 
 Adapter version bumped to `m4-bilingual-drafting-v0.5` (adapter-path validation behavior changed again).
+
+### RBD-09 — context ID not fully content-bound — REMEDIATED (residual round 4)
+
+The re-review (`5382524763`) found `_derive_context_id` incorporated unknown records by ID only, leaving `statement_en`, `statement_ar`, `aspect`, and the unknown's entity reference outside the identity. The derivation now incorporates the **complete** `context["unknowns"]` records — the same pre-written statements the adapter can copy verbatim into `unknowns_rendered` — so the ID binds every record the run consumes. Regressions: a modified unknown statement, a modified aspect, and a changed unknown entity reference, each under the retained original ID, are all refused before invocation. The RBD-07 section above now records that its earlier "modified content" claim was broader than that round's implementation guaranteed.
+
+Adapter version bumped to `m4-bilingual-drafting-v0.6` (identity derivation changed).
 
 ## Deterministic validation evidence
 

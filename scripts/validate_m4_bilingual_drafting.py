@@ -660,6 +660,29 @@ def main() -> int:
         failures,
     )
 
+    # RBD-09: the context identity is bound to the full unknown records.
+    # Modifying a statement, aspect, or the unknown's entity reference while
+    # keeping the original ID must be refused before invocation.
+    for label, mutate in (
+        ("unknown statement modified", lambda ctx: ctx["unknowns"][0].update(
+            statement_en="The operator of Falcon-X is Al-Noor Industries."
+        )),
+        ("unknown aspect modified", lambda ctx: ctx["unknowns"][0].update(
+            aspect="operator_history"
+        )),
+        ("unknown entity reference changed", lambda ctx: ctx["unknowns"][0].update(
+            entity_id="SDA-PROC-CEDAR"
+        )),
+    ):
+        mutated = copy.deepcopy(context)
+        mutate(mutated)
+        # Retain the ORIGINAL ID over the modified content.
+
+        def run_mutated(ctx=mutated) -> None:
+            run_with(lambda _: json.dumps(good_draft_output()), ctx=ctx)
+
+        expect_error(f"stale identity over modified {label}", run_mutated, failures)
+
     # RBD-08: the adapter version is derived; callers cannot set a conflicting
     # trace value, and emitted runs always agree across both fields.
     try:
@@ -698,7 +721,7 @@ def main() -> int:
         return 1
 
     print(
-        "Validated bounded bilingual drafting v0.5: canonical-typed scope-closed scope-preserving approved-only context with "
+        "Validated bounded bilingual drafting v0.6: canonical-typed scope-closed scope-preserving approved-only context with "
         "per-claim evidence links and roles, "
         "entity-target resolution, terminology digest binding, and a bilingual pre-invocation "
         "sensitivity gate; adapter independently re-validates hand-assembled contexts; invoker "

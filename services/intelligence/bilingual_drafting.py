@@ -35,7 +35,7 @@ from typing import Any, Callable, Mapping
 
 from jsonschema import Draft202012Validator, FormatChecker
 
-ADAPTER_VERSION = "m4-bilingual-drafting-v0.5"
+ADAPTER_VERSION = "m4-bilingual-drafting-v0.6"
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTEXT_SCHEMA_PATH = ROOT / "schemas" / "v0.1" / "editorial-drafting-context.schema.json"
@@ -241,14 +241,20 @@ def _drafting_eligibility_gate(context: Mapping[str, Any]) -> None:
 
 
 def _derive_context_id(context: Mapping[str, Any]) -> str:
-    """Deterministic content-bound identity for an approved drafting context."""
+    """Deterministic identity bound to ALL context content (RBD-09).
+
+    Every record the drafting run consumes participates: full Entities, Claims,
+    Evidence, and the complete unknown records - including the pre-written
+    bilingual statements the adapter can copy verbatim into the run - plus the
+    terminology digest and creation time.
+    """
 
     return _stable_id(
         "SDA-DRAFTCTX",
         context["entities"],
         context["claims"],
         context["evidence"],
-        [item["unknown_id"] for item in context["unknowns"]],
+        context["unknowns"],
         context["terminology_sha256"],
         context["created_at"],
     )
