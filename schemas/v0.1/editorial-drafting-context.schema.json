@@ -1,0 +1,360 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.saudi-defense-atlas.org/v0.1/editorial-drafting-context.schema.json",
+  "title": "SDA Approved Drafting Context",
+  "description": "Deterministic, provider-independent selection of already-approved canonical records that constitutes the ONLY input a bilingual drafting adapter may receive. The model drafts language; it does not choose facts.",
+  "type": "object",
+  "required": [
+    "id",
+    "created_at",
+    "terminology_version",
+    "terminology_sha256",
+    "entities",
+    "claims",
+    "evidence",
+    "unknowns",
+    "conflicts",
+    "authority"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^SDA-DRAFTCTX-[A-Z0-9]{8,32}$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "terminology_version": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "entities": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "entity_id",
+          "entity_type",
+          "names"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "entity_id": {
+            "type": "string",
+            "pattern": "^SDA-[A-Z0-9-]+$"
+          },
+          "entity_type": {
+            "type": "string",
+            "enum": [
+              "organization",
+              "military_unit",
+              "equipment",
+              "equipment_variant",
+              "facility",
+              "exercise",
+              "procurement_program",
+              "contract",
+              "localization_program",
+              "country"
+            ]
+          },
+          "names": {
+            "type": "object",
+            "required": [
+              "en",
+              "ar"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "en": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "ar": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
+            }
+          }
+        }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "claim_id",
+          "subject_entity_id",
+          "predicate_id",
+          "value",
+          "validity",
+          "scope",
+          "claim_state",
+          "evidence_links"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "claim_id": {
+            "type": "string",
+            "pattern": "^SDA-CLAIM-[A-Z0-9-]+$"
+          },
+          "subject_entity_id": {
+            "type": "string",
+            "pattern": "^SDA-[A-Z0-9-]+$"
+          },
+          "predicate_id": {
+            "type": "string",
+            "enum": [
+              "organization.parent_of.organization",
+              "organization.operates.equipment_variant",
+              "military_unit.part_of.organization",
+              "military_unit.operates.equipment_variant",
+              "manufacturer.manufactures.equipment",
+              "company.participates_in.procurement_program",
+              "equipment_variant.variant_of.equipment",
+              "procurement_program.acquires.equipment_variant",
+              "contract.part_of.procurement_program",
+              "contract.awarded_to.company",
+              "exercise.participant.organization",
+              "exercise.uses.equipment_variant",
+              "localization_program.related_to.equipment",
+              "facility.associated_with.organization",
+              "facility.public_latitude",
+              "facility.public_longitude",
+              "facility.public_location_label",
+              "equipment.service_state",
+              "procurement_program.lifecycle_state",
+              "inventory.quantity",
+              "procurement.quantity"
+            ]
+          },
+          "value": {
+            "$ref": "common.schema.json#/$defs/claim_value"
+          },
+          "validity": {
+            "$ref": "common.schema.json#/$defs/validity_interval"
+          },
+          "scope": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "entity_ids": {
+                "type": "array",
+                "items": {
+                  "$ref": "common.schema.json#/$defs/canonical_id"
+                },
+                "uniqueItems": true
+              },
+              "quantity_type": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "enum": [
+                  "ordered",
+                  "approved",
+                  "contracted",
+                  "delivered",
+                  "operational_estimate",
+                  "original_fleet",
+                  "upgraded",
+                  "retired_or_lost",
+                  null
+                ]
+              },
+              "note": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false
+          },
+          "claim_state": {
+            "const": "active"
+          },
+          "evidence_links": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object",
+              "required": [
+                "evidence_id",
+                "role"
+              ],
+              "properties": {
+                "evidence_id": {
+                  "$ref": "common.schema.json#/$defs/canonical_id"
+                },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "supports",
+                    "contradicts",
+                    "contextualizes"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            },
+            "uniqueItems": true
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "evidence_id",
+          "document_id",
+          "locator"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "evidence_id": {
+            "type": "string",
+            "pattern": "^SDA-EVID-[A-Z0-9-]+$"
+          },
+          "document_id": {
+            "type": "string",
+            "pattern": "^SDA-DOC-[A-Z0-9-]+$"
+          },
+          "locator": {
+            "type": "object",
+            "properties": {
+              "page": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "section": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "paragraph": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1
+              },
+              "fragment": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "start_offset": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "end_offset": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "selector": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "additionalProperties": false,
+            "minProperties": 1
+          }
+        }
+      }
+    },
+    "unknowns": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "unknown_id",
+          "aspect",
+          "statement_en",
+          "statement_ar"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "unknown_id": {
+            "type": "string",
+            "pattern": "^UNK-[A-Z0-9-]+$"
+          },
+          "aspect": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64
+          },
+          "entity_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^SDA-[A-Z0-9-]+$"
+          },
+          "statement_en": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "statement_ar": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          }
+        }
+      }
+    },
+    "conflicts": {
+      "type": "array",
+      "maxItems": 0,
+      "description": "Drafting fails closed on unresolved factual conflict; an accepted context carries no conflicts."
+    },
+    "authority": {
+      "type": "object",
+      "required": [
+        "mode",
+        "canonical_mutation_authority",
+        "publication_authority"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "const": "approved_canonical_read_only"
+        },
+        "canonical_mutation_authority": {
+          "const": false
+        },
+        "publication_authority": {
+          "const": false
+        }
+      }
+    },
+    "terminology_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  },
+  "additionalProperties": false
+}

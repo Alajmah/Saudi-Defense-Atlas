@@ -1,0 +1,66 @@
+{
+  "version": "sda-bilingual-terminology-v0.1",
+  "scope": "Recurring non-entity terminology only. Official bilingual canonical Entity names remain authoritative and are carried by ApprovedDraftingContext entities; this registry never overrides them.",
+  "terms": [
+    {
+      "term_id": "TERM-EQCAT-AIRCRAFT",
+      "category": "equipment_category",
+      "en": "aircraft",
+      "ar": "طائرة"
+    },
+    {
+      "term_id": "TERM-EQCAT-TRAINER-AIRCRAFT",
+      "category": "equipment_category",
+      "en": "trainer aircraft",
+      "ar": "طائرة تدريب"
+    },
+    {
+      "term_id": "TERM-PROCSTATE-APPROVED",
+      "category": "procurement_state",
+      "en": "approved",
+      "ar": "معتمد"
+    },
+    {
+      "term_id": "TERM-PROCSTATE-CONTRACT-SIGNED",
+      "category": "procurement_state",
+      "en": "contract signed",
+      "ar": "تم توقيع العقد"
+    },
+    {
+      "term_id": "TERM-PROCSTATE-DELIVERED",
+      "category": "procurement_state",
+      "en": "delivered",
+      "ar": "تم التسليم"
+    },
+    {
+      "term_id": "TERM-RANK-AIR-MARSHAL",
+      "category": "rank",
+      "en": "air marshal",
+      "ar": "مشير جوي"
+    },
+    {
+      "term_id": "TERM-RANK-COLONEL",
+      "category": "rank",
+      "en": "colonel",
+      "ar": "عقيد"
+    },
+    {
+      "term_id": "TERM-TECH-PROCUREMENT-PROGRAM",
+      "category": "technical_term",
+      "en": "procurement program",
+      "ar": "برنامج التسلح"
+    },
+    {
+      "term_id": "TERM-TECH-DEFENCE-INDUSTRY",
+      "category": "technical_term",
+      "en": "defence industry",
+      "ar": "الصناعات الدفاعية"
+    },
+    {
+      "term_id": "TERM-TECH-ENTRY-INTO-SERVICE",
+      "category": "technical_term",
+      "en": "entry into service",
+      "ar": "دخول الخدمة"
+    }
+  ]
+}

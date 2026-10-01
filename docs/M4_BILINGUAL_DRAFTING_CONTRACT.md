@@ -1,0 +1,57 @@
+# M4 Bounded Bilingual Drafting Contract
+
+## Status
+
+Deterministic, provider-independent first increment. No live model call has been made; a fake invoker proves every invariant in CI. No translation-quality, editorial-quality, or publication claim is made.
+
+## Architecture rule
+
+**The model drafts language; it does not choose facts.** A deterministic `ApprovedDraftingContext` (`build_approved_drafting_context`) first selects only:
+
+- already-approved canonical Claims (`claim_state = active`, active `record_status`), **including material Claim `scope`** (procurement `quantity_type` such as ordered/approved/contracted/delivered is never collapsed);
+- their Evidence references (with Document identity and locator);
+- resolved Entities carrying official bilingual names in **both** locales;
+- explicit unknown statements (bounded, bilingual, pre-written by the pipeline);
+- the project-owned terminology registry version.
+
+The context is canonically typed: `predicate_id` uses the canonical enum, Claim `value` reuses `common.schema.json#$defs/claim_value`, `scope.quantity_type` uses the canonical procurement-stage enum, `validity` reuses `validity_interval`, `entity_type` uses the canonical enum, and Evidence locators mirror the canonical locator shape — so a hand-assembled context with noncanonical predicate, quantity stage, value shape, or locator fails the schema gate before invocation. Only that bounded object reaches the drafting adapter. A **deterministic drafting-eligibility gate** first rejects restricted operational detail in any factual field, in either locale, before any model invocation. The adapter **independently re-validates the full context contract** (schema plus builder invariants), passes exactly the canonical JSON serialization of the context as the model input — nothing else — and records its SHA-256 (`input_context_sha256`) alongside the SHA-256 of the exact model response (`raw_output_sha256`). A natural-language prompt wrapper arrives with the first live-model increment, wrapped around this same serialization.
+
+## Bilingual structure and the parity invariant
+
+Each factual content unit (`UNIT-*`) carries **one shared support set** — `claim_ids` + `evidence_ids` — plus paired `en`/`ar` prose. The invariant is structural: **Arabic and English may phrase the fact differently, but neither locale can introduce a fact with a different support set**, because the support set is not per-locale. Generated prose is not evidence; every citation resolves to context Evidence, and orphaned citations are rejected.
+
+## Selection rules (fail closed at the builder)
+
+- Candidate identities (`CAND-*`) and non-canonical IDs never enter the context.
+- Claims must be `active`; `disputed` claims are refused. Conflict detection is **scope- and validity-aware**: two active claims conflict only when they share subject, predicate, semantic scope (including `quantity_type`), and validity context while asserting different values. Ordered-versus-delivered quantities and the same scope at different validity contexts coexist; deeper conflict authority remains with upstream canonical adjudication. **No conflict-aware synthesis is attempted.** Conflict-aware prose can be a later capability once a structured, independently reviewed representation exists.
+- Entities without an official name in either locale are refused: drafting never invents translations. Official bilingual canonical names outrank generated translations (governance rule); the terminology registry governs recurring **non-entity** terminology only.
+- Evidence references must resolve inside the context (support closure).
+
+## Draft-output rules (fail closed at the adapter)
+
+- Strict finite JSON, duplicate object keys rejected (same parser discipline as the extraction trial).
+- Units must carry only `unit_id`/`claim_ids`/`evidence_ids`/`prose`; support IDs must exist in the context.
+- **Per-claim Evidence links and claim-specific support closure:** canonical SDA stores the Evidence role on each Claim→Evidence link (`evidence_links: [{evidence_id, role}]`), and the drafting projection preserves exactly that shape. A unit's `evidence_ids` must belong to the claims it cites, **and every claim in a unit must have at least one cited `supports` link** — partial multi-claim support and contradicting/contextual-only citations are rejected. A context claim with no supporting link at all is refused at build.
+- **Terminology pairing, both directions:** if a registry term's English rendering appears in a unit's English prose, the registry Arabic rendering must appear in the Arabic prose of the same unit, and vice versa. The registry is bound by version AND canonical digest (`terminology_sha256`); changed bytes under the same version are refused.
+- **Invented-precision guard:** every digit sequence in either locale's prose (Arabic-Indic digits normalized) must appear among the **factual fields** the draft may express — Claim values, validity, scope, and official entity names. Bookkeeping digits (IDs, timestamps, registry versions) deliberately do not authorize prose numbers.
+- **Restricted-detail rejection, bilingual:** prose carrying restricted operational markers in English or Arabic, or uncoarsened coordinate-like numbers, is rejected.
+- **Exactly-once accounting:** every approved claim is drafted in exactly one unit or listed exactly once in `undrafted_claim_ids` — never both, never twice; every context unknown is rendered or explicitly omitted.
+- **Unknown meaning preservation:** the model never authors unknown prose. It selects which unknowns to render (`rendered_unknown_ids`); the adapter copies the pre-written bilingual statements verbatim into `unknowns_rendered`.
+- Both accepted and rejected runs are runtime-validated against the run schema before the accepted status is granted.
+- Any violation rejects the run and **clears all drafted text**. The mechanical guards reject the defined violations above; they do not make semantic invention impossible — human editorial review remains the authority over meaning.
+
+## Terminology registry
+
+`data/terminology/bilingual-terminology-v0.1.json` is a small project-owned bounded registry (equipment categories, procurement states, ranks, recurring technical terms). It is not an external terminology system, and it never overrides official entity names. The registry version AND canonical digest are bound into the context; the adapter refuses a registry whose version or bytes differ.
+
+## Authority
+
+The drafting context is `approved_canonical_read_only` with `canonical_mutation_authority=false` and `publication_authority=false`. The draft run is `candidate_only` with the same false flags; the schema pins both constants, so an authority claim is schema-invalid, and the adapter refuses an escalated context before invocation.
+
+## Verification
+
+Two deterministic validators run in CI (`validate_m4_bilingual_drafting.py` core; `validate_m4_bilingual_drafting_isolation.py` isolation), covering: context determinism and schema validity; the builder's fail-closed matrix; canonical-input-only invoker evidence; rejection of unsupported IDs, orphaned citations, terminology violations (both directions), invented numbers (both locales, Arabic-Indic included), restricted detail and coordinates; full claim/unknown accounting with explicit abstention; unknown preservation per locale; terminology-version binding; authority escalation refused at both layers; deterministic per-invocation run identity.
+
+## Claim ceiling
+
+This increment establishes the bounded drafting projection mechanics only. It does not establish translation quality, editorial quality, fluency in either locale, live-model behavior, or any publication path. The draft artifact is downstream candidate data until human editorial review says otherwise, and no scheduler, autonomous publication, or canonical mutation exists here.
