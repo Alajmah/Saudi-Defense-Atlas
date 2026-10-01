@@ -9,8 +9,9 @@ resolve), explicit pre-written unknown statements, and the project-owned
 terminology registry version and digest. A deterministic drafting-eligibility
 gate rejects restricted operational detail in either locale before any model
 invocation. Only that bounded object reaches the drafting adapter, which
-independently re-validates the context contract, sends exactly the canonical
-serialization of the context as model input, and converts the response into a
+independently re-validates the context contract, sends the reviewed
+instructions-only wrapper around the canonical context serialization as the
+complete model input, and converts the response into a
 candidate-only draft run: one shared, claim-specific support set per factual
 unit across paired ar/en prose, exact deterministic reuse of pre-written
 unknown statements, a factual-fields-only number allowlist, exactly-once claim
@@ -59,6 +60,18 @@ RESTRICTED_MARKERS_AR = (
     "ذخيرة",  # ammunition
 )
 RESTRICTED_COORDINATE_PATTERN = re.compile(r"\d{1,2}\.\d{3,}")
+# Vocabulary the wrapper template itself must never carry (PW-01): every
+# restricted marker in either locale, plus the operational-domain terms the
+# first template draft quoted. The wrapper states prohibitions generically.
+WRAPPER_FORBIDDEN_VOCABULARY = (
+    *RESTRICTED_MARKERS_EN,
+    *RESTRICTED_MARKERS_AR,
+    "availability",
+    "posture",
+    "movement",
+    "coordinate",
+    "coordinates",
+)
 
 # --- Drafting prompt wrapper (deterministic increment; no live model) ---
 # The wrapper is instructions only: English-only, free of digits, and free of
@@ -106,8 +119,8 @@ RULES
   unknown prose of your own.
 - Do not state any number, date, name, or designation that the context does
   not carry. Do not infer, estimate, or round.
-- Do not include operationally sensitive detail about availability, posture,
-  or movement, and do not output coordinates.
+- Do not include operationally sensitive detail of any kind, and do not
+  include precise location data.
 - Do not invent entity identities, evidence identities, or claim identities.
 - Write public-register prose in each locale without editorial commentary.
 
@@ -809,8 +822,9 @@ def build_bilingual_draft_run(
     """Convert exact model output into a candidate-only bilingual draft run.
 
     The context is independently re-validated (schema plus builder invariants)
-    before invocation; the invoker receives exactly the canonical serialization
-    of the context; the registry is bound by version AND digest; every unit's
+    before invocation; the invoker receives the rendered wrapper input (the
+    reviewed template around the canonical context serialization); the registry
+    is bound by version AND digest; every unit's
     evidence must close over its cited claims specifically; claims are
     accounted exactly once; unknowns are preserved by exact deterministic reuse
     of the pre-written bilingual statements; and both accepted and rejected

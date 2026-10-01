@@ -20,13 +20,16 @@ The context is canonically typed: `predicate_id` uses the canonical enum, Claim 
 
 The complete model input is the reviewed instruction wrapper (`m4-bilingual-drafting-prompt` template **v0.1**) rendered around the canonical JSON serialization of the context — nothing else reaches the model. The run records four trace values: the wrapper `template_id`, `template_version`, the wrapper `template_sha256`, and `rendered_input_sha256` over the complete input, while `input_context_sha256` continues to hash the context alone, so the wrapper's contribution to the input is separately auditable.
 
-The wrapper is **instructions only**, and the validators prove it cannot introduce factual payload:
+The wrapper is reviewed as instructions-only. The validators mechanically prove a precise, enumerated set of properties — not a generic no-factual-payload theorem:
 
 - **round-trip proof:** stripping the wrapper from any rendered input reproduces the canonical context bytes exactly;
 - **no numeric payload:** the wrapper contains no digit characters, so every number in the model input comes from the context (whose factual fields the number allowlist governs);
 - **no Arabic script:** the wrapper is English-only, so every Arabic string in the input is context data;
-- **no context strings or identities:** no entity name, entity/claim/evidence/document identity, predicate, or unknown statement appears in the wrapper text;
+- **no forbidden vocabulary:** the wrapper carries none of the pinned `WRAPPER_FORBIDDEN_VOCABULARY` — every restricted marker in either locale plus the operational-domain terms (availability, posture, movement, coordinate forms) the first template draft quoted before being reworded;
+- **fixture-overlap check:** no string from the context's free-text and identifier surfaces — names, identities, predicates, typed claim values, validity dates, scope notes and entity references, locator text, unknown aspects and statements — appears in the wrapper text;
 - **no registry renderings:** no terminology term's English or Arabic rendering appears in the wrapper (the template was deliberately reworded when the ordinary word "approved" collided with a registry term).
+
+The judgment that the reviewed static template is itself instruction-only is review evidence carried by the first-pass and remediation records, not a validator theorem: the checks above constrain the template's syntax and its overlap with the evaluated context and registry, and a template is a fixed, reviewed artifact rather than model output.
 
 One open question is recorded for the live drafting trial: how registry renderings reach the model. The context binds the registry by version and digest but does not embed the terms; the live increment must decide (for example, a registry section appended inside the rendered input, covered by the rendered-input hash and the context's registry binding) and must be reviewed before any live call.
 

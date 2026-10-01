@@ -27,6 +27,7 @@ if str(ROOT) not in sys.path:
 
 from scripts.validate_schemas import build_registry  # noqa: E402
 from services.intelligence.bilingual_drafting import (  # noqa: E402
+    WRAPPER_FORBIDDEN_VOCABULARY,
     BilingualDraftingError,
     DraftModelTrace,
     build_approved_drafting_context,
@@ -215,6 +216,16 @@ def main() -> int:
     expect(
         not any(char.isdigit() for char in wrapper_text),
         "wrapper text contains digits",
+        failures,
+    )
+    iso_forbidden = sorted(
+        word
+        for word in WRAPPER_FORBIDDEN_VOCABULARY
+        if word.casefold() in wrapper_text.casefold()
+    )
+    expect(
+        not iso_forbidden,
+        f"wrapper text carries restricted or operational vocabulary: {iso_forbidden[:3]}",
         failures,
     )
     prompt_of_run = None  # keep name reuse clear

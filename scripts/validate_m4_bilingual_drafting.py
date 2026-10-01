@@ -23,6 +23,7 @@ from services.intelligence.bilingual_drafting import (  # noqa: E402
     DRAFT_PROMPT_TEMPLATE_ID,
     DRAFT_PROMPT_TEMPLATE_VERSION,
     DRAFT_CONTEXT_TOKEN,
+    WRAPPER_FORBIDDEN_VOCABULARY,
     DraftModelTrace,
     build_approved_drafting_context,
     build_bilingual_draft_run,
@@ -437,24 +438,47 @@ def main() -> int:
         failures,
     )
     wrapper_text = before + after
+
+    # PW-01: the wrapper carries none of the pinned forbidden vocabulary.
+    folded_wrapper = wrapper_text.casefold()
+    forbidden_hits = sorted(
+        word for word in WRAPPER_FORBIDDEN_VOCABULARY if word.casefold() in folded_wrapper
+    )
+    expect(
+        not forbidden_hits,
+        f"wrapper text carries restricted or operational vocabulary: {forbidden_hits[:3]}",
+        failures,
+    )
+
+    # PW-02: the fixture-overlap check walks every string-bearing surface of
+    # the context - identities, names, predicates, claim values (recursively,
+    # so typed string values are covered), scope.note, locator values, and the
+    # unknown records including aspect.
+    structural_keys = frozenset(
+        {"kind", "precision", "role", "claim_state", "entity_type"}
+    )
+
+    def _string_leaves(value, parent_key=None):
+        if isinstance(value, str):
+            if parent_key not in structural_keys and len(value) >= 3:
+                yield value
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                yield from _string_leaves(child, key)
+        elif isinstance(value, list):
+            for child in value:
+                yield from _string_leaves(child, parent_key)
+
     factual_strings = set()
     for item in context["entities"]:
-        factual_strings.update(item["names"].values())
-        factual_strings.add(item["entity_id"])
+        factual_strings.update(_string_leaves(item))
     for item in context["claims"]:
-        factual_strings.add(item["claim_id"])
-        factual_strings.add(item["subject_entity_id"])
-        factual_strings.add(item["predicate_id"])
+        factual_strings.update(_string_leaves(item))
     for item in context["evidence"]:
-        factual_strings.add(item["evidence_id"])
-        factual_strings.add(item["document_id"])
+        factual_strings.update(_string_leaves(item))
     for item in context["unknowns"]:
-        factual_strings.update(
-            {item["unknown_id"], item["statement_en"], item["statement_ar"]}
-        )
-    leaked = sorted(
-        value for value in factual_strings if value and value in wrapper_text
-    )
+        factual_strings.update(_string_leaves(item))
+    leaked = sorted(value for value in factual_strings if value in wrapper_text)
     expect(
         not leaked,
         f"wrapper text carries context factual strings: {leaked[:3]}",
