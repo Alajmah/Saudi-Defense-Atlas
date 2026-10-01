@@ -35,7 +35,7 @@ from typing import Any, Callable, Mapping
 
 from jsonschema import Draft202012Validator, FormatChecker
 
-ADAPTER_VERSION = "m4-bilingual-drafting-v0.3"
+ADAPTER_VERSION = "m4-bilingual-drafting-v0.4"
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTEXT_SCHEMA_PATH = ROOT / "schemas" / "v0.1" / "editorial-drafting-context.schema.json"
@@ -523,10 +523,22 @@ def validate_drafting_context(context: Mapping[str, Any]) -> None:
     evidence_ids = {item["evidence_id"] for item in context["evidence"]}
     if len(entity_ids) != len(context["entities"]):
         raise BilingualDraftingError("drafting context carries duplicate entities")
+    for entity in context["entities"]:
+        if entity["entity_id"].startswith(("SDA-CLAIM-", "SDA-EVID-", "CAND-")):
+            raise BilingualDraftingError(
+                f"entity identity {entity['entity_id']!r} uses a reserved or "
+                "non-Entity prefix"
+            )
     if len(evidence_ids) != len(context["evidence"]):
         raise BilingualDraftingError("drafting context carries duplicate evidence")
     if len({item["claim_id"] for item in context["claims"]}) != len(context["claims"]):
         raise BilingualDraftingError("drafting context carries duplicate claims")
+    for claim in context["claims"]:
+        link_ids = [link["evidence_id"] for link in claim["evidence_links"]]
+        if len(link_ids) != len(set(link_ids)):
+            raise BilingualDraftingError(
+                f"claim {claim['claim_id']} cites the same evidence more than once"
+            )
 
     fingerprints: dict[tuple[str, str, str], list[dict[str, str]]] = {}
     for claim in context["claims"]:
@@ -571,6 +583,12 @@ def validate_drafting_context(context: Mapping[str, Any]) -> None:
     unknown_ids = [item["unknown_id"] for item in context["unknowns"]]
     if len(unknown_ids) != len(set(unknown_ids)):
         raise BilingualDraftingError("drafting context carries duplicate unknowns")
+    for unknown in context["unknowns"]:
+        entity_id = unknown.get("entity_id")
+        if entity_id is not None and entity_id not in entity_ids:
+            raise BilingualDraftingError(
+                f"unknown {unknown['unknown_id']} references an entity outside the context"
+            )
 
     _drafting_eligibility_gate(context)
 

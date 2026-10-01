@@ -579,6 +579,62 @@ def main() -> int:
 
     expect_error("hand-assembled context missing terminology digest", run_no_digest, failures)
 
+    # RBD-04: reserved-prefix entity IDs in a hand-assembled context are
+    # refused by the adapter path even though the schema pattern allows them.
+    reserved_entity = copy.deepcopy(context)
+    reserved_entity["entities"].append(
+        {
+            "entity_id": "SDA-CLAIM-SMUGGLED",
+            "entity_type": "organization",
+            "names": {"en": "Smuggled Claim ID", "ar": "معرف ادعاء مهرب"},
+        }
+    )
+    # Re-key the context identity so only the invariant differs.
+    reserved_entity["id"] = "SDA-DRAFTCTX-RESERVED0000000001"
+
+    def run_reserved() -> None:
+        run_with(lambda _: json.dumps(good_draft_output()), ctx=reserved_entity)
+
+    expect_error("hand-assembled context with reserved-prefix entity ID", run_reserved, failures)
+
+    dangling_unknown = copy.deepcopy(context)
+    dangling_unknown["unknowns"].append(
+        {
+            "unknown_id": "UNK-DANGLING",
+            "aspect": "operator",
+            "entity_id": "SDA-ORG-NOT-IN-CONTEXT",
+            "statement_en": "Unresolved entity reference.",
+            "statement_ar": "مرجع كيان غير محلول.",
+        }
+    )
+    dangling_unknown["id"] = "SDA-DRAFTCTX-DANGLING000000002"
+
+    def run_dangling() -> None:
+        run_with(lambda _: json.dumps(good_draft_output()), ctx=dangling_unknown)
+
+    expect_error("hand-assembled context with dangling unknown entity", run_dangling, failures)
+
+    dup_link = copy.deepcopy(context)
+    dup_link["claims"][0]["evidence_links"] = [
+        {"evidence_id": "SDA-EVID-CEDAR-1", "role": "supports"},
+        {"evidence_id": "SDA-EVID-CEDAR-1", "role": "contextualizes"},
+    ]
+    dup_link["id"] = "SDA-DRAFTCTX-DUPLINK000000003"
+
+    def run_dup_link() -> None:
+        run_with(lambda _: json.dumps(good_draft_output()), ctx=dup_link)
+
+    expect_error(
+        "hand-assembled context citing the same evidence twice", run_dup_link, failures
+    )
+
+    # RBD-05: an empty locator is refused at build (schema minProperties 1).
+    empty_locator = copy.deepcopy(evidence)
+    empty_locator[0]["locator"] = {}
+    expect_error(
+        "evidence with empty locator", lambda: build(evidence=empty_locator), failures
+    )
+
     # FBD-02: changed terminology bytes under the same version are refused.
     tampered_registry = json.loads(TERMINOLOGY.read_text(encoding="utf-8"))
     tampered_registry["terms"][0]["ar"] = "منظومة معدلة"
@@ -595,7 +651,7 @@ def main() -> int:
         return 1
 
     print(
-        "Validated bounded bilingual drafting v0.3: canonical-typed scope-preserving approved-only context with "
+        "Validated bounded bilingual drafting v0.4: canonical-typed scope-preserving approved-only context with "
         "per-claim evidence links and roles, "
         "entity-target resolution, terminology digest binding, and a bilingual pre-invocation "
         "sensitivity gate; adapter independently re-validates hand-assembled contexts; invoker "

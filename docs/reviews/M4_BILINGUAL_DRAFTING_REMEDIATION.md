@@ -54,13 +54,23 @@ The re-review (`5380611107`) found the v0.2 closure admitted partial multi-claim
 
 ### RBD-02 — conflict detection collapsed scope and time — REMEDIATED (residual round)
 
-Conflict fingerprints are now `(subject, predicate, canonical scope)` and values are compared only within the same validity context. Ordered-12 versus delivered-6 coexists (regression), the same scope at provably different validity contexts coexists (regression), and the same scope and validity with different values still fails closed (regression). Deeper conflict authority is explicitly deferred to upstream canonical adjudication, per the reviewer's alternative.
+Conflict fingerprints are now `(subject, predicate, canonical scope)` and values are compared only within the same validity context. Ordered-12 versus delivered-6 coexists (regression), and claims with non-identical validity objects (canonical JSON equality) coexist (regression) — note this distinguishes non-identical validity contexts; it does not itself prove temporal disjointness for overlapping intervals, which remains with upstream canonical adjudication, and the same scope and validity with different values still fails closed (regression). Deeper conflict authority is explicitly deferred to upstream canonical adjudication, per the reviewer's alternative.
 
 ### RBD-03 — context schema looser than canonical — REMEDIATED (residual round)
 
 The context schema now reuses canonical definitions via the schema registry: `predicate_id` is the canonical enum (20 predicates), `value` is `common#$defs/claim_value` (typed oneOf), `scope.quantity_type` is the canonical procurement-stage enum, `validity` is `validity_interval` (object, not nullable — fixtures updated), `entity_type` is the canonical enum, and the Evidence locator mirrors the canonical locator shape. The builder self-validates its constructed context against this schema before returning, and the adapter's pre-invocation gate re-validates hand-assembled contexts against the same schema — so invalid predicates, invalid quantity stages, and malformed values are refused before any model invocation (regressions at build and in the schema gate). The service's schema loader builds a registry over sibling schemas so cross-file `$ref`s resolve, mirroring `validate_schemas`.
 
 Adapter version bumped to `m4-bilingual-drafting-v0.3` (boundary behavior and schema changed). LOW metadata: the PR description now says 11 files (the remediation record itself being the eleventh).
+
+### RBD-04 — adapter-path validation missed three builder invariants — REMEDIATED (residual round 2)
+
+The re-review (`5380995625`) found `validate_drafting_context()` did not reject reserved-prefix Entity IDs (`SDA-CLAIM-*` / `SDA-EVID-*`, schema-pattern-legal), unresolved non-null `unknown.entity_id`, or duplicate Evidence IDs within a Claim's `evidence_links`. All three are now enforced on the adapter path (and the schema adds `uniqueItems` on `evidence_links` for identical-object duplicates), with hand-assembled-context regressions for each — including the same-evidence-different-role case only the invariant check catches. The prior remediation text claiming the adapter re-enforced "identity prefixes" and "duplicate detection" was premature for these specific invariants; it is accurate as of this round.
+
+### RBD-05 — locator lacked canonical `minProperties: 1` — REMEDIATED (residual round 2)
+
+The drafting-context locator now carries `minProperties: 1`, mirroring canonical Evidence; an empty locator is refused at build (self-validation) and on the adapter path, with a regression. The earlier "mirrors the canonical locator" claim is now literally true.
+
+Adapter version bumped to `m4-bilingual-drafting-v0.4` (adapter-path validation behavior changed). The RBD-02 wording above was also narrowed per the fallback review: the comparison distinguishes non-identical validity objects; it does not prove temporal disjointness of overlapping intervals.
 
 ## Deterministic validation evidence
 

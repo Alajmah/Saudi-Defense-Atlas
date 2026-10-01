@@ -204,7 +204,8 @@
                 }
               },
               "additionalProperties": false
-            }
+            },
+            "uniqueItems": true
           }
         }
       }
@@ -278,7 +279,8 @@
                 ]
               }
             },
-            "additionalProperties": false
+            "additionalProperties": false,
+            "minProperties": 1
           }
         }
       }
