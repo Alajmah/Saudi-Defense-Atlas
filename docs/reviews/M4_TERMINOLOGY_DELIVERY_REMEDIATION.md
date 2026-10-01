@@ -22,7 +22,7 @@ The broader statement that official Entity names outrank terminology remains a p
 
 ## TRD-03 — renderer ownership/binding was underspecified — REMEDIATED
 
-The design now freezes the renderer boundary conceptually as `render_draft_prompt(context, terminology) -> str`. The renderer must load/validate the supplied registry, verify its version and digest against the context, run delivery gates, derive the least-privilege lexical payload internally, canonically serialize both data blocks, and return the exact complete string supplied to the invoker.
+The design now freezes the renderer boundary conceptually as `render_draft_prompt(context, terminology) -> str`. The renderer must load/validate the supplied registry, verify its version and digest against the context, run delivery gates, derive the least-privilege delivery payload internally, canonically serialize both data blocks, and return the exact complete string supplied to the invoker.
 
 There is no global/default registry, caller-supplied pre-rendered terminology block, or rendering path over registry bytes that have not been checked against the context binding.
 
@@ -40,14 +40,24 @@ The design no longer proposes reusing only the older drafting-eligibility marker
 
 Wrapper checks and terminology-delivery checks must consume the same underlying pinned vocabulary, plus the existing coordinate-like numeric pattern. This prevents terminology delivery from reopening the lexical-priming surface closed by PW-01.
 
+## TRD-05 — lexical-only delivery dropped registry category semantics — REMEDIATED
+
+Fallback review `5386641700` identified that the first remediated design projected only `en` / `ar` and treated `category` as unnecessary metadata. That was too aggressive: `category` is part of every validated registry term and distinguishes procurement-state, rank, equipment-category, and technical-term mappings. Removing it can broaden the apparent applicability of ambiguous renderings such as `approved` or `delivered`.
+
+The delivery projection now preserves exactly `category` + `en` + `ar` for every registry term, in registry order. Registry version, `term_id`, and top-level descriptive `scope` remain outside the model-facing payload. The design explicitly states that category narrows lexical applicability but does not authorize a fact or prove relevance to a particular Claim.
+
+Validator requirements now include exact category preservation and same-version category mutation refusal through the existing registry digest mismatch.
+
 ## Additional precision added during remediation
 
-The design now explicitly distinguishes static-wrapper properties from whole-input properties after terminology delivery. Arabic registry renderings are intentionally present in the typed TERMINOLOGY block, and future terminology data may contain digits; neither fact changes the context-only factual-number allowlist.
+The design explicitly distinguishes static-wrapper properties from whole-input properties after terminology delivery. Arabic registry renderings and categories are intentionally present in the typed TERMINOLOGY block, and future terminology data may contain digits; neither fact changes the context-only factual-number allowlist.
 
-The model-facing payload remains least privilege: only ordered `terms[].en` / `terms[].ar` pairs are delivered. Registry version, term IDs, categories, and descriptive scope remain outside the model-facing payload.
+The model-facing payload is now the least-privilege **categorized lexical projection**: ordered `terms[].category` / `terms[].en` / `terms[].ar`. Registry version, term IDs, and descriptive scope remain outside the model-facing payload.
 
 ## Status after remediation
 
-TRD-01 through TRD-04 are addressed in the design at commit `713691c3b9c0744a6a050ed59ec628631e5014ae`.
+TRD-01 through TRD-04 were addressed at design commit `713691c3b9c0744a6a050ed59ec628631e5014ae`.
 
-Implementation remains intentionally absent. Template v0.2, adapter v0.8, schema changes, validators, and any live run are future work gated on review of this design.
+TRD-05 was addressed at design commit `c82eaaba8352ed2125a4b28b5fe0fa5763b3a6ed` after the Codex-quota fallback review. The frozen first-pass file and frozen primary review are not rewritten.
+
+Implementation remains intentionally absent. Template v0.2, adapter v0.8, schema changes, validators, and any live run are future work gated on exact-head re-review of this design.
