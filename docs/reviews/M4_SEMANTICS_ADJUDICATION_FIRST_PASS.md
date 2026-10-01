@@ -41,7 +41,7 @@ The R1–R5 outputs were not used as evidence for the adjudication: the reading 
 
 ### REP-02 — claim/event-driven entity set
 
-The rule (entities only when they fill a role in an emitted Claim or Event) is grounded in the ontology (entities as bearers of relationships) and the downstream architecture (the resolver materializes evidence/claim/event mutations and never a standalone entity mutation — verified in `_resolver_verifier_core`'s mutation assembly). Quantity gold already conforms and was not changed; the rule states the basis the evaluator had been enforcing without writing down. Evaluated, not enforced, with the disproportion rationale recorded (an extra source-grounded entity is a scoring miss, not an integrity violation).
+The rule (entities only when they fill a role in an emitted Claim or Event) is a chosen bounded-trial convention motivated by the current downstream proposal surface (the resolver materializes evidence/claim/event mutations and has no standalone Entity mutation — verified in `_resolver_verifier_core`'s mutation assembly) and by the exact-gold evaluation target; it is not an ontology requirement, and canonical Entity remains a first-class domain identity. This framing corrects the first-pass draft's unsupported ontology claim per review 5375506680 (SA-01), which this record acknowledges it originally repeated. Quantity gold already conforms and was not changed; the rule states the basis the evaluator had been enforcing without writing down. Evaluated, not enforced, with the disproportion rationale recorded (an extra source-grounded entity is a scoring miss, not an integrity violation).
 
 ## Evidence integrity during a gold change
 

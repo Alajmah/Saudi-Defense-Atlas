@@ -263,9 +263,15 @@ def main() -> int:
     unused["candidate_id"] = "CAND-ENT-UNUSED-TRAINER-AIRCRAFT"
     unused["names"] = {"en": "trainer aircraft"}
     extra_entity["candidates"]["entities"].append(unused)
+    extra_entity_quality = quality(quantity_case, extra_entity)
     expect(
-        quality(quantity_case, extra_entity)["pass"] is False,
+        extra_entity_quality["pass"] is False,
         "unused extra entity passed the exact entity-set scorer",
+        failures,
+    )
+    expect(
+        any(check.get("id") == "entities-semantics" and not check.get("pass") for check in extra_entity_quality["checks"]),
+        "unused extra entity did not fail specifically the entities-semantics check",
         failures,
     )
 

@@ -54,11 +54,13 @@ Canonical SDA precedent distinguishes named discrete products as variants of fam
 
 An Entity record is expected **only when that entity fills a role in the same extraction** — as the subject or value of an emitted Claim, or as a participant or related entity of an emitted Event. Source-supported noun phrases that no emitted Claim or Event uses are not emitted, even when representable.
 
-Neither exhaustive nor abstractly minimal, the rule is claim/event-driven: entities are the bearers of relationships, and this trial's downstream architecture admits entity semantics into proposals exclusively through Claims and Events — the resolver/verifier materializes evidence, claim, and event mutations and never a standalone entity mutation. An entity record with no propositional role has no downstream representation.
+Canonical SDA Entity remains a first-class domain identity with its own type, naming, aliases, and lifecycle; this rule does not alter ontology semantics. The rule is a **chosen bounded-M4 model-trial candidate-output convention**, not an ontology invariant. What motivates the choice: the current downstream proposal surface admits extracted entity semantics into proposals only through Claims and Events — the resolver/verifier materializes evidence, claim, and event mutations and has no standalone Entity mutation — and the trial's exact-gold evaluation target is the scored Claim/Event set. Under that surface, an unused Entity candidate has no downstream representation and only introduces entity-set noise.
 
 ### Status
 
 **Evaluated, not enforced.** The boundary does not reject an extraction for an unused entity: an extra source-grounded entity is a scoring miss, not an integrity violation. The exact-gold evaluator scores the entity set exactly, and prompt template v0.8 instructs the rule.
+
+**Forcing function.** If M4 later gains a standalone Entity proposal/materialization path, or any other consumer of standalone extracted entities, this convention must be re-adjudicated before it is treated as continuing to hold.
 
 ### Reconciliation with gold
 
