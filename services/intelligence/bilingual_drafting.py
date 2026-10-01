@@ -35,7 +35,7 @@ from typing import Any, Callable, Mapping
 
 from jsonschema import Draft202012Validator, FormatChecker
 
-ADAPTER_VERSION = "m4-bilingual-drafting-v0.4"
+ADAPTER_VERSION = "m4-bilingual-drafting-v0.5"
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTEXT_SCHEMA_PATH = ROOT / "schemas" / "v0.1" / "editorial-drafting-context.schema.json"
@@ -69,17 +69,23 @@ class BilingualDraftingError(ValueError):
 
 @dataclass(frozen=True)
 class DraftModelTrace:
+    """Model provenance for a draft run.
+
+    The adapter version is derived from this module (RBD-08): callers name the
+    provider, model, and model version only, so the nested trace and the
+    top-level run field can never disagree.
+    """
+
     provider: str
     model: str
     model_version: str
-    adapter_version: str = ADAPTER_VERSION
 
     def as_dict(self) -> dict[str, str]:
         values = {
             "provider": self.provider,
             "model": self.model,
             "model_version": self.model_version,
-            "adapter_version": self.adapter_version,
+            "adapter_version": ADAPTER_VERSION,
         }
         for key, value in values.items():
             if not isinstance(value, str) or not value.strip():
@@ -234,6 +240,20 @@ def _drafting_eligibility_gate(context: Mapping[str, Any]) -> None:
         raise BilingualDraftingError("; ".join(failures[:3]))
 
 
+def _derive_context_id(context: Mapping[str, Any]) -> str:
+    """Deterministic content-bound identity for an approved drafting context."""
+
+    return _stable_id(
+        "SDA-DRAFTCTX",
+        context["entities"],
+        context["claims"],
+        context["evidence"],
+        [item["unknown_id"] for item in context["unknowns"]],
+        context["terminology_sha256"],
+        context["created_at"],
+    )
+
+
 def build_approved_drafting_context(
     *,
     entities: list[Mapping[str, Any]],
@@ -356,6 +376,13 @@ def build_approved_drafting_context(
         scope = claim.get("scope")
         if scope is not None and not isinstance(scope, Mapping):
             raise BilingualDraftingError(f"claim {claim_id} scope must be an object or null")
+        if isinstance(scope, Mapping):
+            for scope_entity_id in scope.get("entity_ids", []):
+                if scope_entity_id not in entity_by_id:
+                    raise BilingualDraftingError(
+                        f"claim {claim_id} scope references entity {scope_entity_id!r} "
+                        "outside the context"
+                    )
         evidence_links = claim.get("evidence_links")
         if (
             not isinstance(evidence_links, list)
@@ -468,15 +495,7 @@ def build_approved_drafting_context(
             "publication_authority": False,
         },
     }
-    context["id"] = _stable_id(
-        "SDA-DRAFTCTX",
-        context["entities"],
-        context["claims"],
-        context["evidence"],
-        [item["unknown_id"] for item in prepared_unknowns],
-        context["terminology_sha256"],
-        created_at,
-    )
+    context["id"] = _derive_context_id(context)
     _drafting_eligibility_gate(context)
     schema_errors = [
         error.message for error in _CONTEXT_VALIDATOR.iter_errors(dict(context))
@@ -589,6 +608,24 @@ def validate_drafting_context(context: Mapping[str, Any]) -> None:
             raise BilingualDraftingError(
                 f"unknown {unknown['unknown_id']} references an entity outside the context"
             )
+    # RBD-06: canonical scope carries Entity references; every scope entity
+    # must resolve to a context Entity with its official bilingual record.
+    for claim in context["claims"]:
+        scope = claim.get("scope")
+        if not isinstance(scope, Mapping):
+            continue
+        for scope_entity_id in scope.get("entity_ids", []):
+            if scope_entity_id not in entity_ids:
+                raise BilingualDraftingError(
+                    f"claim {claim['claim_id']} scope references entity "
+                    f"{scope_entity_id!r} outside the context"
+                )
+    # RBD-07: the context identity is content-bound; a stale or hand-picked ID
+    # over modified content is refused before invocation.
+    if context["id"] != _derive_context_id(context):
+        raise BilingualDraftingError(
+            "drafting context identity does not match its content"
+        )
 
     _drafting_eligibility_gate(context)
 

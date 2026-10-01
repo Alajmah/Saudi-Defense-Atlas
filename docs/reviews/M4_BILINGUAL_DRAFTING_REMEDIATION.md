@@ -72,6 +72,20 @@ The drafting-context locator now carries `minProperties: 1`, mirroring canonical
 
 Adapter version bumped to `m4-bilingual-drafting-v0.4` (adapter-path validation behavior changed). The RBD-02 wording above was also narrowed per the fallback review: the comparison distinguishes non-identical validity objects; it does not prove temporal disjointness of overlapping intervals.
 
+### RBD-06 — scope.entity_ids referentially open — REMEDIATED (residual round 3)
+
+Every `scope.entity_ids` entry must now resolve to a context Entity at both the builder and the adapter path, so material scope never reaches the model without the resolved bilingual Entity record. Regressions at both boundaries.
+
+### RBD-07 — context identity not content-bound on the adapter path — REMEDIATED (residual round 3)
+
+The deterministic ID derivation is factored into `_derive_context_id`, used by the builder and recomputed by `validate_drafting_context`: a hand-built context whose ID does not match its content is refused before invocation. Regression: a valid context with modified content under the original ID is refused.
+
+### RBD-08 — caller-settable adapter-version trace — REMEDIATED (residual round 3)
+
+`DraftModelTrace` no longer accepts an adapter version: the field is removed from the constructor and derived from the module constant, so the nested trace and the top-level run field cannot disagree. Regressions: constructing a trace with a `adapter_version` kwarg raises; emitted runs assert both fields equal the module version.
+
+Adapter version bumped to `m4-bilingual-drafting-v0.5` (adapter-path validation behavior changed again).
+
 ## Deterministic validation evidence
 
 - Complete repository suite at the remediation head: **41/41 validators — PASS**, with the rewritten core and isolation validators carrying the expanded matrices (scope grounding, claim-specific closure, exactly-once, bilingual gates, bookkeeping-digit rejection, deterministic unknown reuse, registry-byte binding, hand-assembled-context refusals, raw-output hashing).

@@ -628,6 +628,53 @@ def main() -> int:
         "hand-assembled context citing the same evidence twice", run_dup_link, failures
     )
 
+    # RBD-06: scope.entity_ids must resolve at build and on the adapter path.
+    dangling_scope = copy.deepcopy(claims)
+    dangling_scope[0]["scope"]["entity_ids"] = ["SDA-PROC-NOT-IN-CONTEXT"]
+    expect_error(
+        "claim scope referencing an outside entity", lambda: build(claims=dangling_scope), failures
+    )
+
+    hand_scope = copy.deepcopy(context)
+    hand_scope["claims"][0]["scope"]["entity_ids"] = ["SDA-PROC-NOT-IN-CONTEXT"]
+    hand_scope["id"] = "SDA-DRAFTCTX-HANDSCOPE000004"
+
+    def run_hand_scope() -> None:
+        run_with(lambda _: json.dumps(good_draft_output()), ctx=hand_scope)
+
+    expect_error(
+        "hand-assembled context with dangling scope entity", run_hand_scope, failures
+    )
+
+    # RBD-07: a stale content-bound identity is refused before invocation.
+    stale_id = copy.deepcopy(context)
+    stale_id["entities"][0]["names"]["en"] = "Renamed Aerospace"
+    stale_id["id"] = "SDA-DRAFTCTX-STALE00000000005"
+
+    def run_stale_id() -> None:
+        run_with(lambda _: json.dumps(good_draft_output()), ctx=stale_id)
+
+    expect_error(
+        "hand-assembled context with stale identity over modified content",
+        run_stale_id,
+        failures,
+    )
+
+    # RBD-08: the adapter version is derived; callers cannot set a conflicting
+    # trace value, and emitted runs always agree across both fields.
+    try:
+        DraftModelTrace(
+            provider="p", model="m", model_version="v", adapter_version="forged-v0.1"
+        )
+        failures.append("DraftModelTrace accepted a caller-set adapter_version")
+    except TypeError:
+        pass
+    expect(
+        run["model_trace"]["adapter_version"] == run["adapter_version"] == ADAPTER_VERSION,
+        "emitted run carries conflicting adapter versions",
+        failures,
+    )
+
     # RBD-05: an empty locator is refused at build (schema minProperties 1).
     empty_locator = copy.deepcopy(evidence)
     empty_locator[0]["locator"] = {}
@@ -651,7 +698,7 @@ def main() -> int:
         return 1
 
     print(
-        "Validated bounded bilingual drafting v0.4: canonical-typed scope-preserving approved-only context with "
+        "Validated bounded bilingual drafting v0.5: canonical-typed scope-closed scope-preserving approved-only context with "
         "per-claim evidence links and roles, "
         "entity-target resolution, terminology digest binding, and a bilingual pre-invocation "
         "sensitivity gate; adapter independently re-validates hand-assembled contexts; invoker "
@@ -660,7 +707,8 @@ def main() -> int:
         "abstention; exact deterministic reuse of pre-written unknown statements; terminology "
         "pairing both directions; factual-fields-only number allowlist (bookkeeping digits "
         "rejected); bilingual restricted-detail and coordinate rejection; raw-output hashing; "
-        "runtime schema validation of accepted and rejected runs; candidate-only authority."
+        "runtime schema validation of accepted and rejected runs; content-bound context identity "
+        "reforged on the adapter path; derived adapter version; candidate-only authority."
     )
     return 0
 
