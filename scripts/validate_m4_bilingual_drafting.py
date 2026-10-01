@@ -19,10 +19,18 @@ from scripts.validate_schemas import build_registry  # noqa: E402
 from services.intelligence.bilingual_drafting import (  # noqa: E402
     ADAPTER_VERSION,
     BilingualDraftingError,
+    DRAFT_PROMPT_TEMPLATE,
+    DRAFT_PROMPT_TEMPLATE_ID,
+    DRAFT_PROMPT_TEMPLATE_VERSION,
+    DRAFT_CONTEXT_TOKEN,
+    WRAPPER_FORBIDDEN_VOCABULARY,
     DraftModelTrace,
     build_approved_drafting_context,
     build_bilingual_draft_run,
+    draft_prompt_template_sha256,
     load_terminology,
+    render_draft_prompt,
+    split_rendered_prompt,
     terminology_digest,
 )
 
@@ -375,9 +383,10 @@ def main() -> int:
         "raw output hash does not match the exact model response",
         failures,
     )
+    rendered_prompt = render_draft_prompt(context)
     expect(
-        captured_prompt[0] == canonical_json(context),
-        "invoker did not receive exactly the canonical context serialization",
+        captured_prompt[0] == rendered_prompt,
+        "invoker did not receive exactly the rendered wrapper input",
         failures,
     )
     expect("CAND-" not in captured_prompt[0], "prompt leaked candidate markers", failures)
@@ -386,6 +395,107 @@ def main() -> int:
         "prompt dropped the material scope semantics the fixture prose expresses",
         failures,
     )
+    expect(
+        run["prompt_trace"]["template_id"] == DRAFT_PROMPT_TEMPLATE_ID
+        and run["prompt_trace"]["template_version"] == DRAFT_PROMPT_TEMPLATE_VERSION
+        and run["prompt_trace"]["template_sha256"] == draft_prompt_template_sha256(),
+        "run prompt_trace misidentifies the wrapper template",
+        failures,
+    )
+    expect(
+        run["prompt_trace"]["rendered_input_sha256"] == sha256_text(rendered_prompt),
+        "rendered-input hash does not match the complete model input",
+        failures,
+    )
+    expect(
+        run["input_context_sha256"] == sha256_text(canonical_json(context)),
+        "context-only hash was not retained separately from the rendered input",
+        failures,
+    )
+
+    # --- wrapper-isolation proofs: enumerated template properties (the
+    # instructions-only judgment of the reviewed template is review evidence) ---
+    import re as _re
+
+    expect(
+        DRAFT_PROMPT_TEMPLATE.count(DRAFT_CONTEXT_TOKEN) == 1,
+        "wrapper template carries the context token more than once",
+        failures,
+    )
+    expect(
+        not any(char.isdigit() for char in DRAFT_PROMPT_TEMPLATE),
+        "wrapper template contains digits and can introduce numeric payload",
+        failures,
+    )
+    expect(
+        not _re.search(r"[\u0600-\u06FF]", DRAFT_PROMPT_TEMPLATE),
+        "wrapper template contains Arabic script",
+        failures,
+    )
+    before, extracted_json, after = split_rendered_prompt(rendered_prompt)
+    expect(
+        extracted_json == canonical_json(context),
+        "stripping the wrapper does not reproduce the canonical context bytes",
+        failures,
+    )
+    wrapper_text = before + after
+
+    # PW-01: the wrapper carries none of the pinned forbidden vocabulary.
+    folded_wrapper = wrapper_text.casefold()
+    forbidden_hits = sorted(
+        word for word in WRAPPER_FORBIDDEN_VOCABULARY if word.casefold() in folded_wrapper
+    )
+    expect(
+        not forbidden_hits,
+        f"wrapper text carries restricted or operational vocabulary: {forbidden_hits[:3]}",
+        failures,
+    )
+
+    # PW-02: the fixture-overlap check walks every string-bearing surface of
+    # the context - identities, names, predicates, claim values (recursively,
+    # so typed string values are covered), scope.note, locator values, and the
+    # unknown records including aspect.
+    structural_keys = frozenset(
+        {"kind", "precision", "role", "claim_state", "entity_type"}
+    )
+
+    def _string_leaves(value, parent_key=None):
+        if isinstance(value, str):
+            if parent_key not in structural_keys and len(value) >= 3:
+                yield value
+        elif isinstance(value, dict):
+            for key, child in value.items():
+                yield from _string_leaves(child, key)
+        elif isinstance(value, list):
+            for child in value:
+                yield from _string_leaves(child, parent_key)
+
+    factual_strings = set()
+    for item in context["entities"]:
+        factual_strings.update(_string_leaves(item))
+    for item in context["claims"]:
+        factual_strings.update(_string_leaves(item))
+    for item in context["evidence"]:
+        factual_strings.update(_string_leaves(item))
+    for item in context["unknowns"]:
+        factual_strings.update(_string_leaves(item))
+    leaked = sorted(value for value in factual_strings if value in wrapper_text)
+    expect(
+        not leaked,
+        f"wrapper text carries context factual strings: {leaked[:3]}",
+        failures,
+    )
+    for term in terminology["terms"]:
+        expect(
+            term["en"].casefold() not in wrapper_text.casefold(),
+            f"wrapper text carries registry term {term['term_id']} English rendering",
+            failures,
+        )
+        expect(
+            term["ar"] not in wrapper_text,
+            f"wrapper text carries registry term {term['term_id']} Arabic rendering",
+            failures,
+        )
     expect(
         run["unknowns_rendered"][0]["prose"]["en"]
         == unknowns[0]["statement_en"]
@@ -721,7 +831,7 @@ def main() -> int:
         return 1
 
     print(
-        "Validated bounded bilingual drafting v0.6: canonical-typed scope-closed scope-preserving approved-only context with "
+        "Validated bounded bilingual drafting v0.7: canonical-typed scope-closed scope-preserving approved-only context with "
         "per-claim evidence links and roles, "
         "entity-target resolution, terminology digest binding, and a bilingual pre-invocation "
         "sensitivity gate; adapter independently re-validates hand-assembled contexts; invoker "

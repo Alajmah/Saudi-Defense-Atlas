@@ -11,6 +11,7 @@
     "completed_at",
     "model_trace",
     "input_context_sha256",
+    "prompt_trace",
     "raw_output_sha256",
     "adapter_version",
     "validation",
@@ -236,6 +237,36 @@
     "raw_output_sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "prompt_trace": {
+      "type": "object",
+      "required": [
+        "template_id",
+        "template_version",
+        "template_sha256",
+        "rendered_input_sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "template_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "template_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "template_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "rendered_input_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
     }
   },
   "additionalProperties": false
