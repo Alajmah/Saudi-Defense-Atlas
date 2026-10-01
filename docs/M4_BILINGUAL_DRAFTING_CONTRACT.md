@@ -14,7 +14,23 @@ Deterministic, provider-independent first increment. No live model call has been
 - explicit unknown statements (bounded, bilingual, pre-written by the pipeline);
 - the project-owned terminology registry version.
 
-The context is canonically typed: `predicate_id` uses the canonical enum, Claim `value` reuses `common.schema.json#$defs/claim_value`, `scope.quantity_type` uses the canonical procurement-stage enum, `validity` reuses `validity_interval`, `entity_type` uses the canonical enum, and Evidence locators mirror the canonical locator shape — so a hand-assembled context with noncanonical predicate, quantity stage, value shape, or locator fails the schema gate before invocation. Only that bounded object reaches the drafting adapter. A **deterministic drafting-eligibility gate** first rejects restricted operational detail in any factual field, in either locale, before any model invocation. The adapter **independently re-validates the full context contract** (schema plus builder invariants), passes exactly the canonical JSON serialization of the context as the model input — nothing else — and records its SHA-256 (`input_context_sha256`) alongside the SHA-256 of the exact model response (`raw_output_sha256`). A natural-language prompt wrapper arrives with the first live-model increment, wrapped around this same serialization.
+The context is canonically typed: `predicate_id` uses the canonical enum, Claim `value` reuses `common.schema.json#$defs/claim_value`, `scope.quantity_type` uses the canonical procurement-stage enum, `validity` reuses `validity_interval`, `entity_type` uses the canonical enum, and Evidence locators mirror the canonical locator shape — so a hand-assembled context with noncanonical predicate, quantity stage, value shape, or locator fails the schema gate before invocation. Only that bounded object reaches the drafting adapter. A **deterministic drafting-eligibility gate** first rejects restricted operational detail in any factual field, in either locale, before any model invocation. The adapter **independently re-validates the full context contract** (schema plus builder invariants).
+
+## Model input: the reviewed drafting wrapper
+
+The complete model input is the reviewed instruction wrapper (`m4-bilingual-drafting-prompt` template **v0.1**) rendered around the canonical JSON serialization of the context — nothing else reaches the model. The run records four trace values: the wrapper `template_id`, `template_version`, the wrapper `template_sha256`, and `rendered_input_sha256` over the complete input, while `input_context_sha256` continues to hash the context alone, so the wrapper's contribution to the input is separately auditable.
+
+The wrapper is **instructions only**, and the validators prove it cannot introduce factual payload:
+
+- **round-trip proof:** stripping the wrapper from any rendered input reproduces the canonical context bytes exactly;
+- **no numeric payload:** the wrapper contains no digit characters, so every number in the model input comes from the context (whose factual fields the number allowlist governs);
+- **no Arabic script:** the wrapper is English-only, so every Arabic string in the input is context data;
+- **no context strings or identities:** no entity name, entity/claim/evidence/document identity, predicate, or unknown statement appears in the wrapper text;
+- **no registry renderings:** no terminology term's English or Arabic rendering appears in the wrapper (the template was deliberately reworded when the ordinary word "approved" collided with a registry term).
+
+One open question is recorded for the live drafting trial: how registry renderings reach the model. The context binds the registry by version and digest but does not embed the terms; the live increment must decide (for example, a registry section appended inside the rendered input, covered by the rendered-input hash and the context's registry binding) and must be reviewed before any live call.
+
+The adapter also records the SHA-256 of the exact model response (`raw_output_sha256`).
 
 ## Bilingual structure and the parity invariant
 

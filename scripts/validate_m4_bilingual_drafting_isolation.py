@@ -32,6 +32,8 @@ from services.intelligence.bilingual_drafting import (  # noqa: E402
     build_approved_drafting_context,
     build_bilingual_draft_run,
     load_terminology,
+    render_draft_prompt,
+    split_rendered_prompt,
 )
 
 TERMINOLOGY = ROOT / "data" / "terminology" / "bilingual-terminology-v0.1.json"
@@ -166,13 +168,57 @@ def main() -> int:
     prompt = captured[0]
     for marker in ("CAND-", "readiness", "patrol", "stock level", "live unit", "جاهزية", "مخزون"):
         expect(marker not in prompt, f"model input leaked {marker!r}", failures)
-    parsed_prompt = json.loads(prompt)
-    expect(set(parsed_prompt) == set(context), "model input is not exactly the context", failures)
+    expect(
+        prompt == render_draft_prompt(context),
+        "model input is not exactly the rendered wrapper input",
+        failures,
+    )
+    _, extracted_json, _ = split_rendered_prompt(prompt)
+    parsed_prompt = json.loads(extracted_json)
+    expect(
+        set(parsed_prompt) == set(context),
+        "the context inside the wrapper is not exactly the context object",
+        failures,
+    )
     expect(
         "terminology_sha256" in parsed_prompt,
         "model input lost the terminology digest binding",
         failures,
     )
+    # The wrapper cannot introduce factual payload: stripping it reproduces the
+    # canonical context bytes, and the wrapper text carries none of the
+    # context's identities or names.
+    import hashlib as _hashlib
+
+    canonical = json.dumps(
+        context, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
+    expect(
+        extracted_json == canonical,
+        "stripped context bytes differ from the canonical serialization",
+        failures,
+    )
+    before, _, after = split_rendered_prompt(prompt)
+    wrapper_text = before + after
+    for item in context["entities"]:
+        for name in item["names"].values():
+            expect(
+                name not in wrapper_text,
+                f"wrapper text carries the entity name {name!r}",
+                failures,
+            )
+        expect(
+            item["entity_id"] not in wrapper_text,
+            f"wrapper text carries the entity identity {item['entity_id']!r}",
+            failures,
+    )
+    expect(
+        not any(char.isdigit() for char in wrapper_text),
+        "wrapper text contains digits",
+        failures,
+    )
+    prompt_of_run = None  # keep name reuse clear
+    del prompt_of_run
 
     # 1b. RBD-01: a unit citing only contradicting-role evidence for its claim
     #     is rejected (the claim's supporting link exists but is not cited).
