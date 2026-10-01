@@ -152,8 +152,10 @@ def main() -> int:
             clock=lambda: "2026-10-02T00:01:00Z",
         )
 
-    # 1. The invoker receives ONLY the bounded approved context: no candidate
-    #    markers, no restricted vocabulary in either locale, nothing extra.
+    # 1. The invoker receives exactly the rendered wrapper input: the reviewed
+    #    template around the canonical context, with no candidate markers and
+    #    no restricted or pinned vocabulary in either locale beyond the
+    #    template's enumerated, reviewed instructions.
     captured: list[str] = []
 
     def capture_invoke(prompt: str) -> str:
@@ -186,7 +188,7 @@ def main() -> int:
         "model input lost the terminology digest binding",
         failures,
     )
-    # The wrapper cannot introduce factual payload: stripping it reproduces the
+    # Enumerated template property: stripping the wrapper reproduces the
     # canonical context bytes, and the wrapper text carries none of the
     # context's identities or names.
     import hashlib as _hashlib

@@ -413,7 +413,8 @@ def main() -> int:
         failures,
     )
 
-    # --- wrapper-isolation proofs: the wrapper cannot introduce factual payload ---
+    # --- wrapper-isolation proofs: enumerated template properties (the
+    # instructions-only judgment of the reviewed template is review evidence) ---
     import re as _re
 
     expect(

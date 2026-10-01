@@ -74,12 +74,12 @@ WRAPPER_FORBIDDEN_VOCABULARY = (
 )
 
 # --- Drafting prompt wrapper (deterministic increment; no live model) ---
-# The wrapper is instructions only: English-only, free of digits, and free of
-# every factual string the canonical context carries. It carries no entity
-# name, identity, predicate, statement, or terminology rendering. The complete
-# model input is wrapper + canonical context serialization + wrapper, and the
-# validators prove the round-trip: stripping the wrapper reproduces the
-# canonical context bytes exactly.
+# The wrapper is reviewed as instructions-only. The validators prove an
+# enumerated set of properties - digit absence, English-only script, forbidden-
+# vocabulary absence, fixture-overlap absence, registry-rendering absence, and
+# the byte round-trip (stripping the wrapper reproduces the canonical context
+# exactly). The instructions-only judgment of the reviewed static template is
+# review evidence; the checks are not a generic no-factual-payload theorem.
 DRAFT_PROMPT_TEMPLATE_ID = "m4-bilingual-drafting-prompt"
 DRAFT_PROMPT_TEMPLATE_VERSION = "v0.1"
 DRAFT_CONTEXT_TOKEN = "__SDA_DRAFT_CONTEXT_JSON__"

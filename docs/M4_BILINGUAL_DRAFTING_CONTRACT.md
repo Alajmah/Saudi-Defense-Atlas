@@ -69,7 +69,7 @@ The drafting context is `approved_canonical_read_only` with `canonical_mutation_
 
 ## Verification
 
-Two deterministic validators run in CI (`validate_m4_bilingual_drafting.py` core; `validate_m4_bilingual_drafting_isolation.py` isolation), covering: context determinism and schema validity; the builder's fail-closed matrix; canonical-input-only invoker evidence; rejection of unsupported IDs, orphaned citations, terminology violations (both directions), invented numbers (both locales, Arabic-Indic included), restricted detail and coordinates; full claim/unknown accounting with explicit abstention; unknown preservation per locale; terminology-version binding; authority escalation refused at both layers; deterministic per-invocation run identity.
+Two deterministic validators run in CI (`validate_m4_bilingual_drafting.py` core; `validate_m4_bilingual_drafting_isolation.py` isolation), covering: context determinism and schema validity; the builder's fail-closed matrix; rendered-wrapper-input invoker evidence (template hashes, byte round-trip, and the enumerated template-property proofs); rejection of unsupported IDs, orphaned citations, terminology violations (both directions), invented numbers (both locales, Arabic-Indic included), restricted detail and coordinates; full claim/unknown accounting with explicit abstention; unknown preservation per locale; terminology-version binding; authority escalation refused at both layers; deterministic per-invocation run identity.
 
 ## Claim ceiling
 
