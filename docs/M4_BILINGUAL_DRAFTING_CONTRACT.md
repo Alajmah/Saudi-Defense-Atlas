@@ -8,13 +8,13 @@ Deterministic, provider-independent first increment. No live model call has been
 
 **The model drafts language; it does not choose facts.** A deterministic `ApprovedDraftingContext` (`build_approved_drafting_context`) first selects only:
 
-- already-approved canonical Claims (`claim_state = active`, active `record_status`);
+- already-approved canonical Claims (`claim_state = active`, active `record_status`), **including material Claim `scope`** (procurement `quantity_type` such as ordered/approved/contracted/delivered is never collapsed);
 - their Evidence references (with Document identity and locator);
 - resolved Entities carrying official bilingual names in **both** locales;
 - explicit unknown statements (bounded, bilingual, pre-written by the pipeline);
 - the project-owned terminology registry version.
 
-Only that bounded object reaches the drafting adapter. The adapter passes exactly the canonical JSON serialization of the context as the model input — nothing else — and records its SHA-256 (`input_context_sha256`). A natural-language prompt wrapper arrives with the first live-model increment, wrapped around this same serialization.
+Only that bounded object reaches the drafting adapter. A **deterministic drafting-eligibility gate** first rejects restricted operational detail in any factual field, in either locale, before any model invocation. The adapter **independently re-validates the full context contract** (schema plus builder invariants), passes exactly the canonical JSON serialization of the context as the model input — nothing else — and records its SHA-256 (`input_context_sha256`) alongside the SHA-256 of the exact model response (`raw_output_sha256`). A natural-language prompt wrapper arrives with the first live-model increment, wrapped around this same serialization.
 
 ## Bilingual structure and the parity invariant
 
@@ -31,15 +31,18 @@ Each factual content unit (`UNIT-*`) carries **one shared support set** — `cla
 
 - Strict finite JSON, duplicate object keys rejected (same parser discipline as the extraction trial).
 - Units must carry only `unit_id`/`claim_ids`/`evidence_ids`/`prose`; support IDs must exist in the context.
-- **Terminology pairing, both directions:** if a registry term's English rendering appears in a unit's English prose, the registry Arabic rendering must appear in the Arabic prose of the same unit, and vice versa.
-- **Invented-precision guard:** every digit sequence in either locale's prose (Arabic-Indic digits normalized) must appear in the approved context's canonical serialization; numbers the context does not carry are rejected.
-- **Restricted-detail rejection:** prose carrying restricted operational markers (readiness, patrol, stock levels, live-unit language, and similar) or uncoarsened coordinate-like numbers is rejected.
-- **Full accounting:** every approved claim must be either drafted in a unit or listed in `undrafted_claim_ids` (abstention is explicit; invention is impossible); every context unknown must be rendered bilingually in `unknowns_rendered` or listed in `omitted_unknown_ids`.
-- Any violation rejects the run and **clears all drafted text**.
+- **Claim-specific support closure:** a unit's `evidence_ids` must support the claims that unit cites; citing valid but unrelated context Evidence is rejected.
+- **Terminology pairing, both directions:** if a registry term's English rendering appears in a unit's English prose, the registry Arabic rendering must appear in the Arabic prose of the same unit, and vice versa. The registry is bound by version AND canonical digest (`terminology_sha256`); changed bytes under the same version are refused.
+- **Invented-precision guard:** every digit sequence in either locale's prose (Arabic-Indic digits normalized) must appear among the **factual fields** the draft may express — Claim values, validity, scope, and official entity names. Bookkeeping digits (IDs, timestamps, registry versions) deliberately do not authorize prose numbers.
+- **Restricted-detail rejection, bilingual:** prose carrying restricted operational markers in English or Arabic, or uncoarsened coordinate-like numbers, is rejected.
+- **Exactly-once accounting:** every approved claim is drafted in exactly one unit or listed exactly once in `undrafted_claim_ids` — never both, never twice; every context unknown is rendered or explicitly omitted.
+- **Unknown meaning preservation:** the model never authors unknown prose. It selects which unknowns to render (`rendered_unknown_ids`); the adapter copies the pre-written bilingual statements verbatim into `unknowns_rendered`.
+- Both accepted and rejected runs are runtime-validated against the run schema before the accepted status is granted.
+- Any violation rejects the run and **clears all drafted text**. The mechanical guards reject the defined violations above; they do not make semantic invention impossible — human editorial review remains the authority over meaning.
 
 ## Terminology registry
 
-`data/terminology/bilingual-terminology-v0.1.json` is a small project-owned bounded registry (equipment categories, procurement states, ranks, recurring technical terms). It is not an external terminology system, and it never overrides official entity names. The registry version is bound into the context and the adapter refuses a registry whose version differs.
+`data/terminology/bilingual-terminology-v0.1.json` is a small project-owned bounded registry (equipment categories, procurement states, ranks, recurring technical terms). It is not an external terminology system, and it never overrides official entity names. The registry version AND canonical digest are bound into the context; the adapter refuses a registry whose version or bytes differ.
 
 ## Authority
 

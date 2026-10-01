@@ -2,16 +2,24 @@
 
 Architecture rule: the model drafts language; it does not choose facts. A
 deterministic :func:`build_approved_drafting_context` first selects only
-already-approved canonical Claims, their Evidence references, resolved
-Entities with official bilingual names, explicit unknown statements, and the
-project-owned terminology registry version. Only that bounded object reaches
-the drafting adapter. The adapter sends exactly the canonical serialization of
-the context as model input, converts the response into a candidate-only
-``AI bilingual draft run`` with one shared support set per factual unit, and
-owns no truth, canonical-mutation, or publication authority.
+already-approved canonical Claims (including material ``scope`` semantics such
+as ``quantity_type``), their Claim-specific Evidence references, resolved
+Entities with official bilingual names (entity-valued Claim targets must
+resolve), explicit pre-written unknown statements, and the project-owned
+terminology registry version and digest. A deterministic drafting-eligibility
+gate rejects restricted operational detail in either locale before any model
+invocation. Only that bounded object reaches the drafting adapter, which
+independently re-validates the context contract, sends exactly the canonical
+serialization of the context as model input, and converts the response into a
+candidate-only draft run: one shared, claim-specific support set per factual
+unit across paired ar/en prose, exact deterministic reuse of pre-written
+unknown statements, a factual-fields-only number allowlist, exactly-once claim
+accounting, and a raw-output hash. Rejected output clears all drafted text.
 
 Unresolved factual conflicts fail closed: no conflict-aware synthesis is
-attempted in this version.
+attempted in this version. The mechanical guards reject defined violations;
+they do not make semantic invention impossible - human editorial review
+remains the authority.
 """
 
 from __future__ import annotations
@@ -22,11 +30,18 @@ import math
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Callable, Mapping
 
-ADAPTER_VERSION = "m4-bilingual-drafting-v0.1"
+from jsonschema import Draft202012Validator, FormatChecker
 
-RESTRICTED_PROSE_MARKERS = (
+ADAPTER_VERSION = "m4-bilingual-drafting-v0.2"
+
+ROOT = Path(__file__).resolve().parents[2]
+CONTEXT_SCHEMA_PATH = ROOT / "schemas" / "v0.1" / "editorial-drafting-context.schema.json"
+RUN_SCHEMA_PATH = ROOT / "schemas" / "v0.1" / "ai-bilingual-draft-run.schema.json"
+
+RESTRICTED_MARKERS_EN = (
     "readiness",
     "patrol",
     "stock level",
@@ -34,6 +49,14 @@ RESTRICTED_PROSE_MARKERS = (
     "live unit",
     "operational tempo",
     "ammunition stock",
+)
+RESTRICTED_MARKERS_AR = (
+    "جاهزية",  # readiness
+    "دورية",  # patrol
+    "مخزون",  # stock
+    "وحدة عاملة",  # live/operating unit
+    "وتيرة العمليات",  # operational tempo
+    "ذخيرة",  # ammunition
 )
 RESTRICTED_COORDINATE_PATTERN = re.compile(r"\d{1,2}\.\d{3,}")
 _DIGIT_RUN = re.compile(r"\d+")
@@ -85,6 +108,16 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _load_schema(path: Path) -> Draft202012Validator:
+    schema = json.loads(path.read_text(encoding="utf-8"))
+    Draft202012Validator.check_schema(schema)
+    return Draft202012Validator(schema, format_checker=FormatChecker())
+
+
+_CONTEXT_VALIDATOR = _load_schema(CONTEXT_SCHEMA_PATH)
+_RUN_VALIDATOR = _load_schema(RUN_SCHEMA_PATH)
+
+
 def load_terminology(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Validate the project-owned terminology registry and index it by term."""
 
@@ -114,6 +147,11 @@ def load_terminology(payload: Mapping[str, Any]) -> dict[str, Any]:
                 raise BilingualDraftingError(
                     f"terminology term {term_id} requires a non-empty {locale} rendering"
                 )
+        extra = set(term) - {"term_id", "category", "en", "ar"}
+        if extra:
+            raise BilingualDraftingError(
+                f"terminology term {term_id} carries unsupported keys: {sorted(extra)}"
+            )
         en_key = str(term["en"]).casefold()
         if en_key in seen_en:
             raise BilingualDraftingError(
@@ -123,10 +161,67 @@ def load_terminology(payload: Mapping[str, Any]) -> dict[str, Any]:
     return {"version": version, "terms": [dict(term) for term in terms]}
 
 
+def terminology_digest(registry: Mapping[str, Any]) -> str:
+    """Canonical digest over the registry bytes that govern acceptance."""
+
+    return _sha256_text(_canonical_json({"version": registry["version"], "terms": registry["terms"]}))
+
+
 def _require_active(record: Mapping[str, Any], label: str) -> None:
     status = record.get("record_status", "active")
     if status != "active":
         raise BilingualDraftingError(f"{label} is not an active canonical record")
+
+
+def _restricted_in_text(label: str, text: str, failures: list[str]) -> None:
+    folded = text.casefold()
+    for marker in RESTRICTED_MARKERS_EN:
+        if marker in folded:
+            failures.append(f"{label} carries restricted operational detail: {marker}")
+    for marker in RESTRICTED_MARKERS_AR:
+        if marker in text:
+            failures.append(f"{label} carries restricted operational detail (Arabic): {marker}")
+    if RESTRICTED_COORDINATE_PATTERN.search(text):
+        failures.append(f"{label} carries an uncoarsened coordinate-like number")
+
+
+def _eligibility_parts(context: Mapping[str, Any]) -> dict[str, str]:
+    parts = {
+        f"entity {item['entity_id']} names": f"{item['names']['en']} {item['names']['ar']}"
+        for item in context["entities"]
+    }
+    parts.update(
+        {
+            f"claim {item['claim_id']} factual fields": _canonical_json(
+                {
+                    "predicate_id": item["predicate_id"],
+                    "value": item["value"],
+                    "validity": item["validity"],
+                    "scope": item["scope"],
+                }
+            )
+            for item in context["claims"]
+        }
+    )
+    parts.update(
+        {
+            f"unknown {item['unknown_id']} statements": (
+                f"{item['statement_en']} {item['statement_ar']}"
+            )
+            for item in context["unknowns"]
+        }
+    )
+    return parts
+
+
+def _drafting_eligibility_gate(context: Mapping[str, Any]) -> None:
+    """Deterministic sensitivity gate before any model invocation (BD-03)."""
+
+    failures: list[str] = []
+    for label, text in _eligibility_parts(context).items():
+        _restricted_in_text(label, text, failures)
+    if failures:
+        raise BilingualDraftingError("; ".join(failures[:3]))
 
 
 def build_approved_drafting_context(
@@ -140,10 +235,12 @@ def build_approved_drafting_context(
 ) -> dict[str, Any]:
     """Select only approved canonical records into the bounded drafting context.
 
-    Fails closed on: candidate or non-canonical identities, unapproved claim
-    state, disputed claims, conflicting active claims on the same
-    subject/predicate, entities without official bilingual names in both
-    locales, evidence references that do not resolve, and non-active records.
+    Fails closed on: candidate or non-canonical identities; unapproved or
+    disputed claim state; conflicting active claims on the same
+    subject/predicate; unresolved entity-valued Claim targets; entities without
+    official bilingual names in both locales; evidence references that do not
+    resolve; restricted operational detail in any factual field (either
+    locale, before invocation); and malformed registry entries.
     """
 
     registry = load_terminology(terminology)
@@ -157,7 +254,7 @@ def build_approved_drafting_context(
             raise BilingualDraftingError(
                 f"drafting entity identity {entity_id!r} is not canonical SDA identity"
             )
-        if entity_id.startswith("SDA-CLAIM-") or entity_id.startswith("CAND-"):
+        if entity_id.startswith(("SDA-CLAIM-", "SDA-EVID-", "CAND-")):
             raise BilingualDraftingError(
                 f"drafting entity identity {entity_id!r} is not an Entity identity"
             )
@@ -244,6 +341,15 @@ def build_approved_drafting_context(
         value = claim.get("value")
         if not isinstance(value, Mapping):
             raise BilingualDraftingError(f"claim {claim_id} requires a typed value object")
+        if value.get("kind") == "entity":
+            target = value.get("entity_id")
+            if not isinstance(target, str) or target not in entity_by_id:
+                raise BilingualDraftingError(
+                    f"claim {claim_id} targets unresolved entity {target!r}"
+                )
+        scope = claim.get("scope")
+        if scope is not None and not isinstance(scope, Mapping):
+            raise BilingualDraftingError(f"claim {claim_id} scope must be an object or null")
         evidence_ids = claim.get("evidence_ids")
         if (
             not isinstance(evidence_ids, list)
@@ -272,6 +378,7 @@ def build_approved_drafting_context(
             "predicate_id": predicate,
             "value": dict(value),
             "validity": claim.get("validity"),
+            "scope": dict(scope) if scope is not None else None,
             "claim_state": "active",
             "evidence_ids": sorted(evidence_ids),
         }
@@ -311,19 +418,11 @@ def build_approved_drafting_context(
             }
         )
 
-    context_id = _stable_id(
-        "SDA-DRAFTCTX",
-        sorted(entity_by_id),
-        sorted(prepared_claims),
-        sorted(evidence_by_id),
-        [item["unknown_id"] for item in prepared_unknowns],
-        registry["version"],
-        created_at,
-    )
-    return {
-        "id": context_id,
+    context = {
+        "id": "",
         "created_at": created_at,
         "terminology_version": registry["version"],
+        "terminology_sha256": terminology_digest(registry),
         "entities": [entity_by_id[key] for key in sorted(entity_by_id)],
         "claims": [prepared_claims[key] for key in sorted(prepared_claims)],
         "evidence": [evidence_by_id[key] for key in sorted(evidence_by_id)],
@@ -335,6 +434,92 @@ def build_approved_drafting_context(
             "publication_authority": False,
         },
     }
+    context["id"] = _stable_id(
+        "SDA-DRAFTCTX",
+        context["entities"],
+        context["claims"],
+        context["evidence"],
+        [item["unknown_id"] for item in prepared_unknowns],
+        context["terminology_sha256"],
+        created_at,
+    )
+    _drafting_eligibility_gate(context)
+    return context
+
+
+def validate_drafting_context(context: Mapping[str, Any]) -> None:
+    """Independently enforce the ApprovedDraftingContext contract (BD-04).
+
+    The adapter calls this before invocation so a hand-assembled context must
+    satisfy the same schema and builder-level invariants the builder produces,
+    including support closure, entity resolution, conflict refusal, and the
+    bilingual restricted-detail gate.
+    """
+
+    if not isinstance(context, Mapping):
+        raise BilingualDraftingError("drafting context must be an object")
+    schema_errors = [
+        error.message for error in _CONTEXT_VALIDATOR.iter_errors(dict(context))
+    ]
+    if schema_errors:
+        raise BilingualDraftingError(
+            f"drafting context violates its schema: {schema_errors[0]}"
+        )
+    authority = context["authority"]
+    if authority["mode"] != "approved_canonical_read_only":
+        raise BilingualDraftingError("drafting requires an approved read-only context")
+    if (
+        authority["canonical_mutation_authority"] is not False
+        or authority["publication_authority"] is not False
+    ):
+        raise BilingualDraftingError("drafting context exceeded read-only authority")
+    if context["conflicts"] != []:
+        raise BilingualDraftingError(
+            "drafting context carries unresolved conflicts; drafting fails closed"
+        )
+
+    entity_ids = {item["entity_id"] for item in context["entities"]}
+    evidence_ids = {item["evidence_id"] for item in context["evidence"]}
+    if len(entity_ids) != len(context["entities"]):
+        raise BilingualDraftingError("drafting context carries duplicate entities")
+    if len(evidence_ids) != len(context["evidence"]):
+        raise BilingualDraftingError("drafting context carries duplicate evidence")
+    if len({item["claim_id"] for item in context["claims"]}) != len(context["claims"]):
+        raise BilingualDraftingError("drafting context carries duplicate claims")
+
+    fingerprints: dict[tuple[str, str], str] = {}
+    for claim in context["claims"]:
+        if claim["subject_entity_id"] not in entity_ids:
+            raise BilingualDraftingError(
+                f"claim {claim['claim_id']} subject is not a resolved context Entity"
+            )
+        if claim["claim_state"] != "active":
+            raise BilingualDraftingError(
+                f"claim {claim['claim_id']} is not an approved active claim"
+            )
+        if (
+            claim["value"].get("kind") == "entity"
+            and claim["value"].get("entity_id") not in entity_ids
+        ):
+            raise BilingualDraftingError(
+                f"claim {claim['claim_id']} targets an unresolved entity"
+            )
+        for evidence_id in claim["evidence_ids"]:
+            if evidence_id not in evidence_ids:
+                raise BilingualDraftingError(
+                    f"claim {claim['claim_id']} cites evidence outside the context"
+                )
+        fingerprint = (claim["subject_entity_id"], claim["predicate_id"])
+        rendered = _canonical_json(claim["value"])
+        if fingerprint in fingerprints and fingerprints[fingerprint] != rendered:
+            raise BilingualDraftingError("drafting context carries conflicting active claims")
+        fingerprints[fingerprint] = rendered
+
+    unknown_ids = [item["unknown_id"] for item in context["unknowns"]]
+    if len(unknown_ids) != len(set(unknown_ids)):
+        raise BilingualDraftingError("drafting context carries duplicate unknowns")
+
+    _drafting_eligibility_gate(context)
 
 
 def _reject_json_constant(value: str) -> Any:
@@ -372,13 +557,28 @@ def _parse_draft_output(raw_output: str) -> tuple[dict[str, Any] | None, list[st
     return payload, []
 
 
-def _prose_number_violations(prose_en: str, prose_ar: str, allowed: set[str]) -> list[str]:
-    violations: list[str] = []
-    for text in (prose_en, prose_ar.translate(_ARABIC_INDIC)):
-        for token in _DIGIT_RUN.findall(text):
-            if token not in allowed:
-                violations.append(f"prose carries a number not grounded in the context: {token}")
-    return violations
+def _factual_number_allowlist(context: Mapping[str, Any]) -> set[str]:
+    """Digits from factual fields a draft may express only (BD-06).
+
+    Deliberately excludes IDs, timestamps, versions, and bookkeeping: the
+    allowlist covers Claim values/validity/scope and official entity names.
+    """
+
+    factual: list[Any] = []
+    for claim in context["claims"]:
+        factual.append(
+            {
+                "value": claim["value"],
+                "validity": claim["validity"],
+                "scope": claim["scope"],
+            }
+        )
+    for entity in context["entities"]:
+        factual.append({"names": entity["names"]})
+    rendered = _canonical_json(factual)
+    return {
+        token.translate(_ARABIC_INDIC) for token in _DIGIT_RUN.findall(rendered)
+    }
 
 
 def _terminology_violations(
@@ -386,10 +586,9 @@ def _terminology_violations(
 ) -> list[str]:
     errors: list[str] = []
     en_folded = prose_en.casefold()
-    ar_text = prose_ar
     for term in terms:
         en_used = str(term["en"]).casefold() in en_folded
-        ar_used = str(term["ar"]) in ar_text
+        ar_used = str(term["ar"]) in prose_ar
         if en_used and not ar_used:
             errors.append(
                 f"unit uses registry term {term['term_id']} in English prose without the "
@@ -399,22 +598,6 @@ def _terminology_violations(
             errors.append(
                 f"unit uses registry term {term['term_id']} in Arabic prose without the "
                 "registry English rendering"
-            )
-    return errors
-
-
-def _restricted_detail_violations(prose_en: str, prose_ar: str) -> list[str]:
-    errors: list[str] = []
-    for label, text in (("en", prose_en), ("ar", prose_ar)):
-        folded = text.casefold()
-        for marker in RESTRICTED_PROSE_MARKERS:
-            if marker in folded:
-                errors.append(
-                    f"{label} prose carries restricted operational detail marker: {marker}"
-                )
-        if RESTRICTED_COORDINATE_PATTERN.search(text):
-            errors.append(
-                f"{label} prose carries an uncoarsened coordinate-like number"
             )
     return errors
 
@@ -429,67 +612,65 @@ def build_bilingual_draft_run(
 ) -> dict[str, Any]:
     """Convert exact model output into a candidate-only bilingual draft run.
 
-    The invoker receives exactly the canonical serialization of the approved
-    drafting context - nothing else - and the run records the SHA-256 of that
-    serialization. Any violation rejects the run and clears all drafted text.
+    The context is independently re-validated (schema plus builder invariants)
+    before invocation; the invoker receives exactly the canonical serialization
+    of the context; the registry is bound by version AND digest; every unit's
+    evidence must close over its cited claims specifically; claims are
+    accounted exactly once; unknowns are preserved by exact deterministic reuse
+    of the pre-written bilingual statements; and both accepted and rejected
+    runs are schema-validated, carrying the raw-output hash.
     """
 
-    authority = context.get("authority")
-    if not isinstance(authority, Mapping) or authority.get("mode") != "approved_canonical_read_only":
-        raise BilingualDraftingError("drafting requires an approved read-only context")
-    if (
-        authority.get("canonical_mutation_authority") is not False
-        or authority.get("publication_authority") is not False
-    ):
-        raise BilingualDraftingError("drafting context exceeded read-only authority")
-    if context.get("conflicts") != []:
+    validate_drafting_context(context)
+
+    registry = load_terminology(terminology)
+    if registry["version"] != context["terminology_version"]:
         raise BilingualDraftingError(
-            "drafting context carries unresolved conflicts; drafting fails closed"
+            "terminology registry version does not match the drafting context"
+        )
+    digest = terminology_digest(registry)
+    if digest != context["terminology_sha256"]:
+        raise BilingualDraftingError(
+            "terminology registry bytes do not match the context terminology_sha256"
         )
 
     context_json = _canonical_json(dict(context))
     input_context_sha256 = _sha256_text(context_json)
     trace = model_trace.as_dict()
 
-    allowed_numbers = {
-        token.translate(_ARABIC_INDIC) for token in _DIGIT_RUN.findall(context_json)
+    allowed_numbers = _factual_number_allowlist(context)
+    claim_evidence = {
+        str(item["claim_id"]): {str(eid) for eid in item["evidence_ids"]}
+        for item in context["claims"]
     }
-    claim_ids = {
-        str(item["claim_id"]) for item in context.get("claims", []) if isinstance(item, Mapping)
+    claim_ids = set(claim_evidence)
+    unknown_by_id = {
+        str(item["unknown_id"]): item for item in context["unknowns"]
     }
-    evidence_ids = {
-        str(item["evidence_id"]) for item in context.get("evidence", []) if isinstance(item, Mapping)
-    }
-    unknown_ids = {
-        str(item["unknown_id"]) for item in context.get("unknowns", []) if isinstance(item, Mapping)
-    }
-    registry = load_terminology(terminology)
-    if registry["version"] != context.get("terminology_version"):
-        raise BilingualDraftingError(
-            "terminology registry version does not match the drafting context"
-        )
-    terminology_terms = registry["terms"]
 
     started_at = clock()
     raw_output = invoke(context_json)
     completed_at = clock()
     if not isinstance(raw_output, str):
         raise BilingualDraftingError("draft invoker must return text")
+    raw_output_sha256 = _sha256_text(raw_output)
 
     seed = {
-        "drafting_context_id": context.get("id"),
+        "drafting_context_id": context["id"],
         "input_context_sha256": input_context_sha256,
+        "raw_output_sha256": raw_output_sha256,
         "model_trace": trace,
         "started_at": started_at,
         "completed_at": completed_at,
     }
     run = {
         "id": _stable_id("SDA-AIDRAFT", seed),
-        "drafting_context_id": context.get("id"),
+        "drafting_context_id": context["id"],
         "started_at": started_at,
         "completed_at": completed_at,
         "model_trace": trace,
         "input_context_sha256": input_context_sha256,
+        "raw_output_sha256": raw_output_sha256,
         "adapter_version": ADAPTER_VERSION,
         "authority": {
             "mode": "candidate_only",
@@ -502,7 +683,7 @@ def build_bilingual_draft_run(
         rendered = [str(error)[:512] for error in errors if str(error)] or [
             "draft output rejected"
         ]
-        return {
+        candidate = {
             **run,
             "validation": {"status": "rejected", "errors": rendered},
             "units": [],
@@ -510,12 +691,18 @@ def build_bilingual_draft_run(
             "unknowns_rendered": [],
             "omitted_unknown_ids": [],
         }
+        schema_errors = [error.message for error in _RUN_VALIDATOR.iter_errors(candidate)]
+        if schema_errors:
+            raise BilingualDraftingError(
+                f"rejected draft run is schema-invalid: {schema_errors[0]}"
+            )
+        return candidate
 
     payload, errors = _parse_draft_output(raw_output)
     if errors:
         return rejected(errors)
 
-    expected_keys = {"units", "undrafted_claim_ids", "unknowns_rendered", "omitted_unknown_ids"}
+    expected_keys = {"units", "undrafted_claim_ids", "rendered_unknown_ids", "omitted_unknown_ids"}
     unexpected = sorted(set(payload) - expected_keys)
     missing = sorted(expected_keys - set(payload))
     if unexpected or missing:
@@ -532,8 +719,9 @@ def build_bilingual_draft_run(
         return rejected(["draft output units must be an array"])
 
     seen_unit_ids: set[str] = set()
-    drafted_claims: set[str] = set()
+    claim_use_count: dict[str, int] = {}
     unit_errors: list[str] = []
+    accepted_units: list[dict[str, Any]] = []
     for unit in units:
         if not isinstance(unit, Mapping):
             unit_errors.append("draft unit must be an object")
@@ -567,6 +755,8 @@ def build_bilingual_draft_run(
                 unit_errors.append(
                     f"unit {unit_id} references claim {claim_id!r} outside the approved context"
                 )
+            else:
+                claim_use_count[claim_id] = claim_use_count.get(claim_id, 0) + 1
         unit_evidence = unit.get("evidence_ids")
         if (
             not isinstance(unit_evidence, list)
@@ -575,11 +765,17 @@ def build_bilingual_draft_run(
         ):
             unit_errors.append(f"unit {unit_id} requires a non-empty unique evidence_ids array")
             continue
+        cited_evidence = {
+            evidence_id
+            for claim_id in unit_claims
+            if claim_id in claim_evidence
+            for evidence_id in claim_evidence[claim_id]
+        }
         for evidence_id in unit_evidence:
-            if evidence_id not in evidence_ids:
+            if evidence_id not in cited_evidence:
                 unit_errors.append(
-                    f"unit {unit_id} cites evidence {evidence_id!r} outside the approved context "
-                    "(orphaned citation)"
+                    f"unit {unit_id} cites evidence {evidence_id!r} that does not support any "
+                    "of the unit's claims (claim-specific support closure)"
                 )
         prose = unit.get("prose")
         if not isinstance(prose, Mapping) or set(prose) != {"en", "ar"}:
@@ -593,69 +789,69 @@ def build_bilingual_draft_run(
         if not isinstance(prose_ar, str) or not prose_ar.strip():
             unit_errors.append(f"unit {unit_id} requires non-empty Arabic prose")
             continue
-        unit_errors.extend(_terminology_violations(prose_en, prose_ar, terminology_terms))
-        unit_errors.extend(_restricted_detail_violations(prose_en, prose_ar))
-        unit_errors.extend(_prose_number_violations(prose_en, prose_ar, allowed_numbers))
-        drafted_claims.update(claim_id for claim_id in unit_claims if claim_id in claim_ids)
+        unit_errors.extend(_terminology_violations(prose_en, prose_ar, registry["terms"]))
+        _restricted_in_text(f"unit {unit_id} English prose", prose_en, unit_errors)
+        _restricted_in_text(f"unit {unit_id} Arabic prose", prose_ar, unit_errors)
+        for text in (prose_en, prose_ar.translate(_ARABIC_INDIC)):
+            for token in _DIGIT_RUN.findall(text):
+                if token not in allowed_numbers:
+                    unit_errors.append(
+                        f"unit {unit_id} prose carries a number not grounded in the "
+                        f"context's factual fields: {token}"
+                    )
+        accepted_units.append(dict(unit))
 
-    rendered_unknowns = payload.get("unknowns_rendered")
-    if not isinstance(rendered_unknowns, list):
-        return rejected(unit_errors or ["draft output unknowns_rendered must be an array"])
-    rendered_ids: set[str] = set()
-    for item in rendered_unknowns:
-        if not isinstance(item, Mapping) or set(item) != {"unknown_id", "prose"}:
-            unit_errors.append("rendered unknown requires exactly unknown_id and prose")
-            continue
-        unknown_id = item.get("unknown_id")
-        if unknown_id not in unknown_ids:
+    rendered_ids = payload.get("rendered_unknown_ids")
+    if not isinstance(rendered_ids, list) or len(rendered_ids) != len(set(rendered_ids)):
+        return rejected(
+            unit_errors or ["draft output rendered_unknown_ids must be a unique array"]
+        )
+    for unknown_id in rendered_ids:
+        if unknown_id not in unknown_by_id:
             unit_errors.append(
                 f"rendered unknown {unknown_id!r} is outside the approved context"
             )
-            continue
-        if unknown_id in rendered_ids:
-            unit_errors.append(f"duplicate rendered unknown: {unknown_id}")
-            continue
-        rendered_ids.add(unknown_id)
-        prose = item.get("prose")
-        if not isinstance(prose, Mapping) or set(prose) != {"en", "ar"}:
-            unit_errors.append(f"rendered unknown {unknown_id} requires exactly en and ar prose")
-            continue
-        for locale in ("en", "ar"):
-            text = prose.get(locale)
-            if not isinstance(text, str) or not text.strip():
-                unit_errors.append(
-                    f"rendered unknown {unknown_id} requires non-empty {locale} prose"
-                )
-        prose_en = prose.get("en") if isinstance(prose.get("en"), str) else ""
-        prose_ar = prose.get("ar") if isinstance(prose.get("ar"), str) else ""
-        unit_errors.extend(_restricted_detail_violations(prose_en, prose_ar))
-        unit_errors.extend(_prose_number_violations(prose_en, prose_ar, allowed_numbers))
 
     omitted = payload.get("omitted_unknown_ids")
     if not isinstance(omitted, list) or len(omitted) != len(set(omitted)):
         return rejected(unit_errors or ["draft output omitted_unknown_ids must be a unique array"])
     for unknown_id in omitted:
-        if unknown_id not in unknown_ids:
+        if unknown_id not in unknown_by_id:
             unit_errors.append(
                 f"omitted unknown {unknown_id!r} is outside the approved context"
             )
         if unknown_id in rendered_ids:
-            unit_errors.append(
-                f"unknown {unknown_id} is both rendered and omitted"
-            )
+            unit_errors.append(f"unknown {unknown_id} is both rendered and omitted")
 
     if unit_errors:
         return rejected(unit_errors)
 
-    undrafted_claim_ids = payload.get("undrafted_claim_ids")
-    if not isinstance(undrafted_claim_ids, list):
-        return rejected(["draft output undrafted_claim_ids must be an array"])
-    for claim_id in undrafted_claim_ids:
+    undrafted = payload.get("undrafted_claim_ids")
+    if not isinstance(undrafted, list) or len(undrafted) != len(set(undrafted)):
+        return rejected(["draft output undrafted_claim_ids must be a unique array"])
+    for claim_id in undrafted:
         if claim_id not in claim_ids:
             return rejected(
                 [f"undrafted claim {claim_id!r} is outside the approved context"]
             )
-    accounted = set(undrafted_claim_ids) | drafted_claims
+        if claim_use_count.get(claim_id, 0) > 0:
+            return rejected(
+                [
+                    f"claim {claim_id} is both drafted in a unit and listed as undrafted "
+                    "(claims must be accounted exactly once)"
+                ]
+            )
+    double_drafts = sorted(
+        claim_id for claim_id, count in claim_use_count.items() if count > 1
+    )
+    if double_drafts:
+        return rejected(
+            [
+                "claims must be drafted in exactly one unit; duplicated: "
+                f"{', '.join(double_drafts)}"
+            ]
+        )
+    accounted = set(undrafted) | set(claim_use_count)
     if accounted != claim_ids:
         return rejected(
             [
@@ -664,21 +860,40 @@ def build_bilingual_draft_run(
             ]
         )
 
-    omitted_accounted = rendered_ids | set(omitted)
-    if omitted_accounted != unknown_ids:
+    unknown_accounted = set(rendered_ids) | set(omitted)
+    if unknown_accounted != set(unknown_by_id):
         return rejected(
             [
                 "draft output does not account for every context unknown: "
-                f"{sorted(unknown_ids - omitted_accounted)} missing"
+                f"{sorted(set(unknown_by_id) - unknown_accounted)} missing"
             ]
         )
 
-    return {
+    # Unknown meaning is preserved by exact deterministic reuse of the
+    # pre-written bilingual statements (BD-05): the model only selects whether
+    # an unknown is rendered; it never authors unknown prose.
+    unknowns_rendered = [
+        {
+            "unknown_id": unknown_id,
+            "prose": {
+                "en": unknown_by_id[unknown_id]["statement_en"],
+                "ar": unknown_by_id[unknown_id]["statement_ar"],
+            },
+        }
+        for unknown_id in sorted(rendered_ids)
+    ]
+
+    accepted = {
         **run,
         "validation": {"status": "accepted_for_editorial_review", "errors": []},
-        "units": [dict(unit) for unit in units],
-        "undrafted_claim_ids": sorted(undrafted_claim_ids),
-        "unknowns_rendered": [dict(item) for item in rendered_unknowns],
+        "units": accepted_units,
+        "undrafted_claim_ids": sorted(undrafted),
+        "unknowns_rendered": unknowns_rendered,
         "omitted_unknown_ids": sorted(omitted),
     }
-
+    schema_errors = [error.message for error in _RUN_VALIDATOR.iter_errors(accepted)]
+    if schema_errors:
+        return rejected(
+            [f"accepted draft failed runtime schema validation: {schema_errors[0]}"]
+        )
+    return accepted

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -22,6 +23,7 @@ from services.intelligence.bilingual_drafting import (  # noqa: E402
     build_approved_drafting_context,
     build_bilingual_draft_run,
     load_terminology,
+    terminology_digest,
 )
 
 TERMINOLOGY = ROOT / "data" / "terminology" / "bilingual-terminology-v0.1.json"
@@ -40,11 +42,12 @@ def expect_error(label: str, fn: Any, failures: list[str]) -> None:
     failures.append(f"{label} did not fail closed")
 
 
-def sha256_of(value: Any) -> str:
-    import hashlib
+def sha256_text(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
-    canonical = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+def canonical_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
 def entity(entity_id: str, entity_type: str, en: str, ar: str) -> dict[str, Any]:
@@ -76,6 +79,7 @@ def canonical_inputs() -> tuple[list, list, list, list]:
                 "upper_bound": None,
             },
             "validity": {"point_in_time": {"value": "2024-03-15", "precision": "day"}},
+            "scope": {"entity_ids": ["SDA-PROC-CEDAR"], "quantity_type": "contracted", "note": None},
             "claim_state": "active",
             "record_status": "active",
             "evidence_ids": ["SDA-EVID-CEDAR-1"],
@@ -86,6 +90,7 @@ def canonical_inputs() -> tuple[list, list, list, list]:
             "predicate_id": "manufacturer.manufactures.equipment",
             "value": {"kind": "entity", "entity_id": "SDA-EQUIP-FALCONX"},
             "validity": None,
+            "scope": None,
             "claim_state": "active",
             "record_status": "active",
             "evidence_ids": ["SDA-EVID-FALCONX-1"],
@@ -142,15 +147,7 @@ def good_draft_output() -> dict[str, Any]:
             },
         ],
         "undrafted_claim_ids": [],
-        "unknowns_rendered": [
-            {
-                "unknown_id": "UNK-FALCONX-OPERATOR",
-                "prose": {
-                    "en": "The operator of Falcon-X remains unknown.",
-                    "ar": "يبقى مشغّل فالكون-إكس غير معروف.",
-                },
-            }
-        ],
+        "rendered_unknown_ids": ["UNK-FALCONX-OPERATOR"],
         "omitted_unknown_ids": [],
     }
 
@@ -180,13 +177,13 @@ def main() -> int:
     )
     validate("editorial-drafting-context.schema.json", context, "drafting context")
     expect(
-        context["authority"]
-        == {
-            "mode": "approved_canonical_read_only",
-            "canonical_mutation_authority": False,
-            "publication_authority": False,
-        },
-        "context carries wrong authority",
+        context["claims"][0]["scope"]["quantity_type"] == "contracted",
+        "context dropped material Claim scope (quantity_type)",
+        failures,
+    )
+    expect(
+        context["terminology_sha256"] == terminology_digest(terminology),
+        "context terminology digest does not bind the registry bytes",
         failures,
     )
     expect(context["conflicts"] == [], "accepted context carries conflicts", failures)
@@ -233,6 +230,28 @@ def main() -> int:
     orphan[0]["evidence_ids"] = ["SDA-EVID-NOT-HERE"]
     expect_error("claim citing evidence outside context", lambda: build(claims=orphan), failures)
 
+    unresolved_target = copy.deepcopy(claims)
+    unresolved_target[1]["value"] = {"kind": "entity", "entity_id": "SDA-EQUIP-UNRESOLVED"}
+    expect_error(
+        "claim targeting an unresolved entity", lambda: build(claims=unresolved_target), failures
+    )
+
+    restricted_statement = copy.deepcopy(unknowns)
+    restricted_statement[0]["statement_en"] = "Unit readiness is not established."
+    expect_error(
+        "restricted detail in context factual field (pre-invocation gate)",
+        lambda: build(unknowns=restricted_statement),
+        failures,
+    )
+
+    restricted_arabic_name = copy.deepcopy(entities)
+    restricted_arabic_name[2]["names"]["ar"] = "مشروع الأرز لرفع الجاهزية"
+    expect_error(
+        "Arabic restricted marker in entity name (pre-invocation gate)",
+        lambda: build(entities=restricted_arabic_name),
+        failures,
+    )
+
     conflicting = claims + [
         {
             "claim_id": "SDA-CLAIM-CEDAR-QTY-2",
@@ -247,6 +266,7 @@ def main() -> int:
                 "upper_bound": None,
             },
             "validity": {"point_in_time": {"value": "2024-03-15", "precision": "day"}},
+            "scope": {"entity_ids": ["SDA-PROC-CEDAR"], "quantity_type": "contracted", "note": None},
             "claim_state": "active",
             "record_status": "active",
             "evidence_ids": ["SDA-EVID-CEDAR-1"],
@@ -258,10 +278,6 @@ def main() -> int:
     cand_entity[0]["entity_id"] = "CAND-ENT-1"
     expect_error("candidate entity", lambda: build(entities=cand_entity), failures)
 
-    bad_term = copy.deepcopy(terminology)
-    bad_term["terms"][0]["ar"] = ""
-    expect_error("terminology term missing Arabic rendering", lambda: build(terminology=bad_term), failures)
-
     # --- accepted run via fake invoker ---
     captured_prompt: list[str] = []
 
@@ -269,40 +285,53 @@ def main() -> int:
         captured_prompt.append(prompt)
         return json.dumps(good_draft_output(), ensure_ascii=False)
 
-    run = build_bilingual_draft_run(
-        context=context,
-        terminology=terminology,
-        model_trace=DraftModelTrace(
-            provider="deterministic-test", model="fixture-drafter", model_version="v0"
-        ),
-        invoke=fake_invoke,
-        clock=lambda: "2026-10-02T00:01:00Z",
+    trace = DraftModelTrace(
+        provider="deterministic-test", model="fixture-drafter", model_version="v0"
     )
+
+    def run_with(invoke: Any, ctx: Any = context, term: Any = terminology) -> dict[str, Any]:
+        return build_bilingual_draft_run(
+            context=ctx,
+            terminology=term,
+            model_trace=trace,
+            invoke=invoke,
+            clock=lambda: "2026-10-02T00:01:00Z",
+        )
+
+    run = run_with(fake_invoke)
     validate("ai-bilingual-draft-run.schema.json", run, "accepted draft run")
     expect(
         run["validation"]["status"] == "accepted_for_editorial_review",
-        "valid draft output was not accepted",
+        f"valid draft output was not accepted: {run['validation']['errors'][:2]}",
         failures,
     )
     expect(
-        run["input_context_sha256"] == sha256_of(context),
+        run["input_context_sha256"] == sha256_text(canonical_json(context)),
         "input context hash does not match the approved context",
         failures,
     )
     expect(
-        captured_prompt[0] == json.dumps(context, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+        run["raw_output_sha256"]
+        == sha256_text(json.dumps(good_draft_output(), ensure_ascii=False)),
+        "raw output hash does not match the exact model response",
+        failures,
+    )
+    expect(
+        captured_prompt[0] == canonical_json(context),
         "invoker did not receive exactly the canonical context serialization",
         failures,
     )
+    expect("CAND-" not in captured_prompt[0], "prompt leaked candidate markers", failures)
     expect(
-        "CAND-" not in captured_prompt[0],
-        "canonical prompt leaked candidate identity markers",
+        "contracted" in captured_prompt[0],
+        "prompt dropped the material scope semantics the fixture prose expresses",
         failures,
     )
     expect(
-        run["authority"]
-        == {"mode": "candidate_only", "canonical_mutation_authority": False, "publication_authority": False},
-        "draft run carries more than candidate-only authority",
+        run["unknowns_rendered"][0]["prose"]["en"]
+        == unknowns[0]["statement_en"]
+        and run["unknowns_rendered"][0]["prose"]["ar"] == unknowns[0]["statement_ar"],
+        "rendered unknown is not the exact pre-written bilingual statement",
         failures,
     )
     expect(
@@ -310,29 +339,14 @@ def main() -> int:
         "draft run lost the adapter version",
         failures,
     )
-    expect(
-        [unit["unit_id"] for unit in run["units"]] == ["UNIT-QTY", "UNIT-MANUFACTURER"],
-        "accepted run altered the unit list",
-        failures,
-    )
 
-    # Determinism: same inputs and clock -> same identity; different clock -> different identity.
-    run_again = build_bilingual_draft_run(
-        context=context,
-        terminology=terminology,
-        model_trace=DraftModelTrace(
-            provider="deterministic-test", model="fixture-drafter", model_version="v0"
-        ),
-        invoke=fake_invoke,
-        clock=lambda: "2026-10-02T00:01:00Z",
-    )
+    # Determinism / distinctness.
+    run_again = run_with(fake_invoke)
     expect(run_again["id"] == run["id"], "draft run identity is not deterministic", failures)
     run_later = build_bilingual_draft_run(
         context=context,
         terminology=terminology,
-        model_trace=DraftModelTrace(
-            provider="deterministic-test", model="fixture-drafter", model_version="v0"
-        ),
+        model_trace=trace,
         invoke=fake_invoke,
         clock=lambda: "2026-10-02T00:02:00Z",
     )
@@ -343,23 +357,11 @@ def main() -> int:
         def invoke(_: str) -> str:
             return payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
 
-        return build_bilingual_draft_run(
-            context=context,
-            terminology=terminology,
-            model_trace=DraftModelTrace(
-                provider="deterministic-test", model="fixture-drafter", model_version="v0"
-            ),
-            invoke=invoke,
-            clock=lambda: "2026-10-02T00:03:00Z",
-        )
+        return run_with(invoke)
 
     def expect_rejected(label: str, payload: Any, fragment: str) -> None:
         result = run_with_output(payload)
-        expect(
-            result["validation"]["status"] == "rejected",
-            f"{label} was not rejected",
-            failures,
-        )
+        expect(result["validation"]["status"] == "rejected", f"{label} was not rejected", failures)
         expect(
             not result["units"] and not result["unknowns_rendered"],
             f"{label} rejection leaked drafted text",
@@ -380,14 +382,26 @@ def main() -> int:
     unsupported["units"][0]["claim_ids"] = ["SDA-CLAIM-NOT-APPROVED"]
     expect_rejected("unsupported claim id", unsupported, "outside the approved context")
 
-    orphan_cite = copy.deepcopy(good_draft_output())
-    orphan_cite["units"][0]["evidence_ids"] = ["SDA-EVID-ORPHAN"]
-    expect_rejected("orphaned citation", orphan_cite, "orphaned citation")
+    cross_cite = copy.deepcopy(good_draft_output())
+    cross_cite["units"][0]["evidence_ids"] = ["SDA-EVID-FALCONX-1"]
+    expect_rejected("cross-claim evidence citation", cross_cite, "claim-specific support closure")
+
+    double_draft = copy.deepcopy(good_draft_output())
+    double_draft["units"][1]["claim_ids"] = [
+        "SDA-CLAIM-FALCONX-MANUFACTURER",
+        "SDA-CLAIM-CEDAR-QTY",
+    ]
+    double_draft["units"][1]["evidence_ids"] = ["SDA-EVID-FALCONX-1", "SDA-EVID-CEDAR-1"]
+    expect_rejected("claim drafted in two units", double_draft, "exactly one unit")
+
+    both_modes = copy.deepcopy(good_draft_output())
+    both_modes["undrafted_claim_ids"] = ["SDA-CLAIM-CEDAR-QTY"]
+    expect_rejected("claim both drafted and undrafted", both_modes, "exactly once")
 
     term_violation = copy.deepcopy(good_draft_output())
     term_violation["units"][1]["prose"] = {
         "en": "Atlas Aerospace manufactures the Falcon-X trainer aircraft.",
-        "ar": "تُصنّع الشركة منظومة فالكون-إكس.",  # registry Arabic for trainer aircraft absent
+        "ar": "تُصنّع الشركة منظومة فالكون-إكس.",
     }
     expect_rejected("terminology pairing violation", term_violation, "registry term")
 
@@ -395,13 +409,29 @@ def main() -> int:
     invented_number["units"][0]["prose"]["en"] = (
         "Project Cedar carries a contracted quantity of 84 aircraft as of 2024-03-15."
     )
-    expect_rejected("invented number", invented_number, "not grounded in the context")
+    expect_rejected("invented number", invented_number, "not grounded")
+
+    bookkeeping_number = copy.deepcopy(good_draft_output())
+    bookkeeping_number["units"][0]["prose"]["en"] = (
+        "Project Cedar carries a contracted quantity of 2026 aircraft as of 2024-03-15."
+    )
+    expect_rejected(
+        "bookkeeping-only number (context year)", bookkeeping_number, "not grounded"
+    )
 
     restricted = copy.deepcopy(good_draft_output())
     restricted["units"][0]["prose"]["en"] = (
         "Project Cedar covers 12 aircraft; unit readiness remains high."
     )
     expect_rejected("restricted operational detail", restricted, "restricted operational detail")
+
+    restricted_arabic = copy.deepcopy(good_draft_output())
+    restricted_arabic["units"][1]["prose"]["ar"] = (
+        "تُصنّع الشركة المنظومة مع الحفاظ على الجاهزية العالية."
+    )
+    expect_rejected(
+        "restricted operational detail in Arabic", restricted_arabic, "Arabic"
+    )
 
     coordinate = copy.deepcopy(good_draft_output())
     coordinate["units"][0]["prose"]["ar"] = "اعتُمد مشروع الأرز عند الإحداثيات 24.7136 شمالاً."
@@ -414,31 +444,63 @@ def main() -> int:
     )
 
     unknown_outside = copy.deepcopy(good_draft_output())
-    unknown_outside["unknowns_rendered"][0]["unknown_id"] = "UNK-NOT-IN-CONTEXT"
+    unknown_outside["rendered_unknown_ids"] = ["UNK-NOT-IN-CONTEXT"]
     expect_rejected("unknown outside context", unknown_outside, "outside the approved context")
 
     unaccounted_unknown = copy.deepcopy(good_draft_output())
-    unaccounted_unknown["unknowns_rendered"] = []
+    unaccounted_unknown["rendered_unknown_ids"] = []
     unaccounted_unknown["omitted_unknown_ids"] = []
     expect_rejected(
         "unaccounted context unknown", unaccounted_unknown, "account for every context unknown"
     )
 
-    # Abstention is allowed: a claim may be undrafted, but must be accounted.
+    # Abstention is allowed: a claim may be undrafted, and an unknown omitted,
+    # but both must be accounted exactly once.
     abstain = copy.deepcopy(good_draft_output())
     abstain["units"] = abstain["units"][:1]
     abstain["undrafted_claim_ids"] = ["SDA-CLAIM-FALCONX-MANUFACTURER"]
+    abstain["rendered_unknown_ids"] = []
+    abstain["omitted_unknown_ids"] = ["UNK-FALCONX-OPERATOR"]
     abstained_run = run_with_output(abstain)
     expect(
         abstained_run["validation"]["status"] == "accepted_for_editorial_review",
-        "accounted abstention was rejected",
+        f"accounted abstention was rejected: {abstained_run['validation']['errors'][:2]}",
         failures,
     )
     expect(
-        abstained_run["undrafted_claim_ids"] == ["SDA-CLAIM-FALCONX-MANUFACTURER"],
-        "abstention lost the undrafted claim",
+        abstained_run["undrafted_claim_ids"] == ["SDA-CLAIM-FALCONX-MANUFACTURER"]
+        and abstained_run["omitted_unknown_ids"] == ["UNK-FALCONX-OPERATOR"]
+        and abstained_run["unknowns_rendered"] == [],
+        "abstention accounting was not preserved",
         failures,
     )
+
+    # BD-04: a hand-assembled context that violates the builder contract is
+    # refused by the adapter before invocation.
+    tampered = copy.deepcopy(context)
+    tampered["claims"][0]["claim_state"] = "disputed"
+
+    def run_tampered() -> None:
+        run_with(lambda _: json.dumps(good_draft_output()), ctx=tampered)
+
+    expect_error("hand-assembled context with unapproved claim", run_tampered, failures)
+
+    no_digest = copy.deepcopy(context)
+    no_digest.pop("terminology_sha256")
+
+    def run_no_digest() -> None:
+        run_with(lambda _: json.dumps(good_draft_output()), ctx=no_digest)
+
+    expect_error("hand-assembled context missing terminology digest", run_no_digest, failures)
+
+    # FBD-02: changed terminology bytes under the same version are refused.
+    tampered_registry = json.loads(TERMINOLOGY.read_text(encoding="utf-8"))
+    tampered_registry["terms"][0]["ar"] = "منظومة معدلة"
+
+    def run_tampered_registry() -> None:
+        run_with(lambda _: json.dumps(good_draft_output()), term=tampered_registry)
+
+    expect_error("terminology bytes changed under same version", run_tampered_registry, failures)
 
     if failures:
         print("M4 bilingual drafting validation FAILED:")
@@ -447,14 +509,15 @@ def main() -> int:
         return 1
 
     print(
-        "Validated bounded bilingual drafting: deterministic approved-only context selection with "
-        "official bilingual names and conflict fail-closed; invoker receives exactly the canonical "
-        "context serialization; strict JSON draft output; one shared support set per unit across "
-        "locales; support closure and full claim/unknown accounting with explicit abstention; "
-        "terminology-registry pairing in both directions; unknown preservation; invented-number "
-        "and restricted-detail rejection including coordinate-like precision; deterministic run "
-        "identity per invocation; candidate-only authority with zero canonical mutation or "
-        "publication rights."
+        "Validated bounded bilingual drafting v0.2: scope-preserving approved-only context with "
+        "entity-target resolution, terminology digest binding, and a bilingual pre-invocation "
+        "sensitivity gate; adapter independently re-validates hand-assembled contexts; invoker "
+        "receives exactly the canonical context serialization; strict JSON output; one shared, "
+        "claim-specific support set per unit; exactly-once claim accounting with explicit "
+        "abstention; exact deterministic reuse of pre-written unknown statements; terminology "
+        "pairing both directions; factual-fields-only number allowlist (bookkeeping digits "
+        "rejected); bilingual restricted-detail and coordinate rejection; raw-output hashing; "
+        "runtime schema validation of accepted and rejected runs; candidate-only authority."
     )
     return 0
 

@@ -8,6 +8,7 @@
     "id",
     "created_at",
     "terminology_version",
+    "terminology_sha256",
     "entities",
     "claims",
     "evidence",
@@ -33,7 +34,11 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["entity_id", "entity_type", "names"],
+        "required": [
+          "entity_id",
+          "entity_type",
+          "names"
+        ],
         "additionalProperties": false,
         "properties": {
           "entity_id": {
@@ -47,11 +52,22 @@
           },
           "names": {
             "type": "object",
-            "required": ["en", "ar"],
+            "required": [
+              "en",
+              "ar"
+            ],
             "additionalProperties": false,
             "properties": {
-              "en": { "type": "string", "minLength": 1, "maxLength": 256 },
-              "ar": { "type": "string", "minLength": 1, "maxLength": 256 }
+              "en": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "ar": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              }
             }
           }
         }
@@ -67,7 +83,8 @@
           "predicate_id",
           "value",
           "claim_state",
-          "evidence_ids"
+          "evidence_ids",
+          "scope"
         ],
         "additionalProperties": false,
         "properties": {
@@ -84,9 +101,18 @@
             "minLength": 1,
             "maxLength": 128
           },
-          "value": { "type": "object" },
-          "validity": { "type": ["object", "null"] },
-          "claim_state": { "const": "active" },
+          "value": {
+            "type": "object"
+          },
+          "validity": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "claim_state": {
+            "const": "active"
+          },
           "evidence_ids": {
             "type": "array",
             "minItems": 1,
@@ -95,6 +121,12 @@
               "type": "string",
               "pattern": "^SDA-EVID-[A-Z0-9-]+$"
             }
+          },
+          "scope": {
+            "type": [
+              "object",
+              "null"
+            ]
           }
         }
       }
@@ -103,7 +135,12 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["evidence_id", "document_id", "locator", "role"],
+        "required": [
+          "evidence_id",
+          "document_id",
+          "locator",
+          "role"
+        ],
         "additionalProperties": false,
         "properties": {
           "evidence_id": {
@@ -114,10 +151,16 @@
             "type": "string",
             "pattern": "^SDA-DOC-[A-Z0-9-]+$"
           },
-          "locator": { "type": "object" },
+          "locator": {
+            "type": "object"
+          },
           "role": {
             "type": "string",
-            "enum": ["supports", "contradicts", "contextualizes"]
+            "enum": [
+              "supports",
+              "contradicts",
+              "contextualizes"
+            ]
           }
         }
       }
@@ -126,7 +169,12 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["unknown_id", "aspect", "statement_en", "statement_ar"],
+        "required": [
+          "unknown_id",
+          "aspect",
+          "statement_en",
+          "statement_ar"
+        ],
         "additionalProperties": false,
         "properties": {
           "unknown_id": {
@@ -139,7 +187,10 @@
             "maxLength": 64
           },
           "entity_id": {
-            "type": ["string", "null"],
+            "type": [
+              "string",
+              "null"
+            ],
             "pattern": "^SDA-[A-Z0-9-]+$"
           },
           "statement_en": {
@@ -169,10 +220,20 @@
       ],
       "additionalProperties": false,
       "properties": {
-        "mode": { "const": "approved_canonical_read_only" },
-        "canonical_mutation_authority": { "const": false },
-        "publication_authority": { "const": false }
+        "mode": {
+          "const": "approved_canonical_read_only"
+        },
+        "canonical_mutation_authority": {
+          "const": false
+        },
+        "publication_authority": {
+          "const": false
+        }
       }
+    },
+    "terminology_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
     }
   },
   "additionalProperties": false

@@ -2,11 +2,13 @@
 """Isolation checks for the bounded bilingual drafting projection.
 
 Proves the boundary properties beyond the happy path: the model input is only
-the bounded approved context (no candidate or restricted material can reach
-the invoker), conflicts fail closed at both the builder and the adapter,
-unknown preservation is enforced per locale, the number guard covers Arabic
-prose including Arabic-Indic digits, terminology pairing is enforced in both
-directions, and no run can carry canonical mutation or publication authority.
+the bounded approved context; the pre-invocation sensitivity gate is bilingual;
+conflicts fail closed at the builder and hand-assembled contexts at the
+adapter; the number allowlist excludes bookkeeping digits and covers Arabic
+prose including Arabic-Indic digits; unknown meaning is preserved by exact
+deterministic reuse (the model cannot author unknown prose); terminology
+pairing is enforced in both directions and bound to registry bytes; and no run
+can carry canonical mutation or publication authority.
 """
 
 from __future__ import annotations
@@ -82,6 +84,7 @@ def main() -> int:
             "predicate_id": "contract.awarded_to.company",
             "value": {"kind": "entity", "entity_id": "SDA-EQUIP-ALPHA"},
             "validity": None,
+            "scope": None,
             "claim_state": "active",
             "record_status": "active",
             "evidence_ids": ["SDA-EVID-ALPHA-1"],
@@ -128,15 +131,7 @@ def main() -> int:
             }
         ],
         "undrafted_claim_ids": [],
-        "unknowns_rendered": [
-            {
-                "unknown_id": "UNK-ALPHA-QUANTITY",
-                "prose": {
-                    "en": "The contracted quantity remains unknown.",
-                    "ar": "يبقى حجم العقد غير معروف.",
-                },
-            }
-        ],
+        "rendered_unknown_ids": ["UNK-ALPHA-QUANTITY"],
         "omitted_unknown_ids": [],
     }
 
@@ -144,17 +139,17 @@ def main() -> int:
         provider="deterministic-isolation", model="fixture-drafter", model_version="v0"
     )
 
-    def run_with(invoke: Any, ctx: Any = context) -> dict[str, Any]:
+    def run_with(invoke: Any, ctx: Any = context, term: Any = terminology) -> dict[str, Any]:
         return build_bilingual_draft_run(
             context=ctx,
-            terminology=terminology,
+            terminology=term,
             model_trace=trace,
             invoke=invoke,
             clock=lambda: "2026-10-02T00:01:00Z",
         )
 
     # 1. The invoker receives ONLY the bounded approved context: no candidate
-    #    markers, no restricted vocabulary, and nothing beyond the context keys.
+    #    markers, no restricted vocabulary in either locale, nothing extra.
     captured: list[str] = []
 
     def capture_invoke(prompt: str) -> str:
@@ -164,20 +159,46 @@ def main() -> int:
     run = run_with(capture_invoke)
     expect(
         run["validation"]["status"] == "accepted_for_editorial_review",
-        "isolation happy path was not accepted",
+        f"isolation happy path was not accepted: {run['validation']['errors'][:2]}",
         failures,
     )
     prompt = captured[0]
-    for marker in ("CAND-", "readiness", "patrol", "stock level", "live unit"):
+    for marker in ("CAND-", "readiness", "patrol", "stock level", "live unit", "جاهزية", "مخزون"):
         expect(marker not in prompt, f"model input leaked {marker!r}", failures)
     parsed_prompt = json.loads(prompt)
+    expect(set(parsed_prompt) == set(context), "model input is not exactly the context", failures)
     expect(
-        set(parsed_prompt) == set(context),
-        "model input is not exactly the context object",
+        "terminology_sha256" in parsed_prompt,
+        "model input lost the terminology digest binding",
         failures,
     )
 
-    # 2. Conflict fail-closed at the builder: disputed claim state.
+    # 2. Unknown meaning is preserved by construction: the model only selects
+    #    unknown IDs; authored unknown prose is an unsupported key.
+    authored_unknown = copy.deepcopy(good_output)
+    authored_unknown["unknowns_rendered"] = [
+        {
+            "unknown_id": "UNK-ALPHA-QUANTITY",
+            "prose": {
+                "en": "The Alpha Training System is operated by the Royal Air Force.",
+                "ar": "تشغّل القوة الجوية الملكية منظومة التدريب ألفا.",
+            },
+        }
+    ]
+    au_result = run_with(lambda _: json.dumps(authored_unknown, ensure_ascii=False))
+    expect(
+        au_result["validation"]["status"] == "rejected",
+        "model-authored unknown prose was not rejected",
+        failures,
+    )
+    expect(
+        run["unknowns_rendered"][0]["prose"]["en"] == unknowns[0]["statement_en"]
+        and run["unknowns_rendered"][0]["prose"]["ar"] == unknowns[0]["statement_ar"],
+        "accepted run did not reuse the exact pre-written unknown statements",
+        failures,
+    )
+
+    # 3. Conflict fail-closed at the builder (disputed) and adapter (hand-assembled).
     disputed = copy.deepcopy(claims)
     disputed[0]["claim_state"] = "disputed"
 
@@ -193,18 +214,29 @@ def main() -> int:
 
     expect_error("disputed claim at builder", build_disputed, failures)
 
-    # 3. Conflict fail-closed at the adapter: a hand-assembled context carrying
-    #    a non-empty conflicts array is refused before any invocation.
-    conflicted = copy.deepcopy(context)
-    conflicted["conflicts"] = [{"aspect": "quantity"}]
+    conflicted_ctx = copy.deepcopy(context)
+    conflicted_ctx["conflicts"] = [{"aspect": "quantity"}]
 
     def run_conflicted() -> None:
-        run_with(lambda _: json.dumps(good_output), ctx=conflicted)
+        run_with(lambda _: json.dumps(good_output), ctx=conflicted_ctx)
 
-    expect_error("context with conflicts at adapter", run_conflicted, failures)
+    expect_error("hand-assembled context with conflicts", run_conflicted, failures)
 
-    # 4. Authority escalation is structurally impossible: the schema pins
-    #    candidate-only authority with false flags.
+    injected = copy.deepcopy(context)
+    injected["entities"].append(
+        {
+            "entity_id": "CAND-ENT-SMUGGLED",
+            "entity_type": "organization",
+            "names": {"en": "Smuggled", "ar": "مهرب"},
+        }
+    )
+
+    def run_injected() -> None:
+        run_with(lambda _: json.dumps(good_output), ctx=injected)
+
+    expect_error("hand-assembled context with injected candidate entity", run_injected, failures)
+
+    # 4. Authority escalation is schema-impossible and adapter-refused.
     escalated = copy.deepcopy(run)
     escalated["authority"] = {
         "mode": "canonical",
@@ -232,8 +264,8 @@ def main() -> int:
     # 5. Terminology pairing in both directions.
     ar_only_term = copy.deepcopy(good_output)
     ar_only_term["units"][0]["prose"] = {
-        "en": "Al-Noor Industries supplies a training system.",  # avoids registry English
-        "ar": "فازت شركة النور للصناعات بعقد لدخول الخدمة.",  # uses Arabic registry term
+        "en": "Al-Noor Industries supplies a training system.",
+        "ar": "فازت شركة النور للصناعات بعقد لدخول الخدمة.",
     }
     ar_result = run_with(lambda _: json.dumps(ar_only_term, ensure_ascii=False))
     expect(
@@ -243,7 +275,8 @@ def main() -> int:
         failures,
     )
 
-    # 6. The number guard covers Arabic prose, including Arabic-Indic digits.
+    # 6. The number guard covers Arabic prose including Arabic-Indic digits,
+    #    and excludes bookkeeping digits (the context-creation year).
     arabic_number = copy.deepcopy(good_output)
     arabic_number["units"][0]["prose"]["ar"] = (
         "فازت شركة النور للصناعات بعقد لمنظومة التدريب ألفا بقيمة ٩٩ منصة."
@@ -255,53 +288,45 @@ def main() -> int:
         f"Arabic-Indic invented number was not rejected: {an_result['validation']['errors'][:2]}",
         failures,
     )
-
-    # 7. Unknown preservation: omitting the context unknown entirely is a
-    #    rejection; rendering it in only one locale is a rejection.
-    omitted_unknown = copy.deepcopy(good_output)
-    omitted_unknown["unknowns_rendered"] = []
-    omitted_unknown["omitted_unknown_ids"] = []
-    oo_result = run_with(lambda _: json.dumps(omitted_unknown, ensure_ascii=False))
+    bookkeeping = copy.deepcopy(good_output)
+    bookkeeping["units"][0]["prose"]["en"] = (
+        "Al-Noor Industries was awarded a contract in 2026 for the Alpha Training System."
+    )
+    bk_result = run_with(lambda _: json.dumps(bookkeeping, ensure_ascii=False))
     expect(
-        oo_result["validation"]["status"] == "rejected",
-        "fully omitted context unknown was not rejected",
+        bk_result["validation"]["status"] == "rejected"
+        and any("not grounded" in error for error in bk_result["validation"]["errors"]),
+        f"bookkeeping-only year was not rejected: {bk_result['validation']['errors'][:2]}",
         failures,
     )
-    one_locale = copy.deepcopy(good_output)
-    one_locale["unknowns_rendered"][0]["prose"].pop("ar")
-    ol_result = run_with(lambda _: json.dumps(one_locale, ensure_ascii=False))
-    expect(
-        ol_result["validation"]["status"] == "rejected",
-        "unknown rendered in only one locale was not rejected",
-        failures,
-    )
-    validate(
-        "ai-bilingual-draft-run.schema.json", ol_result, "rejected one-locale unknown run"
-    )
 
-    # 8. Terminology version binding: a registry whose version differs from the
-    #    context is refused before invocation.
-    other_version = copy.deepcopy(terminology)
-    other_version["version"] = "sda-bilingual-terminology-v9.9"
+    # 7. Pre-invocation sensitivity gate is bilingual (BD-03).
+    arabic_restricted_statement = copy.deepcopy(unknowns)
+    arabic_restricted_statement[0]["statement_ar"] = "لم يثبت مستوى الجاهزية من الادعاءات."
 
-    def run_wrong_registry() -> None:
-        build_bilingual_draft_run(
-            context=context,
-            terminology=other_version,
-            model_trace=trace,
-            invoke=lambda _: json.dumps(good_output),
-            clock=lambda: "2026-10-02T00:02:00Z",
+    def build_arabic_restricted() -> None:
+        build_approved_drafting_context(
+            entities=entities,
+            claims=claims,
+            evidence=evidence,
+            unknowns=arabic_restricted_statement,
+            terminology=terminology,
+            created_at="2026-10-02T00:00:03Z",
         )
 
-    expect_error("terminology version mismatch", run_wrong_registry, failures)
+    expect_error("Arabic restricted marker in context (pre-invocation)", build_arabic_restricted, failures)
 
-    # 9. Official names outrank generated translations: the accepted prose uses
-    #    the entity's official Arabic name, and a unit substituting an invented
-    #    Arabic name for the entity still passes the mechanical checks (the
-    #    registry governs terminology, not entity names) - so the contract
-    #    documents official-name precedence as a prompt/evaluation rule, and the
-    #    mechanical guard here proves the boundary never blocks on entity names
-    #    it was never asked to police.
+    # 8. Terminology bytes are bound, not just the version (FBD-02).
+    tampered_registry = json.loads(TERMINOLOGY.read_text(encoding="utf-8"))
+    tampered_registry["terms"][2]["en"] = "greenlit"
+
+    def run_tampered_registry() -> None:
+        run_with(lambda _: json.dumps(good_output), term=tampered_registry)
+
+    expect_error("terminology bytes changed under same version", run_tampered_registry, failures)
+
+    # 9. Official names outrank generated translations as a documented rule;
+    #    the accepted fixture prose carries the official Arabic entity name.
     expect(
         "منظومة التدريب ألفا" in run["units"][0]["prose"]["ar"],
         "fixture prose lost the official Arabic entity name",
@@ -316,12 +341,13 @@ def main() -> int:
 
     print(
         "Validated bilingual drafting isolation: model input is exactly the bounded approved "
-        "context with no candidate or restricted material; disputed claims fail closed at the "
-        "builder and conflicted contexts at the adapter; authority escalation is schema-"
-        "impossible and adapter-refused; terminology pairing enforced in both directions; the "
-        "invented-number guard covers Arabic prose including Arabic-Indic digits; context "
-        "unknowns must be rendered bilingually or explicitly omitted; terminology version is "
-        "bound to the context."
+        "context (now including the terminology digest) with no candidate, restricted, English, "
+        "or Arabic leakage; the model cannot author unknown prose (unsupported key) and rendered "
+        "unknowns are exact deterministic reuse; disputed claims fail closed at the builder and "
+        "hand-assembled contexts (conflicts, injected candidates, escalation) at the adapter; "
+        "authority escalation is schema-impossible; terminology pairing enforced in both "
+        "directions with registry-byte binding; the number guard covers Arabic-Indic digits and "
+        "rejects bookkeeping-only digits; the pre-invocation sensitivity gate is bilingual."
     )
     return 0
 
