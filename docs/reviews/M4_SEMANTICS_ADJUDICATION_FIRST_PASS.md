@@ -12,7 +12,7 @@ Base branch / merge base:
 
 Implementation baseline reviewed before this review record was added:
 
-- `m4/semantics-adjudication` at the implementation commit recorded with this branch's push (the commit preceding this record).
+- `m4/semantics-adjudication` at `ad8103ca1de202c0845ceed0806addbef3c34723` (implementation, decision record, and this review record in one commit; verified via `git rev-parse HEAD` before this wording fix).
 
 Net surface:
 
