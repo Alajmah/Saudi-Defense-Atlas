@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Isolation checks for the bounded bilingual drafting projection.
 
-Proves the boundary properties beyond the happy path: the model input is only
-the bounded approved context; the pre-invocation sensitivity gate is bilingual;
+Proves the boundary properties beyond the happy path: the model input is the
+static wrapper plus two typed data blocks — the canonical context and the
+bounded terminology-delivery block; the pre-invocation sensitivity gate is bilingual;
 conflicts fail closed at the builder and hand-assembled contexts at the
 adapter; the number allowlist excludes bookkeeping digits and covers Arabic
 prose including Arabic-Indic digits; unknown meaning is preserved by exact
@@ -152,10 +153,11 @@ def main() -> int:
             clock=lambda: "2026-10-02T00:01:00Z",
         )
 
-    # 1. The invoker receives exactly the rendered wrapper input: the reviewed
-    #    template around the canonical context, with no candidate markers and
-    #    no restricted or pinned vocabulary in either locale beyond the
-    #    template's enumerated, reviewed instructions.
+    # 1. The invoker receives exactly the rendered two-block input: the
+    #    reviewed template around the canonical context block and the
+    #    least-privilege terminology delivery block, with no candidate markers
+    #    and no restricted or pinned vocabulary beyond the reviewed
+    #    instructions and the gated registry renderings.
     captured: list[str] = []
 
     def capture_invoke(prompt: str) -> str:
@@ -172,20 +174,41 @@ def main() -> int:
     for marker in ("CAND-", "readiness", "patrol", "stock level", "live unit", "جاهزية", "مخزون"):
         expect(marker not in prompt, f"model input leaked {marker!r}", failures)
     expect(
-        prompt == render_draft_prompt(context),
-        "model input is not exactly the rendered wrapper input",
+        prompt == render_draft_prompt(context, terminology),
+        "model input is not exactly the rendered two-block input",
         failures,
     )
-    _, extracted_json, _ = split_rendered_prompt(prompt)
+    _, extracted_json, _, extracted_terms, _ = split_rendered_prompt(prompt)
     parsed_prompt = json.loads(extracted_json)
     expect(
         set(parsed_prompt) == set(context),
-        "the context inside the wrapper is not exactly the context object",
+        "the context inside the template is not exactly the context object",
         failures,
     )
     expect(
         "terminology_sha256" in parsed_prompt,
         "model input lost the terminology digest binding",
+        failures,
+    )
+    # The terminology block is exactly the least-privilege delivery payload,
+    # and the registry's own version/term-id metadata never reaches the model.
+    delivered = json.loads(extracted_terms)
+    # Independent oracle (TDI-03): construct the expected records locally
+    # from the loaded registry, record by record, without the production
+    # projection helper.
+    expected_terms = [
+        {"category": term["category"], "en": term["en"], "ar": term["ar"]}
+        for term in terminology["terms"]
+    ]
+    expect(
+        delivered.get("terms") == expected_terms,
+        "the terminology block does not correspond per-term (category, en, ar) "
+        "to the loaded registry in registry order",
+        failures,
+    )
+    expect(
+        "version" not in extracted_terms and "term_id" not in extracted_terms,
+        "terminology block leaked registry version or term identity",
         failures,
     )
     # Enumerated template property: stripping the wrapper reproduces the
@@ -201,8 +224,8 @@ def main() -> int:
         "stripped context bytes differ from the canonical serialization",
         failures,
     )
-    before, _, after = split_rendered_prompt(prompt)
-    wrapper_text = before + after
+    before, _, mid, _, after = split_rendered_prompt(prompt)
+    wrapper_text = before + mid + after
     for item in context["entities"]:
         for name in item["names"].values():
             expect(
@@ -214,7 +237,20 @@ def main() -> int:
             item["entity_id"] not in wrapper_text,
             f"wrapper text carries the entity identity {item['entity_id']!r}",
             failures,
-    )
+        )
+    # Registry renderings live in the terminology block, never in the static
+    # template segments; official Entity names remain context-owned.
+    for term in terminology["terms"]:
+        expect(
+            term["en"].casefold() not in wrapper_text.casefold(),
+            f"static segments carry registry English rendering {term['term_id']}",
+            failures,
+        )
+        expect(
+            term["ar"] not in wrapper_text,
+            f"static segments carry registry Arabic rendering {term['term_id']}",
+            failures,
+        )
     expect(
         not any(char.isdigit() for char in wrapper_text),
         "wrapper text contains digits",
@@ -491,10 +527,14 @@ def main() -> int:
         return 1
 
     print(
-        "Validated bilingual drafting isolation: model input is exactly the bounded approved "
-        "context (now including the terminology digest) with no candidate, restricted, English, "
-        "or Arabic leakage; the model cannot author unknown prose (unsupported key) and rendered "
-        "unknowns are exact deterministic reuse; disputed claims fail closed at the builder and "
+        "Validated bilingual drafting isolation: the model input is the rendered two-block "
+        "input - static wrapper plus verbatim canonical context and least-privilege "
+        "terminology delivery, each recoverable byte-for-byte against an independent "
+        "per-term oracle - with registry metadata absent from the terminology block, "
+        "renderings absent from static segments, and no wrapper-carried digits, Arabic "
+        "script, forbidden vocabulary, or context factual strings; the model cannot "
+        "author unknown prose (unsupported key) and rendered unknowns are exact "
+        "deterministic reuse; disputed claims fail closed at the builder and "
         "hand-assembled contexts (conflicts, injected candidates, escalation) at the adapter; "
         "authority escalation is schema-impossible; terminology pairing enforced in both "
         "directions with registry-byte binding; the number guard covers Arabic-Indic digits and "

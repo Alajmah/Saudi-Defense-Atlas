@@ -23,6 +23,8 @@ from services.intelligence.bilingual_drafting import (  # noqa: E402
     DRAFT_PROMPT_TEMPLATE_ID,
     DRAFT_PROMPT_TEMPLATE_VERSION,
     DRAFT_CONTEXT_TOKEN,
+    DRAFT_TERMINOLOGY_TOKEN,
+    TERMINOLOGY_CATEGORIES,
     WRAPPER_FORBIDDEN_VOCABULARY,
     DraftModelTrace,
     build_approved_drafting_context,
@@ -383,10 +385,10 @@ def main() -> int:
         "raw output hash does not match the exact model response",
         failures,
     )
-    rendered_prompt = render_draft_prompt(context)
+    rendered_prompt = render_draft_prompt(context, terminology)
     expect(
         captured_prompt[0] == rendered_prompt,
-        "invoker did not receive exactly the rendered wrapper input",
+        "invoker did not receive exactly the rendered two-block input",
         failures,
     )
     expect("CAND-" not in captured_prompt[0], "prompt leaked candidate markers", failures)
@@ -395,11 +397,36 @@ def main() -> int:
         "prompt dropped the material scope semantics the fixture prose expresses",
         failures,
     )
+    # Independent delivery oracle (TDI-03): construct the expected payload
+    # locally from the loaded registry — never via the production projection
+    # helper — so a swapped category or Arabic rendering between terms cannot
+    # evade this comparison.
+    delivery_payload = {
+        "terms": [
+            {
+                "category": term["category"],
+                "en": term["en"],
+                "ar": term["ar"],
+            }
+            for term in terminology["terms"]
+        ]
+    }
+    delivery_json = canonical_json(delivery_payload)
     expect(
         run["prompt_trace"]["template_id"] == DRAFT_PROMPT_TEMPLATE_ID
         and run["prompt_trace"]["template_version"] == DRAFT_PROMPT_TEMPLATE_VERSION
         and run["prompt_trace"]["template_sha256"] == draft_prompt_template_sha256(),
         "run prompt_trace misidentifies the wrapper template",
+        failures,
+    )
+    expect(
+        run["prompt_trace"]["terminology_registry_sha256"] == context["terminology_sha256"],
+        "prompt_trace registry hash does not copy the context binding",
+        failures,
+    )
+    expect(
+        run["prompt_trace"]["terminology_delivery_sha256"] == sha256_text(delivery_json),
+        "prompt_trace delivery hash does not match the delivered terminology bytes",
         failures,
     )
     expect(
@@ -410,6 +437,37 @@ def main() -> int:
     expect(
         run["input_context_sha256"] == sha256_text(canonical_json(context)),
         "context-only hash was not retained separately from the rendered input",
+        failures,
+    )
+    # Both dynamic blocks are recovered verbatim; the terminology block
+    # carries exactly the least-privilege payload in registry order.
+    before, ctx_json, mid, term_json, after = split_rendered_prompt(rendered_prompt)
+    expect(
+        ctx_json == canonical_json(context),
+        "stripping the template does not reproduce the canonical context bytes",
+        failures,
+    )
+    expect(
+        term_json == delivery_json,
+        "stripping the template does not reproduce the canonical terminology bytes",
+        failures,
+    )
+    parsed_terms = json.loads(term_json)
+    expect(
+        set(parsed_terms) == {"terms"}
+        and all(set(term) == {"category", "en", "ar"} for term in parsed_terms["terms"]),
+        "terminology block carries fields beyond category/en/ar",
+        failures,
+    )
+    expect(
+        parsed_terms["terms"] == delivery_payload["terms"],
+        "terminology block does not correspond per-term (category, en, ar) "
+        "to the loaded registry in registry order",
+        failures,
+    )
+    expect(
+        all(term["category"] in TERMINOLOGY_CATEGORIES for term in parsed_terms["terms"]),
+        "terminology block carries a category outside the frozen vocabulary",
         failures,
     )
 
@@ -432,13 +490,13 @@ def main() -> int:
         "wrapper template contains Arabic script",
         failures,
     )
-    before, extracted_json, after = split_rendered_prompt(rendered_prompt)
+    before, extracted_json, mid, extracted_terms, after = split_rendered_prompt(rendered_prompt)
     expect(
         extracted_json == canonical_json(context),
         "stripping the wrapper does not reproduce the canonical context bytes",
         failures,
     )
-    wrapper_text = before + after
+    wrapper_text = before + mid + after
 
     # PW-01: the wrapper carries none of the pinned forbidden vocabulary.
     folded_wrapper = wrapper_text.casefold()
@@ -815,6 +873,157 @@ def main() -> int:
         "evidence with empty locator", lambda: build(evidence=empty_locator), failures
     )
 
+    # --- terminology-delivery design matrix (pre-invocation spy proofs) ---
+    invocation_count = [0]
+
+    def spy_invoke(prompt: str) -> str:
+        invocation_count[0] += 1
+        return json.dumps(good_draft_output(), ensure_ascii=False)
+
+    def expect_pre_invocation_failure(label: str, ctx: Any, term: Any) -> None:
+        before_count = invocation_count[0]
+        try:
+            build_bilingual_draft_run(
+                context=ctx,
+                terminology=term,
+                model_trace=trace,
+                invoke=spy_invoke,
+                clock=lambda: "2026-10-02T00:04:00Z",
+            )
+            failures.append(f"{label} did not fail closed")
+        except BilingualDraftingError:
+            pass
+        expect(
+            invocation_count[0] == before_count,
+            f"{label} reached the invoker before failing",
+            failures,
+        )
+
+    # Same-version registry mutations fail through digest mismatch before invoke.
+    mutated_en = json.loads(TERMINOLOGY.read_text(encoding="utf-8"))
+    mutated_en["terms"][0]["en"] = "attack helicopter"
+    expect_pre_invocation_failure(
+        "changed English rendering under same version", context, mutated_en
+    )
+    mutated_ar = json.loads(TERMINOLOGY.read_text(encoding="utf-8"))
+    mutated_ar["terms"][0]["ar"] = "طائرة هجومية"
+    expect_pre_invocation_failure(
+        "changed Arabic rendering under same version", context, mutated_ar
+    )
+    mutated_category = json.loads(TERMINOLOGY.read_text(encoding="utf-8"))
+    mutated_category["terms"][0]["category"] = "rank"
+    expect_pre_invocation_failure(
+        "changed category under same version", context, mutated_category
+    )
+
+    def bound_context_with_registry(registry: Any) -> dict[str, Any]:
+        return build_approved_drafting_context(
+            entities=entities,
+            claims=claims,
+            evidence=evidence,
+            unknowns=unknowns,
+            terminology=registry,
+            created_at="2026-10-02T00:05:00Z",
+        )
+
+    def registry_with_term(term: dict[str, Any]) -> dict[str, Any]:
+        payload = json.loads(TERMINOLOGY.read_text(encoding="utf-8"))
+        payload["terms"] = [term]
+        return payload
+
+    # Unknown category fails at load, before invoke (load rejects the
+    # registry regardless of any context binding).
+    unknown_category = registry_with_term(
+        {"term_id": "TERM-X", "category": "diplomatic_status", "en": "accord", "ar": "اتفاق"}
+    )
+    expect_pre_invocation_failure(
+        "unknown terminology category", context, unknown_category
+    )
+
+    # Restricted and PW-01-only renderings, in either locale, fail the shared
+    # lexical gate before invoke.
+    for label, term in (
+        ("restricted English rendering", {"term_id": "TERM-X", "category": "technical_term", "en": "fleet readiness", "ar": "جاهزة"}),
+        ("restricted Arabic rendering", {"term_id": "TERM-X", "category": "technical_term", "en": "supply status", "ar": "الجاهزية"}),
+        ("PW-01-only English rendering", {"term_id": "TERM-X", "category": "technical_term", "en": "availability", "ar": "التوافر"}),
+        ("coordinate-like rendering", {"term_id": "TERM-X", "category": "technical_term", "en": "site 24.7136 north", "ar": "موقع"}),
+        ("forbidden category text", {"term_id": "TERM-X", "category": "readiness", "en": "status", "ar": "حالة"}),
+    ):
+        bad_registry = registry_with_term(term)
+        # A bound context is used where the registry itself loads (valid
+        # category); the forbidden-category case fails at load first, which
+        # the design permits - the shared scan still covers the field by
+        # construction because the scan walks category/en/ar uniformly.
+        try:
+            bound_ctx = bound_context_with_registry(bad_registry)
+        except BilingualDraftingError:
+            bound_ctx = context
+        expect_pre_invocation_failure(label, bound_ctx, bad_registry)
+
+    # Exact registry/Entity-name collisions fail before invoke (English
+    # case-insensitive, Arabic exact).
+    en_collision = registry_with_term(
+        {"term_id": "TERM-X", "category": "technical_term", "en": "atlas aerospace", "ar": "شركة أخرى"}
+    )
+    expect_pre_invocation_failure(
+        "English registry/Entity-name collision",
+        bound_context_with_registry(en_collision),
+        en_collision,
+    )
+    ar_collision = registry_with_term(
+        {"term_id": "TERM-X", "category": "technical_term", "en": "other company", "ar": "أطلس للصناعات الجوية"}
+    )
+    expect_pre_invocation_failure(
+        "Arabic registry/Entity-name collision",
+        bound_context_with_registry(ar_collision),
+        ar_collision,
+    )
+
+    # Terminology digits never enlarge the factual-number allowlist: a
+    # digit-bearing registry term passes its gates, but prose citing that
+    # digit is still rejected as ungrounded.
+    digit_registry = registry_with_term(
+        {"term_id": "TERM-X", "category": "technical_term", "en": "Block 2026 system", "ar": "منظومة بلوك"}
+    )
+    digit_context = bound_context_with_registry(digit_registry)
+    digit_output = copy.deepcopy(good_draft_output())
+    digit_output["units"][0]["prose"]["en"] = (
+        "Project Cedar covers 12 aircraft under the Block 2026 system as of 2024-03-15."
+    )
+    digit_result = build_bilingual_draft_run(
+        context=digit_context,
+        terminology=digit_registry,
+        model_trace=trace,
+        invoke=lambda _: json.dumps(digit_output, ensure_ascii=False),
+        clock=lambda: "2026-10-02T00:06:00Z",
+    )
+    expect(
+        digit_result["validation"]["status"] == "rejected"
+        and any("not grounded" in error for error in digit_result["validation"]["errors"]),
+        f"terminology digits enlarged the factual-number allowlist: {digit_result['validation']['errors'][:2]}",
+        failures,
+    )
+
+    # Static wrapper segments carry no terminology renderings; the renderings
+    # appear only inside the terminology block.
+    _, _, _, delivered_terms_json, _ = split_rendered_prompt(rendered_prompt)
+    for term in terminology["terms"]:
+        expect(
+            term["en"].casefold() not in wrapper_text.casefold(),
+            f"static wrapper carries registry English rendering {term['term_id']}",
+            failures,
+        )
+        expect(
+            term["ar"] not in wrapper_text,
+            f"static wrapper carries registry Arabic rendering {term['term_id']}",
+            failures,
+        )
+        expect(
+            term["en"] in delivered_terms_json and term["ar"] in delivered_terms_json,
+            f"terminology block lost the renderings of {term['term_id']}",
+            failures,
+        )
+
     # FBD-02: changed terminology bytes under the same version are refused.
     tampered_registry = json.loads(TERMINOLOGY.read_text(encoding="utf-8"))
     tampered_registry["terms"][0]["ar"] = "منظومة معدلة"
@@ -831,15 +1040,19 @@ def main() -> int:
         return 1
 
     print(
-        "Validated bounded bilingual drafting v0.7: canonical-typed scope-closed scope-preserving approved-only context with "
+        "Validated bounded bilingual drafting v0.8: canonical-typed scope-closed scope-preserving approved-only context with "
         "per-claim evidence links and roles, "
         "entity-target resolution, terminology digest binding, and a bilingual pre-invocation "
         "sensitivity gate; adapter independently re-validates hand-assembled contexts; invoker "
-        "receives exactly the canonical context serialization; strict JSON output; one shared, "
+        "receives the rendered two-block input (context block + terminology delivery block); "
+        "strict JSON output; one shared, "
         "claim-specific support set per unit; exactly-once claim accounting with explicit "
         "abstention; exact deterministic reuse of pre-written unknown statements; terminology "
-        "pairing both directions; factual-fields-only number allowlist (bookkeeping digits "
-        "rejected); bilingual restricted-detail and coordinate rejection; raw-output hashing; "
+        "pairing both directions; factual-fields-only number allowlist (bookkeeping and "
+        "terminology digits rejected); bilingual restricted-detail and coordinate rejection; "
+        "two-block terminology delivery with frozen categories, shared forbidden-vocabulary "
+        "scanning, Entity-name collision refusal, separate registry/delivery hashes, and "
+        "pre-invocation spy proofs; raw-output hashing; "
         "runtime schema validation of accepted and rejected runs; content-bound context identity "
         "reforged on the adapter path; derived adapter version; candidate-only authority."
     )
