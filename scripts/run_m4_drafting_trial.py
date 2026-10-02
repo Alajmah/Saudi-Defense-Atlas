@@ -19,6 +19,13 @@ context block embedded in that input, the context object, the registry
 acceptance digest, and the terminology delivery block — agrees with the frozen
 bytes. Transport failures produce a bounded failure report with the attempt
 count owned by `execute_draft_invocation` itself and no retry.
+
+Launch sequencing: `run_trial()` owns the ordered gate-then-invoke-then-write
+sequence (credential read and provider construction happen only after every
+gate passes); `main()` only parses arguments and gathers environment facts.
+The validator drives `run_trial()` with a spy provider factory to prove that
+any gate refusal — including a pre-existing report or sidecar — results in
+zero credential reads, zero provider constructions, and zero invoker calls.
 """
 
 from __future__ import annotations
@@ -477,27 +484,34 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-# --- Main ---
+# --- Launch sequence / Main ---
 
 
-def main() -> int:
-    args = parse_args()
+def run_trial(
+    *,
+    args: argparse.Namespace,
+    env_url: str,
+    git_head: str,
+    git_ref: str,
+    worktree_clean: bool | None,
+    require_api_key: Callable[[], str],
+    invoke_factory: Callable[..., Callable[[str], str]] = zai_invoker,
+    created_at_fn: Callable[[], str] = _utc_now,
+) -> dict[str, Any]:
+    """The full launch sequence: gates in order, one invocation, report write.
+
+    The credential is read and the provider edge is constructed only after
+    every pre-invocation gate passes, so any gate refusal — including a
+    pre-existing report or sidecar — means zero credential reads, zero
+    provider constructions, and zero invoker calls (DTD-02RRR).
+    """
+
     if args.timeout_seconds < 1:
         raise TrialGateError("--timeout-seconds must be positive")
 
     attestation = check_entitlement(args.entitlement_attestation)
-
-    git_head = _git_head(ROOT)
-    git_ref = _git_ref(ROOT)
-    worktree_clean = _worktree_clean(ROOT)
     check_git_state(git_head, worktree_clean, args.reviewed_head)
-
-    # DTD-02RR-A: artifact existence is a pre-invocation gate — the provider
-    # is never called only to discover the report cannot be written.
     check_artifacts_absent(args.output)
-
-    api_key = require_zai_api_key()
-    env_url = os.environ.get(ZAI_BASE_URL_ENV, "").strip()
     check_route_args(args.base_url, args.zai_endpoint, env_url)
     base_url, base_url_source = resolve_zai_base_url(args.base_url, args.zai_endpoint)
     validate_zai_base_url(base_url)
@@ -506,7 +520,7 @@ def main() -> int:
     fixture = load_fixture(args.fixture)
     terminology_payload = json.loads(DEFAULT_TERMINOLOGY.read_text(encoding="utf-8"))
     terminology = load_terminology(terminology_payload)
-    context = build_drafting_context_from_fixture(fixture, terminology, _utc_now())
+    context = build_drafting_context_from_fixture(fixture, terminology, created_at_fn())
     rendered_prompt, _ = prepare_draft_input(context, terminology)
 
     trace = DraftModelTrace(
@@ -514,7 +528,8 @@ def main() -> int:
         model=args.model,
         model_version="provider-managed-unknown",
     )
-    invoke = zai_invoker(
+    api_key = require_api_key()
+    invoke = invoke_factory(
         model=args.model,
         api_key=api_key,
         base_url=base_url,
@@ -559,21 +574,29 @@ def main() -> int:
     structural_status = (
         draft_run["validation"]["status"] if draft_run else "no_draft_run"
     )
-    print(
-        json.dumps(
-            {
-                "structural_status": structural_status,
-                "execution_error": execution_error is not None,
-                "invocation_count": invocation_count,
-                "elapsed_seconds": round(elapsed, 3),
-                "report_sha256": report_sha,
-                "output": str(args.output),
-            },
-            sort_keys=True,
-            allow_nan=False,
-        )
+    return {
+        "structural_status": structural_status,
+        "execution_error": execution_error is not None,
+        "invocation_count": invocation_count,
+        "elapsed_seconds": round(elapsed, 3),
+        "report_sha256": report_sha,
+        "output": str(args.output),
+    }
+
+
+def main() -> int:
+    args = parse_args()
+    summary = run_trial(
+        args=args,
+        env_url=os.environ.get(ZAI_BASE_URL_ENV, "").strip(),
+        git_head=_git_head(ROOT),
+        git_ref=_git_ref(ROOT),
+        worktree_clean=_worktree_clean(ROOT),
+        require_api_key=require_zai_api_key,
+        invoke_factory=zai_invoker,
     )
-    return 1 if execution_error else 0
+    print(json.dumps(summary, sort_keys=True, allow_nan=False))
+    return 1 if summary["execution_error"] else 0
 
 
 if __name__ == "__main__":

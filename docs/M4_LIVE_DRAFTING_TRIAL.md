@@ -46,6 +46,8 @@ The report carries an `editorial_assessment` section with `status: pending_human
 3. **Entitlement gate (DTD-01):** a non-empty `--entitlement-attestation` string is required for every live drafting call. The standing extraction entitlement does **not** cover drafting; the report records the attestation verbatim alongside an explicit `standing_extraction_entitlement_covers_drafting: false` flag.
 4. **Route gate (DTD-01R):** any combination of `--base-url`, `--zai-endpoint`, and `ZAI_BASE_URL` that creates ambiguity is refused (all pairs and the triple). The attestation must also name the route the call actually uses (e.g., "coding-plan" when the resolved URL is the Coding Plan endpoint). The report records the actual resolved base URL and its resolution source.
 
+The ordered launch sequence lives in `run_trial()`: the credential is read and the provider edge is constructed only after every gate passes. The validator drives this actual sequence with a spy provider and proves that a pre-existing report, a pre-existing sidecar, or any earlier gate refusal each yield zero credential reads, zero provider constructions, and zero invoker calls (DTD-02RRR).
+
 ## Failure path (DTD-04R / DTD-04RR)
 
 A transport or provider error produces a bounded failure report — not a crash and not a retry. The failure report preserves the exact rendered input, records the error, sets `structural_result: null`, and keeps the editorial placeholder. The attempt count is owned by `execute_draft_invocation` itself: the invoker is wrapped inside the orchestration, and the validator proves the reported count against the invoker's own call record for both the failing and succeeding paths (one call, no retry).
@@ -82,7 +84,7 @@ These travel with the hash chain (`rendered_input_sha256`, `raw_model_output_sha
 | `provider_edge` | endpoint, credential source, transport, tools, pinned reasoning |
 | `drafting_boundary_versions` | drafting adapter, extraction adapter, prompt template id/version/hash |
 | `terminology` | registry version, registry acceptance digest, delivery-payload digest, terminology file hash |
-| `trial_context` | git HEAD, ref, worktree cleanliness, Python version, fixture hash, terminology file hash |
+| `trial_context` | git HEAD, ref, worktree cleanliness, Python version, fixture hash |
 | `invocation` | attempted flag, count, rendered-input hash, raw-output hash, elapsed seconds |
 | `structural_result` | the full `AI bilingual draft run` (or `null` on transport failure) |
 | `execution_error` | transport/provider error string (or `null`) |

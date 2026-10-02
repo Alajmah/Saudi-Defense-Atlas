@@ -80,6 +80,14 @@ The attempt counter moved inside `execute_draft_invocation`: the invoker is wrap
 
 `docs/M4_LIVE_DRAFTING_TRIAL.md` now has exactly one pre-invocation gate list (the stale DTD-01/02/05 list is removed), one failure-path section, one Frozen-evidence section (the duplicated failure-text block under a second heading is removed), and a field table with a `terminology` row carrying the registry/delivery digests while `invocation` carries only attempted/count/rendered-input hash/raw-output hash/elapsed. Report version bumped to `m4-drafting-live-trial-v0.4` everywhere (the builder's validation strength changed; no live report exists to migrate).
 
+### DTD-02RRR — launch-level zero-invocation regression absent — REMEDIATED (residual round 4)
+
+`main()` is now a thin parse-and-gather wrapper; the ordered launch sequence (gates in order, credential read, provider construction, one invocation, report write) lives in `run_trial()`, which takes the credential provider and the provider factory as injected callables. The validator drives this actual sequence with a spy provider and proves the mechanical property the one-call evidence budget requires: a pre-existing report, a pre-existing sidecar, or an earlier gate refusal (reviewed-head mismatch) each result in **zero credential reads, zero provider constructions, and zero invoker calls** — and the occupied artifact is untouched. The fresh-path control run through the same sequence proves exactly one credential read, one construction, one invoker call, and a written report + sidecar carrying the frozen evidence. The report surface is unchanged, so the version remains `m4-drafting-live-trial-v0.4`.
+
+### DTD-DOC-01 — trial_context field row claimed the terminology file hash — CORRECTED (residual round 4)
+
+The `trial_context` row in the driver-contract field table no longer lists the terminology file hash; that hash lives in the `terminology` row (`terminology_file_sha256`), which was already correct. The contract also now states that the launch sequence itself is regression-tested with a spy provider.
+
 ## Freeze
 
 This record completes remediation of DTD-01 through DTD-05. The remediated head awaits exact-head CI and re-review.

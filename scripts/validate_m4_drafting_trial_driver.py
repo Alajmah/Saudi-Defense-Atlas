@@ -14,6 +14,7 @@ sidecar, and deterministic serialization.
 
 from __future__ import annotations
 
+import argparse
 import copy
 import hashlib
 import json
@@ -40,6 +41,7 @@ from scripts.run_m4_drafting_trial import (  # noqa: E402
     check_route_args,
     execute_draft_invocation,
     load_fixture,
+    run_trial,
     write_report_with_sidecar,
 )
 from services.intelligence.bilingual_drafting import (  # noqa: E402
@@ -474,6 +476,137 @@ def main() -> int:
             failures,
         )
 
+    # --- DTD-02RRR: launch-level regression through the actual launch
+    # sequence — a pre-existing report or sidecar (or any earlier gate
+    # refusal) means zero credential reads, zero provider constructions,
+    # and zero invoker calls.
+    def make_launch_args(output: Path) -> argparse.Namespace:
+        return argparse.Namespace(
+            fixture=DEFAULT_FIXTURE,
+            model="glm-5.3",
+            zai_endpoint="coding-plan",
+            base_url=None,
+            reviewed_head="a" * 40,
+            entitlement_attestation="coding-plan drafting attestation",
+            timeout_seconds=30,
+            output=output,
+        )
+
+    def spy_launch(output: Path, reviewed_head: str = "a" * 40):
+        key_reads: list[int] = []
+        constructions: list[dict] = []
+        invoker_calls: list[str] = []
+
+        def require_key() -> str:
+            key_reads.append(1)
+            return "spy-key"
+
+        def factory(**kwargs):
+            constructions.append(kwargs)
+
+            def spy(prompt: str) -> str:
+                invoker_calls.append(prompt)
+                return raw_good
+
+            return spy
+
+        args = make_launch_args(output)
+        args.reviewed_head = reviewed_head
+        try:
+            summary = run_trial(
+                args=args,
+                env_url="",
+                git_head="a" * 40,
+                git_ref="refs/heads/m4/live-drafting-driver",
+                worktree_clean=True,
+                require_api_key=require_key,
+                invoke_factory=factory,
+                created_at_fn=lambda: "2026-10-03T00:00:00Z",
+            )
+            outcome = "ran"
+        except TrialGateError:
+            summary = None
+            outcome = "refused"
+        return outcome, summary, key_reads, constructions, invoker_calls
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Pre-existing report: the launch refuses with zero provider activity.
+        occupied_report = Path(tmpdir) / "occupied" / "report.json"
+        occupied_report.parent.mkdir(parents=True)
+        occupied_report.write_text("occupied", encoding="utf-8")
+        outcome, _, key_reads, constructions, invoker_calls = spy_launch(
+            occupied_report
+        )
+        expect(outcome == "refused", "launch with pre-existing report did not refuse", failures)
+        expect(
+            not key_reads and not constructions and not invoker_calls,
+            "pre-existing report did not prevent credential read / provider "
+            "construction / invoker calls",
+            failures,
+        )
+        expect(
+            occupied_report.read_text(encoding="utf-8") == "occupied",
+            "refused launch clobbered the occupied report",
+            failures,
+        )
+
+        # Pre-existing sidecar only: same zero-activity refusal.
+        occupied_sidecar_dir = Path(tmpdir) / "sidecar-only"
+        sidecar_target = occupied_sidecar_dir / "report.json"
+        sidecar_target.parent.mkdir(parents=True)
+        sidecar_target.with_name(sidecar_target.name + ".sha256").write_text(
+            "occupied", encoding="utf-8"
+        )
+        outcome, _, key_reads, constructions, invoker_calls = spy_launch(
+            sidecar_target
+        )
+        expect(outcome == "refused", "launch with pre-existing sidecar did not refuse", failures)
+        expect(
+            not key_reads and not constructions and not invoker_calls,
+            "pre-existing sidecar did not prevent credential read / provider "
+            "construction / invoker calls",
+            failures,
+        )
+
+        # An earlier gate refusal (reviewed-head mismatch) is equally silent.
+        fresh_gate = Path(tmpdir) / "gate" / "report.json"
+        outcome, _, key_reads, constructions, invoker_calls = spy_launch(
+            fresh_gate, reviewed_head="b" * 40
+        )
+        expect(outcome == "refused", "launch with mismatched reviewed head did not refuse", failures)
+        expect(
+            not key_reads and not constructions and not invoker_calls,
+            "reviewed-head refusal still reached the provider",
+            failures,
+        )
+
+        # Fresh paths: the launch runs end to end through the same sequence —
+        # one credential read, one provider construction, one invoker call.
+        fresh = Path(tmpdir) / "fresh" / "report.json"
+        outcome, summary, key_reads, constructions, invoker_calls = spy_launch(fresh)
+        expect(outcome == "ran", f"fresh launch refused: {summary}", failures)
+        expect(len(key_reads) == 1, "fresh launch read the credential more than once", failures)
+        expect(len(constructions) == 1, "fresh launch built the provider edge more than once", failures)
+        expect(
+            summary is not None
+            and summary["invocation_count"] == 1 == len(invoker_calls)
+            and summary["structural_status"] == "accepted_for_editorial_review",
+            "fresh launch summary wrong",
+            failures,
+        )
+        written = json.loads(fresh.read_text(encoding="utf-8"))
+        expect(
+            written["evidence"]["raw_model_output"] == raw_good
+            and written["invocation"]["count"] == 1,
+            "launch-written report lost frozen evidence or provenance",
+            failures,
+        )
+        expect(
+            fresh.with_name(fresh.name + ".sha256").exists(),
+            "launch did not write the sidecar",
+            failures,
+        )
+
     if failures:
         print("M4 drafting trial driver validation FAILED:")
         for failure in failures:
@@ -485,13 +618,17 @@ def main() -> int:
         "ambiguity in every combination, entitlement, attestation-route binding, git state "
         "with reviewed-head match, artifact absence for report and sidecar, overwrite "
         "refusal including exclusive creation under a lost existence race) fail closed "
-        "deterministically; the orchestration path owns the attempt count and proves it "
-        "against the invoker's own call record for both the failing and succeeding paths; "
-        "the report builder freezes exact rendered input and raw output bytes and verifies "
-        "the complete hash chain — raw output, rendered input, the embedded context block, "
-        "the context object, the registry digest, and the delivery block — detecting every "
-        "tampered digest and post-invocation context mutation; serialization is "
-        "deterministic and artifacts are immutable."
+        "deterministically; the actual launch sequence (run_trial) is driven end to end "
+        "with a spy provider — a pre-existing report, a pre-existing sidecar, or an "
+        "earlier gate refusal each yield zero credential reads, zero provider "
+        "constructions, and zero invoker calls, while a fresh launch runs once and "
+        "writes report plus sidecar with frozen evidence; the orchestration path owns the "
+        "attempt count and proves it against the invoker's own call record for both the "
+        "failing and succeeding paths; the report builder freezes exact rendered input "
+        "and raw output bytes and verifies the complete hash chain — raw output, rendered "
+        "input, the embedded context block, the context object, the registry digest, and "
+        "the delivery block — detecting every tampered digest and post-invocation "
+        "context mutation; serialization is deterministic and artifacts are immutable."
     )
     return 0
 
