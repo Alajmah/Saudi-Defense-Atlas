@@ -64,6 +64,22 @@ A `--reviewed-head` argument is now required and must exactly match the current 
 
 `docs/M4_LIVE_DRAFTING_TRIAL.md` now says `m4-drafting-live-trial-v0.3` (the implementation version after this round).
 
+### DTD-02RR-A — artifact existence not checked before invocation; writer not exclusive — REMEDIATED (residual round 3)
+
+`check_artifacts_absent` is a new pre-invocation gate called in `main()` before the API key is even read, so the provider is never invoked when the report or sidecar already exists. The writer no longer uses `exists() -> write_bytes()`; both files are created exclusively via `open(path, "xb")` (`_write_exclusive`), converting `FileExistsError` into the same `TrialGateError`. The validator tests the pre-invocation gate (existing report, sidecar-only, fresh paths) and proves exclusivity survives a lost existence race by making `Path.exists` lie while the file physically exists — the write still refuses and the occupied artifact is untouched.
+
+### DTD-02RR-B — hash chain only partially cross-checked; context check a no-op — REMEDIATED (residual round 3)
+
+The no-op `pass` is removed. `build_trial_report` now verifies the complete chain whenever a draft run exists: `raw_output_sha256` against the frozen raw output; `rendered_input_sha256` against the frozen rendered input; `input_context_sha256` against BOTH the context block recovered from the frozen rendered input AND a fresh canonical serialization of the live context object; `prompt_trace.terminology_registry_sha256` against the registry digest recomputed from the terminology payload (which must also equal the context's `terminology_sha256`); `prompt_trace.terminology_delivery_sha256` against the delivery block recovered from the frozen rendered input. The report's `terminology.registry_acceptance_sha256` / `delivery_payload_sha256` now carry these same verified digests. All five tamper classes plus a post-invocation context mutation are regression-tested; each raises before the report is built.
+
+### DTD-04RR — invocation counting outside the orchestration; validator hard-coded the count — REMEDIATED (residual round 3)
+
+The attempt counter moved inside `execute_draft_invocation`: the invoker is wrapped within the orchestration, which returns `attempts` as part of its result tuple; `main()` no longer wraps or counts anything. The validator's fakes record their own calls, and the test asserts the orchestration-returned count equals the invoker-observed call count (exactly 1) on both the failing and succeeding paths. Report provenance is built from the orchestration-derived values, never hard-coded.
+
+### Living contract — duplicated sections and misplaced field — CORRECTED (residual round 3)
+
+`docs/M4_LIVE_DRAFTING_TRIAL.md` now has exactly one pre-invocation gate list (the stale DTD-01/02/05 list is removed), one failure-path section, one Frozen-evidence section (the duplicated failure-text block under a second heading is removed), and a field table with a `terminology` row carrying the registry/delivery digests while `invocation` carries only attempted/count/rendered-input hash/raw-output hash/elapsed. Report version bumped to `m4-drafting-live-trial-v0.4` everywhere (the builder's validation strength changed; no live report exists to migrate).
+
 ## Freeze
 
 This record completes remediation of DTD-01 through DTD-05. The remediated head awaits exact-head CI and re-review.

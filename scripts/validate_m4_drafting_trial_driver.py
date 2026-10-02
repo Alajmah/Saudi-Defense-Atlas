@@ -2,15 +2,19 @@
 """Validate the M4 live drafting trial driver without network calls.
 
 Tests the actual report builder, the orchestration path (with both a
-succeeding and a failing fake invoker), every pre-invocation gate (route
-ambiguity, entitlement, git-state, overwrite refusal), the hash-chain
-consistency check, the invocation-attempt provenance, the editorial
-placeholder, the qualification flags, the sidecar, and deterministic
-serialization.
+succeeding and a failing fake invoker, proving the attempt count from the
+orchestration itself against the invoker's own call record), every
+pre-invocation gate (route ambiguity, entitlement, git-state, artifact
+existence, overwrite refusal including exclusive creation under a lost
+existence race), the complete hash-chain consistency check (raw output,
+rendered input, embedded context block, context object, registry digest,
+delivery block), the editorial placeholder, the qualification flags, the
+sidecar, and deterministic serialization.
 """
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import sys
@@ -29,6 +33,7 @@ from scripts.run_m4_drafting_trial import (  # noqa: E402
     TrialGateError,
     build_drafting_context_from_fixture,
     build_trial_report,
+    check_artifacts_absent,
     check_attestation_route_binding,
     check_entitlement,
     check_git_state,
@@ -39,7 +44,6 @@ from scripts.run_m4_drafting_trial import (  # noqa: E402
 )
 from services.intelligence.bilingual_drafting import (  # noqa: E402
     DraftModelTrace,
-    build_bilingual_draft_run,
     load_terminology,
     prepare_draft_input,
 )
@@ -220,24 +224,39 @@ def main() -> int:
         failures.append("route-bound attestation was rejected")
 
     # --- DTD-04R: orchestration path with failing invoker ---
+    failing_calls: list[str] = []
+
     def failing_invoke(prompt: str) -> str:
+        failing_calls.append(prompt)
         raise RuntimeError("Z.ai API returned HTTP 500: internal error")
 
-    fail_run, fail_error, fail_raw, fail_elapsed = execute_draft_invocation(
-        context=context,
-        terminology=terminology,
-        model_trace=trace,
-        invoke_fn=failing_invoke,
+    fail_run, fail_error, fail_raw, fail_elapsed, fail_attempts = (
+        execute_draft_invocation(
+            context=context,
+            terminology=terminology,
+            model_trace=trace,
+            invoke_fn=failing_invoke,
+        )
     )
     expect(fail_run is None, "failing invoker produced a draft run", failures)
     expect(fail_error is not None, "failing invoker did not produce an error", failures)
     expect(fail_raw is None, "failing invoker produced raw output", failures)
+    # DTD-04RR: the attempt count comes from the orchestration itself and
+    # must equal what the invoker actually observed — one call, no retry.
+    expect(
+        fail_attempts == len(failing_calls) == 1,
+        f"failing invocation count {fail_attempts} != invoker-observed {len(failing_calls)}",
+        failures,
+    )
 
     # --- Success path through the orchestration ---
+    ok_calls: list[str] = []
+
     def fake_invoke(prompt: str) -> str:
+        ok_calls.append(prompt)
         return raw_good
 
-    ok_run, ok_error, ok_raw, ok_elapsed = execute_draft_invocation(
+    ok_run, ok_error, ok_raw, ok_elapsed, ok_attempts = execute_draft_invocation(
         context=context,
         terminology=terminology,
         model_trace=trace,
@@ -246,14 +265,21 @@ def main() -> int:
     expect(ok_error is None, f"succeeding invoker errored: {ok_error}", failures)
     expect(ok_raw == raw_good, "raw output was not captured verbatim", failures)
     expect(
+        ok_attempts == len(ok_calls) == 1,
+        f"success invocation count {ok_attempts} != invoker-observed {len(ok_calls)}",
+        failures,
+    )
+    expect(
         ok_run is not None and ok_run["validation"]["status"] == "accepted_for_editorial_review",
         f"draft run not accepted: {ok_run and ok_run['validation']['errors'][:2]}",
         failures,
     )
 
-    # --- Build the report through the actual builder ---
+    # --- Build the report through the actual builder, with the
+    # orchestration-derived attempt provenance (not hard-coded values) ---
     report = build_report(
-        terminology_payload, context, rendered, ok_raw, ok_run, None, True, 1
+        terminology_payload, context, rendered, ok_raw, ok_run, None,
+        ok_attempts > 0, ok_attempts,
     )
     expect(report["report_version"] == REPORT_VERSION, "report version drifted", failures)
     expect(
@@ -276,7 +302,8 @@ def main() -> int:
         failures,
     )
     expect(
-        report["invocation"]["attempted"] is True and report["invocation"]["count"] == 1,
+        report["invocation"]["attempted"] is True
+        and report["invocation"]["count"] == ok_attempts == 1,
         "invocation provenance wrong",
         failures,
     )
@@ -293,13 +320,14 @@ def main() -> int:
         failures,
     )
 
-    # --- Failure report through the actual builder ---
+    # --- Failure report through the actual builder (orchestration-derived) ---
     failure_report = build_report(
-        terminology_payload, context, rendered, None, None, "Z.ai API returned HTTP 500: internal error", True, 1
+        terminology_payload, context, rendered, None, None,
+        "Z.ai API returned HTTP 500: internal error", fail_attempts > 0, fail_attempts,
     )
     expect(
         failure_report["invocation"]["attempted"] is True
-        and failure_report["invocation"]["count"] == 1,
+        and failure_report["invocation"]["count"] == fail_attempts == 1,
         "failure report invocation provenance wrong",
         failures,
     )
@@ -316,14 +344,84 @@ def main() -> int:
         failures,
     )
 
-    # --- DTD-02R: hash-chain consistency ---
-    tampered = dict(ok_run)
-    tampered["raw_output_sha256"] = "0" * 64
+    # --- DTD-02RR-B: complete hash-chain consistency ---
+    def tampered_run(**overrides) -> dict[str, Any]:
+        clone = copy.deepcopy(ok_run)
+        for key, value in overrides.items():
+            if key == "prompt_trace":
+                trace_clone = dict(clone["prompt_trace"])
+                trace_clone.update(value)
+                clone["prompt_trace"] = trace_clone
+            else:
+                clone[key] = value
+        return clone
+
+    for label, overrides in (
+        ("raw_output_sha256", {"raw_output_sha256": "0" * 64}),
+        (
+            "input_context_sha256",
+            {"input_context_sha256": "0" * 64},
+        ),
+        (
+            "prompt_trace.terminology_registry_sha256",
+            {"prompt_trace": {"terminology_registry_sha256": "0" * 64}},
+        ),
+        (
+            "prompt_trace.terminology_delivery_sha256",
+            {"prompt_trace": {"terminology_delivery_sha256": "0" * 64}},
+        ),
+        (
+            "prompt_trace.rendered_input_sha256",
+            {"prompt_trace": {"rendered_input_sha256": "0" * 64}},
+        ),
+    ):
+        try:
+            build_report(
+                terminology_payload, context, rendered, ok_raw,
+                tampered_run(**overrides), None, True, 1,
+            )
+            failures.append(f"tampered {label} was not detected")
+        except RuntimeError:
+            pass
+
+    # A context mutated after invocation no longer matches the frozen chain.
+    mutated_context = copy.deepcopy(context)
+    mutated_context["claims"][0]["evidence_links"][0]["evidence_id"] = "SDA-EVID-TAMPERED"
     try:
-        build_report(terminology_payload, context, rendered, ok_raw, tampered, None, True, 1)
-        failures.append("tampered draft-run hash chain was not detected")
+        build_report(
+            terminology_payload, mutated_context, rendered, ok_raw, ok_run, None, True, 1
+        )
+        failures.append("post-invocation context mutation was not detected")
     except RuntimeError:
         pass
+
+    # --- DTD-02RR-A: artifact existence is a pre-invocation gate ---
+    with tempfile.TemporaryDirectory() as tmpdir:
+        absent_ok = Path(tmpdir) / "fresh" / "report.json"
+        try:
+            check_artifacts_absent(absent_ok)
+        except TrialGateError:
+            failures.append("check_artifacts_absent refused fresh paths")
+
+        existing_report = Path(tmpdir) / "r" / "report.json"
+        existing_report.parent.mkdir(parents=True)
+        existing_report.write_text("occupied", encoding="utf-8")
+        expect_gate_error(
+            "check_artifacts_absent with existing report",
+            lambda: check_artifacts_absent(existing_report),
+            failures,
+        )
+
+        existing_sidecar = Path(tmpdir) / "s" / "report.json"
+        existing_sidecar.parent.mkdir(parents=True)
+        existing_sidecar.with_name(existing_sidecar.name + ".sha256").write_text(
+            "occupied", encoding="utf-8"
+        )
+        expect_gate_error(
+            "check_artifacts_absent with existing sidecar only",
+            lambda: check_artifacts_absent(existing_sidecar),
+            failures,
+        )
 
     # --- DTD-02R: immutable artifact writer ---
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -348,6 +446,26 @@ def main() -> int:
             lambda: write_report_with_sidecar(out_c, report),
             failures,
         )
+        # Exclusive creation holds even if the existence check loses a race:
+        # with exists() lying, "xb" creation of the occupied path still refuses.
+        out_d = Path(tmpdir) / "d" / "report.json"
+        out_d.parent.mkdir(parents=True)
+        out_d.write_text("occupied", encoding="utf-8")
+        original_exists = Path.exists
+        Path.exists = lambda self: False  # type: ignore[assignment]
+        try:
+            expect_gate_error(
+                "exclusive creation under lost existence race",
+                lambda: write_report_with_sidecar(out_d, report),
+                failures,
+            )
+        finally:
+            Path.exists = original_exists  # type: ignore[assignment]
+        expect(
+            out_d.read_text(encoding="utf-8") == "occupied",
+            "lost-race write clobbered the occupied artifact",
+            failures,
+        )
         # Round-trip: the reparsed report retains the frozen bytes.
         reparsed = json.loads(out_a.read_text(encoding="utf-8"))
         expect(
@@ -365,13 +483,15 @@ def main() -> int:
     print(
         "Validated the M4 live drafting trial driver: all pre-invocation gates (route "
         "ambiguity in every combination, entitlement, attestation-route binding, git state "
-        "with reviewed-head match, overwrite refusal for report and sidecar) fail closed "
-        "deterministically; the orchestration path runs a failing invoker to a bounded "
-        "failure report with invocation_attempted/count provenance; the report builder "
-        "freezes exact rendered input and raw output bytes with matching hashes, records "
-        "registry version alongside digests, carries a reviewed-head pin, separates the "
-        "editorial placeholder, and detects tampered draft-run hash chains; serialization "
-        "is deterministic and sidecars are immutable."
+        "with reviewed-head match, artifact absence for report and sidecar, overwrite "
+        "refusal including exclusive creation under a lost existence race) fail closed "
+        "deterministically; the orchestration path owns the attempt count and proves it "
+        "against the invoker's own call record for both the failing and succeeding paths; "
+        "the report builder freezes exact rendered input and raw output bytes and verifies "
+        "the complete hash chain — raw output, rendered input, the embedded context block, "
+        "the context object, the registry digest, and the delivery block — detecting every "
+        "tampered digest and post-invocation context mutation; serialization is "
+        "deterministic and artifacts are immutable."
     )
     return 0
 

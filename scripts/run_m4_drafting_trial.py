@@ -8,13 +8,17 @@ Pre-invocation gates (all fail closed, all individually testable):
   extraction entitlement does not cover drafting.
 - `check_route_args`: any combination of `--base-url`, `--zai-endpoint`, and
   `ZAI_BASE_URL` that creates route ambiguity is refused.
-- `write_report_with_sidecar`: refuses to overwrite an existing file.
+- `check_artifacts_absent`: neither the report nor the sidecar may exist before
+  the provider is invoked; the writer then creates both exclusively (`"xb"`),
+  so no overwrite path exists even under a lost race.
 
 Evidence immutability: the report embeds the exact rendered input and raw
 model output verbatim alongside their hashes, and the report builder verifies
-the embedded draft run's hash chain agrees with the frozen bytes. Transport
-failures produce a bounded failure report with `invocation_attempted` /
-`invocation_count` provenance and no retry.
+the embedded draft run's complete hash chain — raw output, rendered input, the
+context block embedded in that input, the context object, the registry
+acceptance digest, and the terminology delivery block — agrees with the frozen
+bytes. Transport failures produce a bounded failure report with the attempt
+count owned by `execute_draft_invocation` itself and no retry.
 """
 
 from __future__ import annotations
@@ -44,16 +48,17 @@ from scripts.run_m4_model_extraction_trial import (  # noqa: E402
 )
 from services.intelligence.bilingual_drafting import (  # noqa: E402
     ADAPTER_VERSION as DRAFTING_ADAPTER_VERSION,
-    BilingualDraftingError,
     DRAFT_PROMPT_TEMPLATE_ID,
     DRAFT_PROMPT_TEMPLATE_VERSION,
     DraftModelTrace,
+    _canonical_json,
     build_approved_drafting_context,
     build_bilingual_draft_run,
     draft_prompt_template_sha256,
     load_terminology,
     prepare_draft_input,
     split_rendered_prompt,
+    terminology_digest,
 )
 from services.intelligence.model_extraction_trial import (  # noqa: E402
     ADAPTER_VERSION as EXTRACTION_ADAPTER_VERSION,
@@ -62,7 +67,7 @@ from services.intelligence.model_extraction_trial import (  # noqa: E402
 DEFAULT_FIXTURE = ROOT / "tests" / "fixtures" / "m4-drafting-trial-v0.1.json"
 DEFAULT_TERMINOLOGY = ROOT / "data" / "terminology" / "bilingual-terminology-v0.1.json"
 
-REPORT_VERSION = "m4-drafting-live-trial-v0.3"
+REPORT_VERSION = "m4-drafting-live-trial-v0.4"
 EDITORIAL_DIMENSIONS = [
     "Arabic fluency",
     "English fluency",
@@ -161,6 +166,20 @@ def check_attestation_route_binding(attestation: str, resolved_base_url: str) ->
             )
 
 
+def sidecar_path(output: Path) -> Path:
+    return output.with_name(output.name + ".sha256")
+
+
+def check_artifacts_absent(output: Path) -> None:
+    """Refuse before invocation if either artifact exists (DTD-02RR-A)."""
+
+    if output.exists():
+        raise TrialGateError(f"refusing to overwrite existing artifact: {output}")
+    sidecar = sidecar_path(output)
+    if sidecar.exists():
+        raise TrialGateError(f"refusing to overwrite existing artifact: {sidecar}")
+
+
 # --- Fixture / context / invocation ---
 
 
@@ -191,12 +210,20 @@ def execute_draft_invocation(
     terminology: dict,
     model_trace: DraftModelTrace,
     invoke_fn: Callable[[str], str],
-) -> tuple[dict[str, Any] | None, str | None, str | None, float]:
-    """Run one invocation; return (draft_run, error, raw_output, elapsed)."""
+) -> tuple[dict[str, Any] | None, str | None, str | None, float, int]:
+    """Run one invocation; return (draft_run, error, raw_output, elapsed, attempts).
 
+    The attempt count is owned by this orchestration, not by the caller: the
+    invoker is wrapped here, so `attempts` is exactly how many times the
+    provider was called (one on success or failure — no retry exists).
+    """
+
+    attempts = 0
     raw_holder: list[str] = []
 
     def capturing(prompt: str) -> str:
+        nonlocal attempts
+        attempts += 1
         result = invoke_fn(prompt)
         raw_holder.append(result)
         return result
@@ -215,7 +242,7 @@ def execute_draft_invocation(
         error = str(exc)[:512]
     elapsed = time.monotonic() - started
     raw_output = raw_holder[0] if raw_holder else None
-    return draft_run, error, raw_output, elapsed
+    return draft_run, error, raw_output, elapsed, attempts
 
 
 # --- Report builder (factored for deterministic validation) ---
@@ -253,16 +280,45 @@ def build_trial_report(
         else None
     )
 
-    # DTD-02R: the embedded draft run's hash chain must agree with the
-    # frozen bytes, when both exist.
-    if draft_run is not None and raw_model_output is not None:
+    # DTD-02RR-B: the embedded draft run's complete hash chain must agree
+    # with the frozen evidence bytes — raw output, rendered input, the
+    # context block embedded in that input, the live context object, the
+    # registry acceptance digest, and the terminology delivery block.
+    _, context_json, _, delivery_json, _ = split_rendered_prompt(rendered_prompt)
+    context_sha_frozen = hashlib.sha256(context_json.encode("utf-8")).hexdigest()
+    delivery_sha_frozen = hashlib.sha256(delivery_json.encode("utf-8")).hexdigest()
+    registry_sha = terminology_digest(terminology)
+    if draft_run is not None:
+        prompt_trace = draft_run.get("prompt_trace", {})
         if draft_run.get("raw_output_sha256") != raw_sha:
             raise RuntimeError(
                 "draft run raw_output_sha256 does not match the frozen raw output bytes"
             )
-        if draft_run.get("input_context_sha256") != context.get("_context_sha_for_check"):
-            pass  # context hash checked via prompt_trace below
-        prompt_trace = draft_run.get("prompt_trace", {})
+        if draft_run.get("input_context_sha256") != context_sha_frozen:
+            raise RuntimeError(
+                "draft run input_context_sha256 does not match the context block "
+                "embedded in the frozen rendered input"
+            )
+        if draft_run.get("input_context_sha256") != hashlib.sha256(
+            _canonical_json(dict(context)).encode("utf-8")
+        ).hexdigest():
+            raise RuntimeError(
+                "draft run input_context_sha256 does not match the trial context object"
+            )
+        if context.get("terminology_sha256") != registry_sha:
+            raise RuntimeError(
+                "context terminology_sha256 does not match the terminology registry digest"
+            )
+        if prompt_trace.get("terminology_registry_sha256") != registry_sha:
+            raise RuntimeError(
+                "draft run terminology_registry_sha256 does not match the "
+                "terminology registry digest"
+            )
+        if prompt_trace.get("terminology_delivery_sha256") != delivery_sha_frozen:
+            raise RuntimeError(
+                "draft run terminology_delivery_sha256 does not match the delivery "
+                "block embedded in the frozen rendered input"
+            )
         if prompt_trace.get("rendered_input_sha256") != rendered_sha:
             raise RuntimeError(
                 "draft run rendered_input_sha256 does not match the frozen rendered input bytes"
@@ -272,7 +328,6 @@ def build_trial_report(
         draft_run is not None
         and draft_run.get("validation", {}).get("status") == "accepted_for_editorial_review"
     )
-    _, _, _, delivery_json, _ = split_rendered_prompt(rendered_prompt)
 
     return {
         "report_version": REPORT_VERSION,
@@ -309,10 +364,8 @@ def build_trial_report(
         },
         "terminology": {
             "registry_version": terminology["version"],
-            "registry_acceptance_sha256": context["terminology_sha256"],
-            "delivery_payload_sha256": hashlib.sha256(
-                delivery_json.encode("utf-8")
-            ).hexdigest(),
+            "registry_acceptance_sha256": registry_sha,
+            "delivery_payload_sha256": delivery_sha_frozen,
             "terminology_file_sha256": _file_sha256(terminology_path),
         },
         "trial_context": {
@@ -363,21 +416,29 @@ def build_trial_report(
 # --- Immutable artifact writer ---
 
 
-def write_report_with_sidecar(output: Path, report: dict[str, Any]) -> str:
-    """Write the report + sidecar; refuse if either file already exists (DTD-02R)."""
+def _write_exclusive(path: Path, payload: bytes) -> None:
+    """Create `path` exclusively (`"xb"`); a lost existence race still refuses."""
 
-    sidecar = output.with_name(output.name + ".sha256")
-    if output.exists():
-        raise TrialGateError(f"refusing to overwrite existing artifact: {output}")
-    if sidecar.exists():
-        raise TrialGateError(f"refusing to overwrite existing artifact: {sidecar}")
+    try:
+        with open(path, "xb") as handle:
+            handle.write(payload)
+    except FileExistsError as exc:
+        raise TrialGateError(f"refusing to overwrite existing artifact: {path}") from exc
+
+
+def write_report_with_sidecar(output: Path, report: dict[str, Any]) -> str:
+    """Write the report + sidecar via exclusive creation; never overwrite (DTD-02RR-A)."""
+
+    check_artifacts_absent(output)
     output.parent.mkdir(parents=True, exist_ok=True)
     report_bytes = (
         json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
     ).encode("utf-8")
-    output.write_bytes(report_bytes)
-    report_sha = hashlib.sha256(output.read_bytes()).hexdigest()
-    sidecar.write_bytes(f"{report_sha}  {output.name}\n".encode("utf-8"))
+    _write_exclusive(output, report_bytes)
+    report_sha = hashlib.sha256(report_bytes).hexdigest()
+    _write_exclusive(
+        sidecar_path(output), f"{report_sha}  {output.name}\n".encode("utf-8")
+    )
     return report_sha
 
 
@@ -431,6 +492,10 @@ def main() -> int:
     worktree_clean = _worktree_clean(ROOT)
     check_git_state(git_head, worktree_clean, args.reviewed_head)
 
+    # DTD-02RR-A: artifact existence is a pre-invocation gate — the provider
+    # is never called only to discover the report cannot be written.
+    check_artifacts_absent(args.output)
+
     api_key = require_zai_api_key()
     env_url = os.environ.get(ZAI_BASE_URL_ENV, "").strip()
     check_route_args(args.base_url, args.zai_endpoint, env_url)
@@ -456,17 +521,13 @@ def main() -> int:
         timeout_seconds=args.timeout_seconds,
     )
 
-    attempt_counter = [0]
-
-    def counting_invoke(prompt: str) -> str:
-        attempt_counter[0] += 1
-        return invoke(prompt)
-
-    draft_run, execution_error, raw_output, elapsed = execute_draft_invocation(
-        context=context,
-        terminology=terminology,
-        model_trace=trace,
-        invoke_fn=counting_invoke,
+    draft_run, execution_error, raw_output, elapsed, invocation_count = (
+        execute_draft_invocation(
+            context=context,
+            terminology=terminology,
+            model_trace=trace,
+            invoke_fn=invoke,
+        )
     )
 
     report = build_trial_report(
@@ -477,8 +538,8 @@ def main() -> int:
         raw_model_output=raw_output,
         draft_run=draft_run,
         execution_error=execution_error,
-        invocation_attempted=attempt_counter[0] > 0,
-        invocation_count=attempt_counter[0],
+        invocation_attempted=invocation_count > 0,
+        invocation_count=invocation_count,
         requested_model=args.model,
         base_url=base_url,
         base_url_source=base_url_source,
@@ -503,7 +564,7 @@ def main() -> int:
             {
                 "structural_status": structural_status,
                 "execution_error": execution_error is not None,
-                "invocation_count": attempt_counter[0],
+                "invocation_count": invocation_count,
                 "elapsed_seconds": round(elapsed, 3),
                 "report_sha256": report_sha,
                 "output": str(args.output),
