@@ -23,7 +23,7 @@ The complete model input is the reviewed instruction wrapper (`m4-bilingual-draf
 The wrapper is reviewed as instructions-only. The validators mechanically prove a precise, enumerated set of properties — not a generic no-factual-payload theorem:
 
 - **round-trip proof:** stripping the wrapper from any rendered input reproduces the canonical context bytes exactly;
-- **no numeric payload:** the wrapper contains no digit characters, so every number in the model input comes from the context (whose factual fields the number allowlist governs);
+- **no digits in the static wrapper:** the wrapper contains no digit characters. Complete-input digits may come from the context or from terminology data; only context factual fields authorize numbers in generated prose.
 - **no Arabic script in the static wrapper:** the wrapper is English-only, so every Arabic string in the model input comes from the typed data blocks — the context (names, statements) or the terminology block (registry Arabic renderings);
 - **no forbidden vocabulary:** the wrapper carries none of the pinned `WRAPPER_FORBIDDEN_VOCABULARY` — every restricted marker in either locale plus the operational-domain terms (availability, posture, movement, coordinate forms) the first template draft quoted before being reworded;
 - **fixture-overlap check:** no string from the context's free-text and identifier surfaces — names, identities, predicates, typed claim values, validity dates, scope notes and entity references, locator text, unknown aspects and statements — appears in the wrapper text;

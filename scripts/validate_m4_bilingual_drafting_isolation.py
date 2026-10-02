@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Isolation checks for the bounded bilingual drafting projection.
 
-Proves the boundary properties beyond the happy path: the model input is only
-the bounded approved context; the pre-invocation sensitivity gate is bilingual;
+Proves the boundary properties beyond the happy path: the model input is the
+static wrapper plus two typed data blocks — the canonical context and the
+bounded terminology-delivery block; the pre-invocation sensitivity gate is bilingual;
 conflicts fail closed at the builder and hand-assembled contexts at the
 adapter; the number allowlist excludes bookkeeping digits and covers Arabic
 prose including Arabic-Indic digits; unknown meaning is preserved by exact
