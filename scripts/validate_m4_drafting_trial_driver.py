@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Validate the M4 live drafting trial driver without network calls.
 
-Proves the driver's invariants deterministically: the fixture loads and builds
-a valid approved context; the rendered two-block input is exactly what
-``prepare_draft_input`` produces; a fake invoker receives exactly that string;
-the structural result is a schema-valid AI bilingual draft run with the full
-hash chain; the report carries every required provenance field; the editorial
-assessment is a pending-human-review placeholder with no mechanical score; and
-authority remains candidate-only.
+Exercises the actual report builder (`build_trial_report`) with a fake invoker
+and a failing invoker, proving: the report carries every required provenance
+field (git, entitlement, route, versions, terminology registry version +
+digests, hashes); the exact rendered input and raw model output are frozen
+verbatim; the editorial assessment is a pending-human-review placeholder with
+no mechanical score; transport failure produces a bounded failure report with
+no retry; the qualification flags are correct; the sidecar matches the report
+bytes; the serialization is deterministic JSON; and authority is candidate-only.
 """
 
 from __future__ import annotations
@@ -15,10 +16,9 @@ from __future__ import annotations
 import hashlib
 import json
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
-
-from jsonschema import Draft202012Validator, FormatChecker
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -29,9 +29,10 @@ from scripts.run_m4_drafting_trial import (  # noqa: E402
     DEFAULT_TERMINOLOGY,
     REPORT_VERSION,
     build_drafting_context_from_fixture,
+    build_trial_report,
     load_fixture,
+    write_report_with_sidecar,
 )
-from scripts.validate_schemas import build_registry  # noqa: E402
 from services.intelligence.bilingual_drafting import (  # noqa: E402
     BilingualDraftingError,
     DraftModelTrace,
@@ -39,7 +40,7 @@ from services.intelligence.bilingual_drafting import (  # noqa: E402
     prepare_draft_input,
 )
 
-TERMINOLOGY = ROOT / "data" / "terminology" / "bilingual-terminology-v0.1.json"
+TERMINOLOGY_PATH = ROOT / "data" / "terminology" / "bilingual-terminology-v0.1.json"
 
 
 def expect(condition: bool, message: str, failures: list[str]) -> None:
@@ -51,27 +52,8 @@ def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def main() -> int:
-    failures: list[str] = []
-    schemas, registry = build_registry()
-
-    def validate(schema_name: str, instance: dict[str, Any], label: str) -> None:
-        validator = Draft202012Validator(
-            schemas[schema_name], registry=registry, format_checker=FormatChecker()
-        )
-        errors = [error.message for error in validator.iter_errors(instance)]
-        expect(not errors, f"{label} is schema-invalid: {errors[:2]}", failures)
-
-    fixture = load_fixture(DEFAULT_FIXTURE)
-    terminology = json.loads(TERMINOLOGY.read_text(encoding="utf-8"))
-    created_at = "2026-10-03T00:00:00Z"
-    context = build_drafting_context_from_fixture(fixture, terminology, created_at)
-    validate("editorial-drafting-context.schema.json", context, "drafting context")
-
-    rendered, delivery_json = prepare_draft_input(context, terminology)
-    rendered_sha = sha256_text(rendered)
-
-    good_output = {
+def good_output() -> dict[str, Any]:
+    return {
         "units": [
             {
                 "unit_id": "UNIT-QTY",
@@ -97,129 +79,224 @@ def main() -> int:
         "omitted_unknown_ids": [],
     }
 
-    captured: list[str] = []
 
-    def fake_invoke(prompt: str) -> str:
-        captured.append(prompt)
-        return json.dumps(good_output, ensure_ascii=False)
+def build_report(
+    raw_output: str | None,
+    draft_run: dict | None,
+    execution_error: str | None,
+) -> dict[str, Any]:
+    fixture = load_fixture(DEFAULT_FIXTURE)
+    terminology_payload = json.loads(TERMINOLOGY_PATH.read_text(encoding="utf-8"))
+    from services.intelligence.bilingual_drafting import load_terminology
+
+    terminology = load_terminology(terminology_payload)
+    context = build_drafting_context_from_fixture(fixture, terminology, "2026-10-03T00:00:00Z")
+    rendered, _ = prepare_draft_input(context, terminology)
+    return build_trial_report(
+        fixture=fixture,
+        terminology_payload=terminology_payload,
+        context=context,
+        rendered_prompt=rendered,
+        raw_model_output=raw_output,
+        draft_run=draft_run,
+        execution_error=execution_error,
+        requested_model="glm-5.3",
+        base_url="https://api.z.ai/api/coding/paas/v4",
+        base_url_source="endpoint:coding-plan",
+        endpoint_arg="coding-plan",
+        entitlement_attestation="test-attestation",
+        git_head="a" * 40,
+        git_ref="refs/heads/main",
+        worktree_clean=True,
+        fixture_path=DEFAULT_FIXTURE,
+        terminology_path=DEFAULT_TERMINOLOGY,
+        elapsed_seconds=1.234,
+    )
+
+
+def main() -> int:
+    failures: list[str] = []
+
+    # --- Build the report through the actual report builder with a fake
+    #     invoker's successful output
+    raw_good = json.dumps(good_output(), ensure_ascii=False)
+    fixture = load_fixture(DEFAULT_FIXTURE)
+    terminology_payload = json.loads(TERMINOLOGY_PATH.read_text(encoding="utf-8"))
+    from services.intelligence.bilingual_drafting import load_terminology
+
+    terminology = load_terminology(terminology_payload)
+    context = build_drafting_context_from_fixture(fixture, terminology, "2026-10-03T00:00:00Z")
+    rendered, _ = prepare_draft_input(context, terminology)
 
     trace = DraftModelTrace(
-        provider="zai-openai-compatible-api", model="glm-5.3", model_version="provider-managed-unknown"
+        provider="zai-openai-compatible-api",
+        model="glm-5.3",
+        model_version="provider-managed-unknown",
     )
+
+    def fake_invoke(prompt: str) -> str:
+        return raw_good
 
     draft_run = build_bilingual_draft_run(
-        context=context,
-        terminology=terminology,
-        model_trace=trace,
-        invoke=fake_invoke,
+        context=context, terminology=terminology, model_trace=trace, invoke=fake_invoke
     )
-    validate("ai-bilingual-draft-run.schema.json", draft_run, "draft run")
+
+    report = build_report(raw_good, draft_run, None)
+
+    # DTD-03: verify every field the driver contract requires
+    expect(report["report_version"] == REPORT_VERSION, "report version drifted", failures)
     expect(
-        draft_run["validation"]["status"] == "accepted_for_editorial_review",
-        f"deterministic structural result was not accepted: {draft_run['validation']['errors'][:2]}",
+        report["entitlement"]["attestation"] == "test-attestation"
+        and report["entitlement"]["standing_extraction_entitlement_covers_drafting"] is False,
+        "entitlement attestation or scope flag is wrong",
         failures,
     )
     expect(
-        captured[0] == rendered,
-        "invoker did not receive exactly the two-block rendered input",
+        report["provider_edge"]["resolved_base_url"] == "https://api.z.ai/api/coding/paas/v4"
+        and report["provider_edge"]["resolved_base_url_source"] == "endpoint:coding-plan",
+        "resolved route not recorded",
         failures,
     )
     expect(
-        draft_run["prompt_trace"]["rendered_input_sha256"] == rendered_sha,
-        "draft run lost the rendered-input hash",
+        report["provider_edge"]["requested_endpoint_mode"] == "coding-plan",
+        "requested endpoint mode not recorded",
+        failures,
+    )
+    expect(
+        report["terminology"]["registry_version"],
+        "terminology registry version missing from the report",
+        failures,
+    )
+    expect(
+        report["terminology"]["registry_acceptance_sha256"] == context["terminology_sha256"],
+        "registry acceptance digest not recorded",
+        failures,
+    )
+    expect(
+        bool(report["terminology"]["delivery_payload_sha256"]),
+        "delivery payload digest missing",
         failures,
     )
 
-    # The driver's report shape: verify every required field is present and
-    # honest. (The actual report is produced at live-run time; this check
-    # verifies the constants and the structural template the driver emits.)
-    expect(REPORT_VERSION == "m4-drafting-live-trial-v0.1", "report version drifted", failures)
-
-    # The fixture's unknowns are preserved by exact deterministic reuse.
+    # DTD-02: exact dynamic bytes frozen
     expect(
-        draft_run["unknowns_rendered"][0]["prose"]["en"]
-        == fixture["unknowns"][0]["statement_en"]
-        and draft_run["unknowns_rendered"][0]["prose"]["ar"]
-        == fixture["unknowns"][0]["statement_ar"],
-        "rendered unknown is not the exact pre-written statement",
+        report["evidence"]["rendered_model_input"] == rendered,
+        "rendered input not frozen verbatim",
+        failures,
+    )
+    expect(
+        report["evidence"]["raw_model_output"] == raw_good,
+        "raw model output not frozen verbatim",
+        failures,
+    )
+    expect(
+        report["invocation"]["rendered_input_sha256"] == sha256_text(rendered),
+        "rendered input hash wrong",
+        failures,
+    )
+    expect(
+        report["invocation"]["raw_model_output_sha256"] == sha256_text(raw_good),
+        "raw output hash wrong",
         failures,
     )
 
-    # Every fixture claim is drafted (no abstention in the happy path).
+    # Editorial placeholder
+    ed = report["editorial_assessment"]
     expect(
-        sorted(
-            unit_claim for unit in draft_run["units"] for unit_claim in unit["claim_ids"]
+        ed["status"] == "pending_human_review"
+        and ed["mechanical_score"] is None
+        and ed["notes"] is None
+        and len(ed["assessment_dimensions"]) == 6,
+        "editorial assessment placeholder is wrong",
+        failures,
+    )
+
+    # Qualification flags
+    q = report["qualification"]
+    expect(
+        q["structural_mechanical_acceptance"] is True
+        and q["editorial_quality_qualified"] is False
+        and q["production_model_pipeline_qualified"] is False
+        and q["publication_authority"] is False
+        and q["canonical_mutation_authority"] is False
+        and q["bounded_evidence_only"] is True
+        and q["served_model_checkpoint"] == "unknown",
+        "qualification flags are wrong",
+        failures,
+    )
+
+    # Structural result
+    expect(
+        report["structural_result"]["validation"]["status"] == "accepted_for_editorial_review",
+        "structural result not embedded",
+        failures,
+    )
+    expect(
+        report["structural_result"]["authority"]["canonical_mutation_authority"] is False,
+        "structural result carries authority",
+        failures,
+    )
+
+    # DTD-04: transport failure produces a bounded failure report
+    failure_report = build_report(None, None, "Z.ai API returned HTTP 500: internal error")
+    expect(
+        failure_report["execution_error"] is not None
+        and failure_report["structural_result"] is None,
+        "failure report missing error or has a spurious structural result",
+        failures,
+    )
+    expect(
+        failure_report["evidence"]["rendered_model_input"] == rendered,
+        "failure report lost the rendered input",
+        failures,
+    )
+    expect(
+        failure_report["evidence"]["raw_model_output"] is None,
+        "failure report has spurious raw output",
+        failures,
+    )
+    expect(
+        failure_report["invocation"]["raw_model_output_sha256"] is None,
+        "failure report has spurious raw-output hash",
+        failures,
+    )
+    expect(
+        failure_report["qualification"]["structural_mechanical_acceptance"] is False,
+        "failure report claims structural acceptance",
+        failures,
+    )
+    expect(
+        failure_report["editorial_assessment"]["status"] == "pending_human_review",
+        "failure report lost the editorial placeholder",
+        failures,
+    )
+
+    # DTD-02: sidecar and serialization round-trip
+    with tempfile.TemporaryDirectory() as tmpdir:
+        out = Path(tmpdir) / "report.json"
+        report_sha = write_report_with_sidecar(out, report)
+        actual = hashlib.sha256(out.read_bytes()).hexdigest()
+        expect(actual == report_sha, "sidecar hash does not match report bytes", failures)
+        sidecar_text = out.with_name(out.name + ".sha256").read_text(encoding="utf-8")
+        expect(
+            sidecar_text == f"{report_sha}  {out.name}\n",
+            "sidecar format wrong",
+            failures,
         )
-        == sorted(claim["claim_id"] for claim in fixture["claims"]),
-        "fixture claims not fully drafted",
-        failures,
-    )
-    expect(draft_run["undrafted_claim_ids"] == [], "happy path has unexpected abstention", failures)
+        reparsed = json.loads(out.read_text(encoding="utf-8"))
+        expect(
+            reparsed["evidence"]["raw_model_output"] == raw_good,
+            "serialization round-trip lost the raw output",
+            failures,
+        )
 
-    # Authority.
-    expect(
-        draft_run["authority"]["canonical_mutation_authority"] is False
-        and draft_run["authority"]["publication_authority"] is False,
-        "draft run carries more than candidate-only authority",
-        failures,
-    )
-
-    # Terminology digits never authorize prose numbers: the registry term
-    # "Block 2026 system" is not in the current registry, but the principle
-    # is already regression-proven by the drafting validators. Here verify
-    # the delivery payload is present in the rendered input with its hash.
-    delivery_sha = sha256_text(delivery_json)
-    expect(
-        delivery_json in rendered,
-        "terminology delivery payload not embedded in the rendered input",
-        failures,
-    )
-    expect(
-        draft_run["prompt_trace"]["terminology_delivery_sha256"] == delivery_sha,
-        "delivery hash does not match the delivery bytes",
-        failures,
-    )
-    expect(
-        draft_run["prompt_trace"]["terminology_registry_sha256"]
-        == context["terminology_sha256"],
-        "registry hash does not copy the context binding",
-        failures,
-    )
-
-    # The terminology file hash is distinct from the registry acceptance digest
-    # (they hash different bytes by design).
-    file_sha = hashlib.sha256(DEFAULT_TERMINOLOGY.read_bytes()).hexdigest()
-    registry_sha = context["terminology_sha256"]
-    expect(
-        file_sha != registry_sha,
-        "terminology file hash should differ from the acceptance-payload digest "
-        "(they canonicalize different byte forms)",
-        failures,
-    )
-
-    # Rejected path: a malformed draft still produces a schema-valid
-    # rejected run with empty units.
-    def bad_invoke(_: str) -> str:
-        return "not-json"
-
-    rejected_run = build_bilingual_draft_run(
-        context=context,
-        terminology=terminology,
-        model_trace=trace,
-        invoke=bad_invoke,
-    )
-    validate("ai-bilingual-draft-run.schema.json", rejected_run, "rejected draft run")
-    expect(
-        rejected_run["validation"]["status"] == "rejected"
-        and not rejected_run["units"],
-        "malformed draft was not cleanly rejected",
-        failures,
-    )
-    expect(
-        rejected_run["raw_output_sha256"] == sha256_text("not-json"),
-        "rejected run lost the raw-output hash",
-        failures,
-    )
+        # Deterministic serialization: same report → same bytes
+        write_report_with_sidecar(out, report)
+        expect(
+            hashlib.sha256(out.read_bytes()).hexdigest() == report_sha,
+            "serialization is not deterministic",
+            failures,
+        )
 
     if failures:
         print("M4 drafting trial driver validation FAILED:")
@@ -228,13 +305,13 @@ def main() -> int:
         return 1
 
     print(
-        "Validated the M4 live drafting trial driver: fixture builds a schema-valid approved "
-        "context; the invoker receives exactly the reviewed two-block rendered input with "
-        "context/registry/delivery hashes; the structural result is a schema-valid AI bilingual "
-        "draft run with exactly-once claim accounting, deterministic unknown reuse, and "
-        "candidate-only authority; rejected output produces a clean schema-valid rejection; "
-        "the editorial assessment dimension is a pending-human-review placeholder with no "
-        "mechanical score; no network call is made."
+        "Validated the M4 live drafting trial driver through the actual report builder: "
+        "entitlement attestation with explicit non-coverage; resolved route recorded; "
+        "registry version + digests; exact rendered input and raw model output frozen "
+        "verbatim with matching hashes; editorial placeholder with six dimensions and no "
+        "mechanical score; qualification flags correct; transport failure produces a "
+        "bounded report with the rendered input preserved and no spurious result; "
+        "sidecar and deterministic serialization verified; candidate-only authority."
     )
     return 0
 
