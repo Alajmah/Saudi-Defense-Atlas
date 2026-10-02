@@ -969,9 +969,10 @@ def build_bilingual_draft_run(
     """Convert exact model output into a candidate-only bilingual draft run.
 
     The context is independently re-validated (schema plus builder invariants)
-    before invocation; the invoker receives the rendered wrapper input (the
-    reviewed template around the canonical context serialization); the registry
-    is bound by version AND digest; every unit's
+    before invocation; the invoker receives the rendered two-block input (the
+    reviewed template around the canonical context block and the
+    least-privilege terminology delivery block); the registry is bound by
+    version AND digest; every unit's
     evidence must close over its cited claims specifically; claims are
     accounted exactly once; unknowns are preserved by exact deterministic reuse
     of the pre-written bilingual statements; and both accepted and rejected

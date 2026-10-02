@@ -29,7 +29,6 @@ from services.intelligence.bilingual_drafting import (  # noqa: E402
     DraftModelTrace,
     build_approved_drafting_context,
     build_bilingual_draft_run,
-    derive_terminology_delivery_payload,
     draft_prompt_template_sha256,
     load_terminology,
     render_draft_prompt,
@@ -398,7 +397,20 @@ def main() -> int:
         "prompt dropped the material scope semantics the fixture prose expresses",
         failures,
     )
-    delivery_payload = derive_terminology_delivery_payload(terminology)
+    # Independent delivery oracle (TDI-03): construct the expected payload
+    # locally from the loaded registry — never via the production projection
+    # helper — so a swapped category or Arabic rendering between terms cannot
+    # evade this comparison.
+    delivery_payload = {
+        "terms": [
+            {
+                "category": term["category"],
+                "en": term["en"],
+                "ar": term["ar"],
+            }
+            for term in terminology["terms"]
+        ]
+    }
     delivery_json = canonical_json(delivery_payload)
     expect(
         run["prompt_trace"]["template_id"] == DRAFT_PROMPT_TEMPLATE_ID
@@ -448,9 +460,9 @@ def main() -> int:
         failures,
     )
     expect(
-        [term["en"] for term in parsed_terms["terms"]]
-        == [term["en"] for term in terminology["terms"]],
-        "terminology block is not in registry order",
+        parsed_terms["terms"] == delivery_payload["terms"],
+        "terminology block does not correspond per-term (category, en, ar) "
+        "to the loaded registry in registry order",
         failures,
     )
     expect(
@@ -1032,7 +1044,8 @@ def main() -> int:
         "per-claim evidence links and roles, "
         "entity-target resolution, terminology digest binding, and a bilingual pre-invocation "
         "sensitivity gate; adapter independently re-validates hand-assembled contexts; invoker "
-        "receives exactly the canonical context serialization; strict JSON output; one shared, "
+        "receives the rendered two-block input (context block + terminology delivery block); "
+        "strict JSON output; one shared, "
         "claim-specific support set per unit; exactly-once claim accounting with explicit "
         "abstention; exact deterministic reuse of pre-written unknown statements; terminology "
         "pairing both directions; factual-fields-only number allowlist (bookkeeping and "

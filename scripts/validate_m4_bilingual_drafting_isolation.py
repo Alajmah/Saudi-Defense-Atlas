@@ -33,7 +33,6 @@ from services.intelligence.bilingual_drafting import (  # noqa: E402
     build_approved_drafting_context,
     build_bilingual_draft_run,
     load_terminology,
-    derive_terminology_delivery_payload,
     render_draft_prompt,
     split_rendered_prompt,
 )
@@ -153,10 +152,11 @@ def main() -> int:
             clock=lambda: "2026-10-02T00:01:00Z",
         )
 
-    # 1. The invoker receives exactly the rendered wrapper input: the reviewed
-    #    template around the canonical context, with no candidate markers and
-    #    no restricted or pinned vocabulary in either locale beyond the
-    #    template's enumerated, reviewed instructions.
+    # 1. The invoker receives exactly the rendered two-block input: the
+    #    reviewed template around the canonical context block and the
+    #    least-privilege terminology delivery block, with no candidate markers
+    #    and no restricted or pinned vocabulary beyond the reviewed
+    #    instructions and the gated registry renderings.
     captured: list[str] = []
 
     def capture_invoke(prompt: str) -> str:
@@ -192,12 +192,17 @@ def main() -> int:
     # The terminology block is exactly the least-privilege delivery payload,
     # and the registry's own version/term-id metadata never reaches the model.
     delivered = json.loads(extracted_terms)
-    expected_delivery = derive_terminology_delivery_payload(terminology)
-    import json as _json
-
+    # Independent oracle (TDI-03): construct the expected records locally
+    # from the loaded registry, record by record, without the production
+    # projection helper.
+    expected_terms = [
+        {"category": term["category"], "en": term["en"], "ar": term["ar"]}
+        for term in terminology["terms"]
+    ]
     expect(
-        delivered == expected_delivery,
-        "the terminology block is not the least-privilege delivery payload",
+        delivered.get("terms") == expected_terms,
+        "the terminology block does not correspond per-term (category, en, ar) "
+        "to the loaded registry in registry order",
         failures,
     )
     expect(
@@ -521,10 +526,14 @@ def main() -> int:
         return 1
 
     print(
-        "Validated bilingual drafting isolation: model input is exactly the bounded approved "
-        "context (now including the terminology digest) with no candidate, restricted, English, "
-        "or Arabic leakage; the model cannot author unknown prose (unsupported key) and rendered "
-        "unknowns are exact deterministic reuse; disputed claims fail closed at the builder and "
+        "Validated bilingual drafting isolation: the model input is the rendered two-block "
+        "input - static wrapper plus verbatim canonical context and least-privilege "
+        "terminology delivery, each recoverable byte-for-byte against an independent "
+        "per-term oracle - with registry metadata absent from the terminology block, "
+        "renderings absent from static segments, and no wrapper-carried digits, Arabic "
+        "script, forbidden vocabulary, or context factual strings; the model cannot "
+        "author unknown prose (unsupported key) and rendered unknowns are exact "
+        "deterministic reuse; disputed claims fail closed at the builder and "
         "hand-assembled contexts (conflicts, injected candidates, escalation) at the adapter; "
         "authority escalation is schema-impossible; terminology pairing enforced in both "
         "directions with registry-byte binding; the number guard covers Arabic-Indic digits and "
