@@ -129,6 +129,9 @@ jobs:
       - name: Validate M4 bilingual drafting isolation
         run: python scripts/validate_m4_bilingual_drafting_isolation.py
 
+      - name: Validate M4 drafting trial driver
+        run: python scripts/validate_m4_drafting_trial_driver.py
+
       - name: Validate M4 resolver verifier boundary
         run: python scripts/validate_m4_resolver_verifier.py
 

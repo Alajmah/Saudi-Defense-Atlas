@@ -1,0 +1,82 @@
+{
+  "version": "m4-drafting-trial-v0.1",
+  "description": "Approved canonical drafting fixtures for the bounded live drafting trial. Synthetic; not canonical SDA data.",
+  "entities": [
+    {
+      "entity_id": "SDA-ORG-ATLAS",
+      "entity_type": "organization",
+      "record_status": "active",
+      "names": {"en": "Atlas Aerospace", "ar": "أطلس للصناعات الجوية"}
+    },
+    {
+      "entity_id": "SDA-EQUIP-FALCONX",
+      "entity_type": "equipment_variant",
+      "record_status": "active",
+      "names": {"en": "Falcon-X", "ar": "فالكون-إكس"}
+    },
+    {
+      "entity_id": "SDA-PROC-CEDAR",
+      "entity_type": "procurement_program",
+      "record_status": "active",
+      "names": {"en": "Project Cedar", "ar": "مشروع الأرز"}
+    }
+  ],
+  "claims": [
+    {
+      "claim_id": "SDA-CLAIM-CEDAR-QTY",
+      "subject_entity_id": "SDA-PROC-CEDAR",
+      "predicate_id": "procurement.quantity",
+      "value": {
+        "kind": "number",
+        "value": 12,
+        "unit": "aircraft",
+        "precision": "exact",
+        "lower_bound": null,
+        "upper_bound": null
+      },
+      "validity": {"point_in_time": {"value": "2024-03-15", "precision": "day"}},
+      "scope": {"entity_ids": ["SDA-PROC-CEDAR"], "quantity_type": "contracted", "note": null},
+      "claim_state": "active",
+      "record_status": "active",
+      "evidence_links": [
+        {"evidence_id": "SDA-EVID-CEDAR-1", "role": "supports"}
+      ]
+    },
+    {
+      "claim_id": "SDA-CLAIM-FALCONX-MANUFACTURER",
+      "subject_entity_id": "SDA-ORG-ATLAS",
+      "predicate_id": "manufacturer.manufactures.equipment",
+      "value": {"kind": "entity", "entity_id": "SDA-EQUIP-FALCONX"},
+      "validity": {"point_in_time": {"value": "2020-12-10", "precision": "day"}},
+      "scope": null,
+      "claim_state": "active",
+      "record_status": "active",
+      "evidence_links": [
+        {"evidence_id": "SDA-EVID-FALCONX-1", "role": "supports"}
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "SDA-EVID-CEDAR-1",
+      "document_id": "SDA-DOC-CEDAR",
+      "record_status": "active",
+      "locator": {"fragment": "source-text"}
+    },
+    {
+      "evidence_id": "SDA-EVID-FALCONX-1",
+      "document_id": "SDA-DOC-FALCONX",
+      "record_status": "active",
+      "locator": {"fragment": "source-text"}
+    }
+  ],
+  "unknowns": [
+    {
+      "unknown_id": "UNK-FALCONX-OPERATOR",
+      "aspect": "operator",
+      "entity_id": "SDA-EQUIP-FALCONX",
+      "statement_en": "The operator of Falcon-X is not established by approved claims.",
+      "statement_ar": "لم يثبت المشغّل لمنظومة فالكون-إكس من الادعاءات المعتمدة."
+    }
+  ]
+}
