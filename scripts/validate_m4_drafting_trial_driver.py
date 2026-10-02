@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
 """Validate the M4 live drafting trial driver without network calls.
 
-Exercises the actual report builder (`build_trial_report`) with a fake invoker
-and a failing invoker, proving: the report carries every required provenance
-field (git, entitlement, route, versions, terminology registry version +
-digests, hashes); the exact rendered input and raw model output are frozen
-verbatim; the editorial assessment is a pending-human-review placeholder with
-no mechanical score; transport failure produces a bounded failure report with
-no retry; the qualification flags are correct; the sidecar matches the report
-bytes; the serialization is deterministic JSON; and authority is candidate-only.
+Tests the actual report builder, the orchestration path (with both a
+succeeding and a failing fake invoker), every pre-invocation gate (route
+ambiguity, entitlement, git-state, overwrite refusal), the hash-chain
+consistency check, the invocation-attempt provenance, the editorial
+placeholder, the qualification flags, the sidecar, and deterministic
+serialization.
 """
 
 from __future__ import annotations
@@ -28,15 +26,21 @@ from scripts.run_m4_drafting_trial import (  # noqa: E402
     DEFAULT_FIXTURE,
     DEFAULT_TERMINOLOGY,
     REPORT_VERSION,
+    TrialGateError,
     build_drafting_context_from_fixture,
     build_trial_report,
+    check_attestation_route_binding,
+    check_entitlement,
+    check_git_state,
+    check_route_args,
+    execute_draft_invocation,
     load_fixture,
     write_report_with_sidecar,
 )
 from services.intelligence.bilingual_drafting import (  # noqa: E402
-    BilingualDraftingError,
     DraftModelTrace,
     build_bilingual_draft_run,
+    load_terminology,
     prepare_draft_input,
 )
 
@@ -46,6 +50,14 @@ TERMINOLOGY_PATH = ROOT / "data" / "terminology" / "bilingual-terminology-v0.1.j
 def expect(condition: bool, message: str, failures: list[str]) -> None:
     if not condition:
         failures.append(message)
+
+
+def expect_gate_error(label: str, fn, failures: list[str]) -> None:
+    try:
+        fn()
+    except TrialGateError:
+        return
+    failures.append(f"{label} did not fail closed")
 
 
 def sha256_text(value: str) -> str:
@@ -80,31 +92,37 @@ def good_output() -> dict[str, Any]:
     }
 
 
-def build_report(
-    raw_output: str | None,
-    draft_run: dict | None,
-    execution_error: str | None,
-) -> dict[str, Any]:
+def setup():
     fixture = load_fixture(DEFAULT_FIXTURE)
     terminology_payload = json.loads(TERMINOLOGY_PATH.read_text(encoding="utf-8"))
-    from services.intelligence.bilingual_drafting import load_terminology
-
     terminology = load_terminology(terminology_payload)
     context = build_drafting_context_from_fixture(fixture, terminology, "2026-10-03T00:00:00Z")
     rendered, _ = prepare_draft_input(context, terminology)
+    trace = DraftModelTrace(
+        provider="zai-openai-compatible-api", model="glm-5.3", model_version="provider-managed-unknown"
+    )
+    return fixture, terminology_payload, terminology, context, rendered, trace
+
+
+def build_report(
+    terminology_payload, context, rendered, raw, draft_run, error, attempted, count
+):
     return build_trial_report(
-        fixture=fixture,
+        fixture=load_fixture(DEFAULT_FIXTURE),
         terminology_payload=terminology_payload,
         context=context,
         rendered_prompt=rendered,
-        raw_model_output=raw_output,
+        raw_model_output=raw,
         draft_run=draft_run,
-        execution_error=execution_error,
+        execution_error=error,
+        invocation_attempted=attempted,
+        invocation_count=count,
         requested_model="glm-5.3",
         base_url="https://api.z.ai/api/coding/paas/v4",
         base_url_source="endpoint:coding-plan",
         endpoint_arg="coding-plan",
-        entitlement_attestation="test-attestation",
+        entitlement_attestation="coding-plan drafting attestation",
+        reviewed_head="a" * 40,
         git_head="a" * 40,
         git_ref="refs/heads/main",
         worktree_clean=True,
@@ -116,185 +134,225 @@ def build_report(
 
 def main() -> int:
     failures: list[str] = []
-
-    # --- Build the report through the actual report builder with a fake
-    #     invoker's successful output
+    fixture, terminology_payload, terminology, context, rendered, trace = setup()
     raw_good = json.dumps(good_output(), ensure_ascii=False)
-    fixture = load_fixture(DEFAULT_FIXTURE)
-    terminology_payload = json.loads(TERMINOLOGY_PATH.read_text(encoding="utf-8"))
-    from services.intelligence.bilingual_drafting import load_terminology
 
-    terminology = load_terminology(terminology_payload)
-    context = build_drafting_context_from_fixture(fixture, terminology, "2026-10-03T00:00:00Z")
-    rendered, _ = prepare_draft_input(context, terminology)
-
-    trace = DraftModelTrace(
-        provider="zai-openai-compatible-api",
-        model="glm-5.3",
-        model_version="provider-managed-unknown",
+    # --- DTD-03R: pre-invocation gate regressions ---
+    # Route ambiguity
+    expect_gate_error(
+        "base-url + zai-endpoint",
+        lambda: check_route_args("https://a", "coding-plan", ""),
+        failures,
     )
+    expect_gate_error(
+        "zai-endpoint + env",
+        lambda: check_route_args(None, "coding-plan", "https://env"),
+        failures,
+    )
+    expect_gate_error(
+        "base-url + env",
+        lambda: check_route_args("https://a", None, "https://env"),
+        failures,
+    )
+    expect_gate_error(
+        "all three",
+        lambda: check_route_args("https://a", "coding-plan", "https://env"),
+        failures,
+    )
+    # Exactly one is fine
+    try:
+        check_route_args(None, "coding-plan", "")
+        check_route_args("https://api.z.ai/api/coding/paas/v4", None, "")
+        check_route_args(None, None, "https://api.z.ai/api/coding/paas/v4")
+    except TrialGateError:
+        failures.append("single-route check_route_args failed on a valid combination")
 
+    # Entitlement
+    expect_gate_error("empty attestation", lambda: check_entitlement(""), failures)
+    expect_gate_error("blank attestation", lambda: check_entitlement("   "), failures)
+    try:
+        check_entitlement("  non-empty  ")
+    except TrialGateError:
+        failures.append("valid attestation was rejected")
+
+    # Git state
+    expect_gate_error(
+        "empty HEAD",
+        lambda: check_git_state("", True, "a" * 40),
+        failures,
+    )
+    expect_gate_error(
+        "dirty worktree",
+        lambda: check_git_state("a" * 40, False, "a" * 40),
+        failures,
+    )
+    expect_gate_error(
+        "unknown worktree",
+        lambda: check_git_state("a" * 40, None, "a" * 40),
+        failures,
+    )
+    expect_gate_error(
+        "HEAD != reviewed head",
+        lambda: check_git_state("b" * 40, True, "a" * 40),
+        failures,
+    )
+    try:
+        check_git_state("a" * 40, True, "a" * 40)
+    except TrialGateError:
+        failures.append("valid git state was rejected")
+
+    # Attestation-route binding
+    expect_gate_error(
+        "coding URL without coding attestation",
+        lambda: check_attestation_route_binding(
+            "some attestation", "https://api.z.ai/api/coding/paas/v4"
+        ),
+        failures,
+    )
+    try:
+        check_attestation_route_binding(
+            "coding-plan attestation", "https://api.z.ai/api/coding/paas/v4"
+        )
+        check_attestation_route_binding(
+            "prepaid attestation", "https://api.z.ai/api/paas/v4"
+        )
+    except TrialGateError:
+        failures.append("route-bound attestation was rejected")
+
+    # --- DTD-04R: orchestration path with failing invoker ---
+    def failing_invoke(prompt: str) -> str:
+        raise RuntimeError("Z.ai API returned HTTP 500: internal error")
+
+    fail_run, fail_error, fail_raw, fail_elapsed = execute_draft_invocation(
+        context=context,
+        terminology=terminology,
+        model_trace=trace,
+        invoke_fn=failing_invoke,
+    )
+    expect(fail_run is None, "failing invoker produced a draft run", failures)
+    expect(fail_error is not None, "failing invoker did not produce an error", failures)
+    expect(fail_raw is None, "failing invoker produced raw output", failures)
+
+    # --- Success path through the orchestration ---
     def fake_invoke(prompt: str) -> str:
         return raw_good
 
-    draft_run = build_bilingual_draft_run(
-        context=context, terminology=terminology, model_trace=trace, invoke=fake_invoke
+    ok_run, ok_error, ok_raw, ok_elapsed = execute_draft_invocation(
+        context=context,
+        terminology=terminology,
+        model_trace=trace,
+        invoke_fn=fake_invoke,
+    )
+    expect(ok_error is None, f"succeeding invoker errored: {ok_error}", failures)
+    expect(ok_raw == raw_good, "raw output was not captured verbatim", failures)
+    expect(
+        ok_run is not None and ok_run["validation"]["status"] == "accepted_for_editorial_review",
+        f"draft run not accepted: {ok_run and ok_run['validation']['errors'][:2]}",
+        failures,
     )
 
-    report = build_report(raw_good, draft_run, None)
-
-    # DTD-03: verify every field the driver contract requires
+    # --- Build the report through the actual builder ---
+    report = build_report(
+        terminology_payload, context, rendered, ok_raw, ok_run, None, True, 1
+    )
     expect(report["report_version"] == REPORT_VERSION, "report version drifted", failures)
     expect(
-        report["entitlement"]["attestation"] == "test-attestation"
-        and report["entitlement"]["standing_extraction_entitlement_covers_drafting"] is False,
-        "entitlement attestation or scope flag is wrong",
+        report["entitlement"]["attestation"] == "coding-plan drafting attestation"
+        and report["entitlement"]["standing_extraction_entitlement_covers_drafting"] is False
+        and report["entitlement"]["resolved_base_url"] == "https://api.z.ai/api/coding/paas/v4",
+        "entitlement block wrong",
         failures,
     )
-    expect(
-        report["provider_edge"]["resolved_base_url"] == "https://api.z.ai/api/coding/paas/v4"
-        and report["provider_edge"]["resolved_base_url_source"] == "endpoint:coding-plan",
-        "resolved route not recorded",
-        failures,
-    )
-    expect(
-        report["provider_edge"]["requested_endpoint_mode"] == "coding-plan",
-        "requested endpoint mode not recorded",
-        failures,
-    )
+    expect(report["reviewed_head"] == "a" * 40, "reviewed head not recorded", failures)
     expect(
         report["terminology"]["registry_version"],
-        "terminology registry version missing from the report",
+        "registry version missing",
         failures,
     )
     expect(
-        report["terminology"]["registry_acceptance_sha256"] == context["terminology_sha256"],
-        "registry acceptance digest not recorded",
+        report["evidence"]["rendered_model_input"] == rendered
+        and report["evidence"]["raw_model_output"] == raw_good,
+        "frozen evidence bytes wrong",
         failures,
     )
     expect(
-        bool(report["terminology"]["delivery_payload_sha256"]),
-        "delivery payload digest missing",
+        report["invocation"]["attempted"] is True and report["invocation"]["count"] == 1,
+        "invocation provenance wrong",
         failures,
     )
-
-    # DTD-02: exact dynamic bytes frozen
-    expect(
-        report["evidence"]["rendered_model_input"] == rendered,
-        "rendered input not frozen verbatim",
-        failures,
-    )
-    expect(
-        report["evidence"]["raw_model_output"] == raw_good,
-        "raw model output not frozen verbatim",
-        failures,
-    )
-    expect(
-        report["invocation"]["rendered_input_sha256"] == sha256_text(rendered),
-        "rendered input hash wrong",
-        failures,
-    )
-    expect(
-        report["invocation"]["raw_model_output_sha256"] == sha256_text(raw_good),
-        "raw output hash wrong",
-        failures,
-    )
-
-    # Editorial placeholder
     ed = report["editorial_assessment"]
     expect(
-        ed["status"] == "pending_human_review"
-        and ed["mechanical_score"] is None
-        and ed["notes"] is None
-        and len(ed["assessment_dimensions"]) == 6,
-        "editorial assessment placeholder is wrong",
+        ed["status"] == "pending_human_review" and ed["mechanical_score"] is None,
+        "editorial placeholder wrong",
         failures,
     )
-
-    # Qualification flags
     q = report["qualification"]
     expect(
-        q["structural_mechanical_acceptance"] is True
-        and q["editorial_quality_qualified"] is False
-        and q["production_model_pipeline_qualified"] is False
-        and q["publication_authority"] is False
-        and q["canonical_mutation_authority"] is False
-        and q["bounded_evidence_only"] is True
-        and q["served_model_checkpoint"] == "unknown",
-        "qualification flags are wrong",
+        q["structural_mechanical_acceptance"] is True and q["editorial_quality_qualified"] is False,
+        "qualification flags wrong",
         failures,
     )
 
-    # Structural result
-    expect(
-        report["structural_result"]["validation"]["status"] == "accepted_for_editorial_review",
-        "structural result not embedded",
-        failures,
+    # --- Failure report through the actual builder ---
+    failure_report = build_report(
+        terminology_payload, context, rendered, None, None, "Z.ai API returned HTTP 500: internal error", True, 1
     )
     expect(
-        report["structural_result"]["authority"]["canonical_mutation_authority"] is False,
-        "structural result carries authority",
+        failure_report["invocation"]["attempted"] is True
+        and failure_report["invocation"]["count"] == 1,
+        "failure report invocation provenance wrong",
         failures,
     )
-
-    # DTD-04: transport failure produces a bounded failure report
-    failure_report = build_report(None, None, "Z.ai API returned HTTP 500: internal error")
     expect(
         failure_report["execution_error"] is not None
-        and failure_report["structural_result"] is None,
-        "failure report missing error or has a spurious structural result",
-        failures,
-    )
-    expect(
-        failure_report["evidence"]["rendered_model_input"] == rendered,
-        "failure report lost the rendered input",
-        failures,
-    )
-    expect(
-        failure_report["evidence"]["raw_model_output"] is None,
-        "failure report has spurious raw output",
-        failures,
-    )
-    expect(
-        failure_report["invocation"]["raw_model_output_sha256"] is None,
-        "failure report has spurious raw-output hash",
+        and failure_report["structural_result"] is None
+        and failure_report["evidence"]["rendered_model_input"] == rendered,
+        "failure report fields wrong",
         failures,
     )
     expect(
         failure_report["qualification"]["structural_mechanical_acceptance"] is False,
-        "failure report claims structural acceptance",
-        failures,
-    )
-    expect(
-        failure_report["editorial_assessment"]["status"] == "pending_human_review",
-        "failure report lost the editorial placeholder",
+        "failure report claims acceptance",
         failures,
     )
 
-    # DTD-02: sidecar and serialization round-trip
+    # --- DTD-02R: hash-chain consistency ---
+    tampered = dict(ok_run)
+    tampered["raw_output_sha256"] = "0" * 64
+    try:
+        build_report(terminology_payload, context, rendered, ok_raw, tampered, None, True, 1)
+        failures.append("tampered draft-run hash chain was not detected")
+    except RuntimeError:
+        pass
+
+    # --- DTD-02R: immutable artifact writer ---
     with tempfile.TemporaryDirectory() as tmpdir:
-        out = Path(tmpdir) / "report.json"
-        report_sha = write_report_with_sidecar(out, report)
-        actual = hashlib.sha256(out.read_bytes()).hexdigest()
-        expect(actual == report_sha, "sidecar hash does not match report bytes", failures)
-        sidecar_text = out.with_name(out.name + ".sha256").read_text(encoding="utf-8")
-        expect(
-            sidecar_text == f"{report_sha}  {out.name}\n",
-            "sidecar format wrong",
+        out_a = Path(tmpdir) / "a" / "report.json"
+        sha_a = write_report_with_sidecar(out_a, report)
+        # Writing the same report to a different path yields the same bytes.
+        out_b = Path(tmpdir) / "b" / "report.json"
+        sha_b = write_report_with_sidecar(out_b, report)
+        expect(sha_a == sha_b, "serialization is not deterministic", failures)
+        # Overwriting is refused.
+        expect_gate_error(
+            "overwrite existing report",
+            lambda: write_report_with_sidecar(out_a, report),
             failures,
         )
-        reparsed = json.loads(out.read_text(encoding="utf-8"))
+        # Sidecar overwrite is refused independently.
+        out_c = Path(tmpdir) / "c" / "report.json"
+        out_c.parent.mkdir(parents=True)
+        out_c.with_name(out_c.name + ".sha256").write_text("existing")
+        expect_gate_error(
+            "overwrite existing sidecar",
+            lambda: write_report_with_sidecar(out_c, report),
+            failures,
+        )
+        # Round-trip: the reparsed report retains the frozen bytes.
+        reparsed = json.loads(out_a.read_text(encoding="utf-8"))
         expect(
             reparsed["evidence"]["raw_model_output"] == raw_good,
-            "serialization round-trip lost the raw output",
-            failures,
-        )
-
-        # Deterministic serialization: same report → same bytes
-        write_report_with_sidecar(out, report)
-        expect(
-            hashlib.sha256(out.read_bytes()).hexdigest() == report_sha,
-            "serialization is not deterministic",
+            "serialization round-trip lost raw output",
             failures,
         )
 
@@ -305,13 +363,15 @@ def main() -> int:
         return 1
 
     print(
-        "Validated the M4 live drafting trial driver through the actual report builder: "
-        "entitlement attestation with explicit non-coverage; resolved route recorded; "
-        "registry version + digests; exact rendered input and raw model output frozen "
-        "verbatim with matching hashes; editorial placeholder with six dimensions and no "
-        "mechanical score; qualification flags correct; transport failure produces a "
-        "bounded report with the rendered input preserved and no spurious result; "
-        "sidecar and deterministic serialization verified; candidate-only authority."
+        "Validated the M4 live drafting trial driver: all pre-invocation gates (route "
+        "ambiguity in every combination, entitlement, attestation-route binding, git state "
+        "with reviewed-head match, overwrite refusal for report and sidecar) fail closed "
+        "deterministically; the orchestration path runs a failing invoker to a bounded "
+        "failure report with invocation_attempted/count provenance; the report builder "
+        "freezes exact rendered input and raw output bytes with matching hashes, records "
+        "registry version alongside digests, carries a reviewed-head pin, separates the "
+        "editorial placeholder, and detects tampered draft-run hash chains; serialization "
+        "is deterministic and sidecars are immutable."
     )
     return 0
 

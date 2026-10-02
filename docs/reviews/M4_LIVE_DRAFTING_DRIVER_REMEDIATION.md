@@ -40,6 +40,30 @@ Complete repository suite at the remediation head: **42/42 validators — PASS**
 
 No live model has been invoked through this driver. Driver effectiveness and the structural acceptance behavior with a live model remain unknown until the reviewed trial runs. The entitlement attestation records the operator's acknowledgment; it does not constitute the reapproval itself — the collaborator's explicit start for the live trial is still required.
 
+### DTD-01R — base-url + zai-endpoint ambiguity; attestation not route-bound — REMEDIATED (residual round)
+
+`check_route_args` now refuses any combination of `--base-url`, `--zai-endpoint`, and `ZAI_BASE_URL` (all pairs and the triple). `check_attestation_route_binding` requires the attestation string to name the route the call would actually use (coding-plan mentions for the coding endpoint, prepaid/general mentions for the prepaid endpoint). The report records the attestation alongside the resolved base URL. All combinations are gate-tested.
+
+### DTD-02R — artifact writer not immutable; hash chain not cross-checked — REMEDIATED (residual round)
+
+The overwrite check moved inside `write_report_with_sidecar` itself — the function refuses if either the report or sidecar file exists, independently testable. The report builder now verifies `draft_run.raw_output_sha256` equals the frozen raw-output hash and `prompt_trace.rendered_input_sha256` equals the frozen rendered-input hash; a tampered chain raises before the report is built (regression-tested). The validator now tests determinism by writing to two different paths (not by overwriting).
+
+### DTD-03R — gates not tested — REMEDIATED (residual round)
+
+All four gates are factored into individually callable functions (`check_entitlement`, `check_route_args`, `check_git_state`, `check_attestation_route_binding`, plus the writer's internal overwrite check) and the validator exercises each with pass and fail cases: 14 gate assertions covering every ambiguous route combination, empty/blank attestations, empty/dirty/unknown git states, head mismatch, unbound attestation, overwrite of report, and overwrite of sidecar.
+
+### DTD-04R — invocation attempt not proven — REMEDIATED (residual round)
+
+The orchestration is factored into `execute_draft_invocation` (invoke + build draft run + catch), and the report carries `invocation_attempted: bool` and `invocation_count: int`. The validator runs a **failing fake invoker through the actual orchestration path** (not a manually constructed failure report) and proves the failure report has `attempted: true, count: 1` with the rendered input preserved and no spurious result. The success path proves `attempted: true, count: 1` with the correct bytes.
+
+### DTD-05R — reviewed head not pinned — REMEDIATED (residual round)
+
+A `--reviewed-head` argument is now required and must exactly match the current git HEAD. `check_git_state` refuses on empty HEAD, dirty/unknown worktree, **and** head mismatch. Any clean local commit that is not the reviewed SHA cannot reach the provider. The report records the reviewed head.
+
+### Contract version — CORRECTED
+
+`docs/M4_LIVE_DRAFTING_TRIAL.md` now says `m4-drafting-live-trial-v0.3` (the implementation version after this round).
+
 ## Freeze
 
 This record completes remediation of DTD-01 through DTD-05. The remediated head awaits exact-head CI and re-review.

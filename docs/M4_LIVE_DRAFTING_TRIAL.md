@@ -39,14 +39,27 @@ The report separates two independent dimensions, per the collaborator's directio
 
 The report carries an `editorial_assessment` section with `status: pending_human_review`, a `null` score, and a `null` notes field listing the six assessment dimensions: Arabic fluency, English fluency, factual faithfulness of phrasing, bilingual adequacy, terminology quality, and awkward or misleading wording. A mechanically accepted draft can still be editorially poor; a fluent draft cannot override a mechanical rejection. No mechanical editorial score exists in this increment and none is implied.
 
-## Pre-invocation gates (fail closed)
+## Pre-invocation gates (fail closed, all individually tested)
+
+1. **Reviewed-head gate (DTD-05R):** git HEAD must resolve, the tracked worktree must be clean, **and HEAD must equal the explicit `--reviewed-head` SHA** — the independently reviewed commit that authorized the trial.
+2. **Entitlement gate (DTD-01):** an explicit `--entitlement-attestation` string is required; the standing extraction entitlement does **not** cover drafting.
+3. **Route gate (DTD-01R):** any combination of `--base-url`, `--zai-endpoint`, and `ZAI_BASE_URL` that creates ambiguity is refused (all pairs and the triple). The attestation must also name the route the call actually uses (e.g., "coding-plan" when the resolved URL is the Coding Plan endpoint).
+4. **Artifact gate (DTD-02R):** `write_report_with_sidecar` refuses if the report or sidecar file already exists — the check is inside the writer, not just in `main()`.
 
 1. **Git gate (DTD-05):** git HEAD must resolve to a commit SHA; the tracked worktree must be clean. A dirty tree, an unresolvable HEAD, or an unknown cleanliness state refuses before any model invocation.
 2. **Entitlement gate (DTD-01):** an explicit `--entitlement-attestation` string is required for every live drafting call. The standing extraction entitlement does **not** cover drafting; the report records the attestation verbatim alongside an explicit `standing_extraction_entitlement_covers_drafting: false` flag.
 3. **Route gate (DTD-01):** if both `--zai-endpoint` and `ZAI_BASE_URL` are set, the run is refused (ambiguous route). The report records the actual resolved base URL and its resolution source, not just the requested CLI value.
 4. **Artifact gate (DTD-02):** if any output file (report or sidecar) already exists, the run is refused before invocation. No overwrite.
 
-## Failure path (DTD-04)
+## Failure path (DTD-04R)
+
+A transport or provider error produces a bounded failure report — not a crash and not a retry. The failure report preserves the exact rendered input, records the error, sets `structural_result: null`, carries `invocation_attempted: true` and `invocation_count: 1` (the orchestration path is exercised deterministically by the validator with a failing fake invoker), and keeps the editorial placeholder.
+
+## Hash-chain consistency (DTD-02R)
+
+The report builder verifies the embedded draft run's `raw_output_sha256` and `rendered_input_sha256` agree with the frozen evidence bytes. A tampered hash chain raises before the report is built.
+
+## Frozen evidence (DTD-02)
 
 A transport or provider error (HTTP failure, timeout, malformed response) produces a bounded failure report — not a crash and not a retry. The failure report preserves the exact rendered input, records the error, sets `structural_result: null`, and keeps the editorial placeholder. The evidence is never silently discarded.
 
@@ -64,7 +77,7 @@ These travel with the hash chain (`rendered_input_sha256`, `raw_model_output_sha
 
 | field | content |
 |-------|---------|
-| `report_version` | `m4-drafting-live-trial-v0.1` |
+| `report_version` | `m4-drafting-live-trial-v0.3` |
 | `fixture_version` | drafting fixture version |
 | `provider` / `requested_model` | provider-edge trace |
 | `provider_edge` | endpoint, credential source, transport, tools, pinned reasoning |

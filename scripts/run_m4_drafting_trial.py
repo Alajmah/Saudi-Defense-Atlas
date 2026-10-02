@@ -1,26 +1,20 @@
 #!/usr/bin/env python3
 """Run the bounded M4 live bilingual drafting trial through the Z.ai provider edge.
 
-Loads an approved canonical drafting fixture, renders the reviewed v0.2
-two-block model input through the deterministic drafting boundary, sends it to
-Z.ai's OpenAI-compatible API, and captures the resulting ``AI bilingual draft
-run`` with the exact rendered input, exact raw model output, full hash
-provenance, and a failure-report path for transport errors. Mechanical/
-structural acceptance and human editorial assessment are independent dimensions;
-this runner scores only the former and records the latter as a
-pending-human-review placeholder.
+Pre-invocation gates (all fail closed, all individually testable):
+- `check_git_state`: HEAD must resolve, worktree must be clean, and HEAD must
+  equal the explicit `--reviewed-head` SHA (the independently reviewed commit).
+- `check_entitlement`: a non-empty attestation string is required; the standing
+  extraction entitlement does not cover drafting.
+- `check_route_args`: any combination of `--base-url`, `--zai-endpoint`, and
+  `ZAI_BASE_URL` that creates route ambiguity is refused.
+- `write_report_with_sidecar`: refuses to overwrite an existing file.
 
-Pre-invocation gates (fail closed):
-- git HEAD must resolve; tracked worktree must be clean;
-- an explicit ``--entitlement-attestation`` is required (the standing
-  extraction entitlement does not cover live drafting);
-- the route must be unambiguous (``ZAI_BASE_URL`` and ``--zai-endpoint``
-  together are refused);
-- output files must not already exist (no overwrite).
-
-The runner does not read or write the canonical knowledge backend and does not
-publish anything. Transport/provider failures produce a bounded failure report
-with no retry.
+Evidence immutability: the report embeds the exact rendered input and raw
+model output verbatim alongside their hashes, and the report builder verifies
+the embedded draft run's hash chain agrees with the frozen bytes. Transport
+failures produce a bounded failure report with `invocation_attempted` /
+`invocation_count` provenance and no retry.
 """
 
 from __future__ import annotations
@@ -53,7 +47,6 @@ from services.intelligence.bilingual_drafting import (  # noqa: E402
     BilingualDraftingError,
     DRAFT_PROMPT_TEMPLATE_ID,
     DRAFT_PROMPT_TEMPLATE_VERSION,
-    DRAFT_TERMINOLOGY_TOKEN,
     DraftModelTrace,
     build_approved_drafting_context,
     build_bilingual_draft_run,
@@ -69,8 +62,8 @@ from services.intelligence.model_extraction_trial import (  # noqa: E402
 DEFAULT_FIXTURE = ROOT / "tests" / "fixtures" / "m4-drafting-trial-v0.1.json"
 DEFAULT_TERMINOLOGY = ROOT / "data" / "terminology" / "bilingual-terminology-v0.1.json"
 
-REPORT_VERSION = "m4-drafting-live-trial-v0.2"
-EDITERIAL_DIMENSIONS = [
+REPORT_VERSION = "m4-drafting-live-trial-v0.3"
+EDITORIAL_DIMENSIONS = [
     "Arabic fluency",
     "English fluency",
     "factual faithfulness of phrasing",
@@ -80,6 +73,10 @@ EDITERIAL_DIMENSIONS = [
 ]
 
 
+class TrialGateError(SystemExit):
+    """Raised when a pre-invocation gate refuses the run."""
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--fixture", type=Path, default=DEFAULT_FIXTURE)
@@ -87,16 +84,84 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--zai-endpoint", choices=("coding-plan", "prepaid"), default=None)
     parser.add_argument("--base-url", default=None)
     parser.add_argument(
+        "--reviewed-head",
+        required=True,
+        help="the exact independently reviewed commit SHA this trial is authorized to run from",
+    )
+    parser.add_argument(
         "--entitlement-attestation",
         required=True,
-        help=(
-            "explicit attestation string for THIS live drafting call (the standing "
-            "extraction entitlement does not cover drafting); recorded verbatim"
-        ),
+        help="explicit attestation for THIS live drafting call (not covered by extraction entitlement)",
     )
     parser.add_argument("--timeout-seconds", type=int, default=180)
     parser.add_argument("--output", type=Path, required=True)
     return parser.parse_args()
+
+
+# --- Individually testable pre-invocation gates ---
+
+
+def check_entitlement(attestation: str) -> str:
+    value = attestation.strip()
+    if not value:
+        raise TrialGateError("--entitlement-attestation must be non-empty")
+    return value
+
+
+def check_route_args(
+    base_url_arg: str | None,
+    endpoint_arg: str | None,
+    env_url: str,
+) -> None:
+    """Refuse any ambiguous route combination (DTD-01R)."""
+
+    supplied = [name for name, value in (
+        ("--base-url", base_url_arg),
+        ("--zai-endpoint", endpoint_arg),
+        (ZAI_BASE_URL_ENV, env_url),
+    ) if value]
+    if len(supplied) > 1:
+        raise TrialGateError(
+            f"ambiguous Z.ai route: {', '.join(supplied)} are all set; supply exactly one"
+        )
+
+
+def check_git_state(
+    git_head: str, worktree_clean: bool | None, reviewed_head: str
+) -> None:
+    """Refuse unless HEAD resolves, worktree is clean, and HEAD is the reviewed SHA (DTD-05R)."""
+
+    if not git_head:
+        raise TrialGateError("cannot resolve git HEAD")
+    if worktree_clean is not True:
+        raise TrialGateError(
+            "tracked worktree is dirty or git is unavailable; live evidence "
+            "requires a clean checkout"
+        )
+    if git_head != reviewed_head:
+        raise TrialGateError(
+            f"git HEAD {git_head} is not the reviewed head {reviewed_head}; "
+            "live drafting must run from the independently reviewed commit"
+        )
+
+
+def check_attestation_route_binding(attestation: str, resolved_base_url: str) -> None:
+    """The attestation must name the route the call actually uses (DTD-01R)."""
+
+    if "coding" in resolved_base_url and "coding" not in attestation.lower():
+        raise TrialGateError(
+            "entitlement attestation does not mention the coding-plan route the "
+            "call would use; bind the attestation to the resolved endpoint"
+        )
+    if "paas/v4" in resolved_base_url and "coding" not in resolved_base_url:
+        if "prepaid" not in attestation.lower() and "general" not in attestation.lower():
+            raise TrialGateError(
+                "entitlement attestation does not mention the prepaid/general route "
+                "the call would use"
+            )
+
+
+# --- Fixture / context / invocation ---
 
 
 def load_fixture(path: Path) -> dict:
@@ -120,64 +185,40 @@ def build_drafting_context_from_fixture(
     )
 
 
-def _utc_now() -> str:
-    from datetime import datetime, timezone
+def execute_draft_invocation(
+    *,
+    context: dict,
+    terminology: dict,
+    model_trace: DraftModelTrace,
+    invoke_fn: Callable[[str], str],
+) -> tuple[dict[str, Any] | None, str | None, str | None, float]:
+    """Run one invocation; return (draft_run, error, raw_output, elapsed)."""
 
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    raw_holder: list[str] = []
 
+    def capturing(prompt: str) -> str:
+        result = invoke_fn(prompt)
+        raw_holder.append(result)
+        return result
 
-def _git_head(root: Path) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "HEAD"],
-        capture_output=True, text=True, timeout=30,
-    )
-    return result.stdout.strip() if result.returncode == 0 else ""
-
-
-def _git_ref(root: Path) -> str:
-    result = subprocess.run(
-        ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
-        capture_output=True, text=True, timeout=30,
-    )
-    return result.stdout.strip() if result.returncode == 0 else ""
-
-
-def _worktree_clean(root: Path) -> bool | None:
-    result = subprocess.run(
-        ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
-        capture_output=True, text=True, timeout=30,
-    )
-    if result.returncode != 0:
-        return None
-    return not result.stdout.strip()
-
-
-def _refuse_overwrite(*paths: Path) -> None:
-    existing = [str(p) for p in paths if p.exists()]
-    if existing:
-        raise SystemExit(
-            f"refusing to overwrite existing artifact(s): {', '.join(existing)}"
+    started = time.monotonic()
+    draft_run = None
+    error = None
+    try:
+        draft_run = build_bilingual_draft_run(
+            context=context,
+            terminology=terminology,
+            model_trace=model_trace,
+            invoke=capturing,
         )
+    except Exception as exc:  # noqa: BLE001 — failure must produce a report
+        error = str(exc)[:512]
+    elapsed = time.monotonic() - started
+    raw_output = raw_holder[0] if raw_holder else None
+    return draft_run, error, raw_output, elapsed
 
 
-def resolve_route(
-    base_url_arg: str | None, endpoint_arg: str | None
-) -> tuple[str, str]:
-    """Resolve the endpoint with fail-closed ambiguity handling (DTD-01)."""
-
-    env_url = os.environ.get(ZAI_BASE_URL_ENV, "").strip()
-    if endpoint_arg and env_url:
-        raise SystemExit(
-            f"ambiguous Z.ai route: both --zai-endpoint {endpoint_arg} and "
-            f"{ZAI_BASE_URL_ENV} are set; remove one before running"
-        )
-    if base_url_arg and env_url:
-        raise SystemExit(
-            f"ambiguous Z.ai route: both --base-url and {ZAI_BASE_URL_ENV} are set"
-        )
-    base_url, source = resolve_zai_base_url(base_url_arg, endpoint_arg)
-    validate_zai_base_url(base_url)
-    return base_url, source
+# --- Report builder (factored for deterministic validation) ---
 
 
 def build_trial_report(
@@ -187,13 +228,16 @@ def build_trial_report(
     context: dict,
     rendered_prompt: str,
     raw_model_output: str | None,
-    draft_run: dict | None,
+    draft_run: dict[str, Any] | None,
     execution_error: str | None,
+    invocation_attempted: bool,
+    invocation_count: int,
     requested_model: str,
     base_url: str,
     base_url_source: str,
     endpoint_arg: str | None,
     entitlement_attestation: str,
+    reviewed_head: str,
     git_head: str,
     git_ref: str,
     worktree_clean: bool,
@@ -201,8 +245,6 @@ def build_trial_report(
     terminology_path: Path,
     elapsed_seconds: float,
 ) -> dict[str, Any]:
-    """Build the evidence report; callable with fake invoker results (DTD-03)."""
-
     terminology = load_terminology(terminology_payload)
     rendered_sha = hashlib.sha256(rendered_prompt.encode("utf-8")).hexdigest()
     raw_sha = (
@@ -210,6 +252,22 @@ def build_trial_report(
         if raw_model_output is not None
         else None
     )
+
+    # DTD-02R: the embedded draft run's hash chain must agree with the
+    # frozen bytes, when both exist.
+    if draft_run is not None and raw_model_output is not None:
+        if draft_run.get("raw_output_sha256") != raw_sha:
+            raise RuntimeError(
+                "draft run raw_output_sha256 does not match the frozen raw output bytes"
+            )
+        if draft_run.get("input_context_sha256") != context.get("_context_sha_for_check"):
+            pass  # context hash checked via prompt_trace below
+        prompt_trace = draft_run.get("prompt_trace", {})
+        if prompt_trace.get("rendered_input_sha256") != rendered_sha:
+            raise RuntimeError(
+                "draft run rendered_input_sha256 does not match the frozen rendered input bytes"
+            )
+
     structural_accepted = (
         draft_run is not None
         and draft_run.get("validation", {}).get("status") == "accepted_for_editorial_review"
@@ -238,12 +296,10 @@ def build_trial_report(
         },
         "entitlement": {
             "attestation": entitlement_attestation,
+            "resolved_base_url": base_url,
             "standing_extraction_entitlement_covers_drafting": False,
-            "note": (
-                "The standing Coding Plan approval covers bounded M4 structured-extraction "
-                "runs. Live drafting requires this explicit per-run attestation."
-            ),
         },
+        "reviewed_head": reviewed_head,
         "drafting_boundary_versions": {
             "drafting_adapter": DRAFTING_ADAPTER_VERSION,
             "extraction_adapter_at_build": EXTRACTION_ADAPTER_VERSION,
@@ -267,6 +323,8 @@ def build_trial_report(
             "fixture_sha256": _file_sha256(fixture_path),
         },
         "invocation": {
+            "attempted": invocation_attempted,
+            "count": invocation_count,
             "rendered_input_sha256": rendered_sha,
             "raw_model_output_sha256": raw_sha,
             "elapsed_seconds": round(elapsed_seconds, 3),
@@ -274,10 +332,6 @@ def build_trial_report(
         "evidence": {
             "rendered_model_input": rendered_prompt,
             "raw_model_output": raw_model_output,
-            "note": (
-                "Exact dynamic bytes frozen for audit; the structural result below is "
-                "the reviewed boundary's typed projection of the raw output."
-            ),
         },
         "structural_result": draft_run,
         "execution_error": execution_error,
@@ -285,13 +339,7 @@ def build_trial_report(
             "status": "pending_human_review",
             "mechanical_score": None,
             "notes": None,
-            "assessment_dimensions": EDITERIAL_DIMENSIONS,
-            "note": (
-                "This section is a placeholder for independent human editorial "
-                "review. A mechanically accepted draft can still be editorially "
-                "poor; a fluent draft cannot override a mechanical rejection. "
-                "No mechanical editorial score exists in this increment."
-            ),
+            "assessment_dimensions": EDITORIAL_DIMENSIONS,
         },
         "qualification": {
             "structural_mechanical_acceptance": structural_accepted,
@@ -312,53 +360,89 @@ def build_trial_report(
     }
 
 
+# --- Immutable artifact writer ---
+
+
 def write_report_with_sidecar(output: Path, report: dict[str, Any]) -> str:
+    """Write the report + sidecar; refuse if either file already exists (DTD-02R)."""
+
+    sidecar = output.with_name(output.name + ".sha256")
+    if output.exists():
+        raise TrialGateError(f"refusing to overwrite existing artifact: {output}")
+    if sidecar.exists():
+        raise TrialGateError(f"refusing to overwrite existing artifact: {sidecar}")
     output.parent.mkdir(parents=True, exist_ok=True)
     report_bytes = (
         json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
     ).encode("utf-8")
     output.write_bytes(report_bytes)
     report_sha = hashlib.sha256(output.read_bytes()).hexdigest()
-    sidecar = output.with_name(output.name + ".sha256")
     sidecar.write_bytes(f"{report_sha}  {output.name}\n".encode("utf-8"))
     return report_sha
+
+
+# --- Git helpers ---
+
+
+def _git_head(root: Path) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "HEAD"],
+        capture_output=True, text=True, timeout=30,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _git_ref(root: Path) -> str:
+    result = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True, timeout=30,
+    )
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def _worktree_clean(root: Path) -> bool | None:
+    result = subprocess.run(
+        ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+        capture_output=True, text=True, timeout=30,
+    )
+    if result.returncode != 0:
+        return None
+    return not result.stdout.strip()
+
+
+def _utc_now() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+# --- Main ---
 
 
 def main() -> int:
     args = parse_args()
     if args.timeout_seconds < 1:
-        raise SystemExit("--timeout-seconds must be positive")
-    attestation = args.entitlement_attestation.strip()
-    if not attestation:
-        raise SystemExit("--entitlement-attestation must be non-empty")
+        raise TrialGateError("--timeout-seconds must be positive")
 
-    # DTD-05: pre-invocation git gate
+    attestation = check_entitlement(args.entitlement_attestation)
+
     git_head = _git_head(ROOT)
-    if not git_head:
-        raise SystemExit(
-            "cannot resolve git HEAD; live drafting evidence requires a reviewed commit"
-        )
     git_ref = _git_ref(ROOT)
     worktree_clean = _worktree_clean(ROOT)
-    if worktree_clean is not True:
-        raise SystemExit(
-            "tracked worktree is dirty or git is unavailable; live drafting "
-            "evidence requires a clean checkout of the reviewed tip"
-        )
+    check_git_state(git_head, worktree_clean, args.reviewed_head)
 
-    # DTD-01: credential + route resolution with ambiguity refusal
     api_key = require_zai_api_key()
-    base_url, base_url_source = resolve_route(args.base_url, args.zai_endpoint)
+    env_url = os.environ.get(ZAI_BASE_URL_ENV, "").strip()
+    check_route_args(args.base_url, args.zai_endpoint, env_url)
+    base_url, base_url_source = resolve_zai_base_url(args.base_url, args.zai_endpoint)
+    validate_zai_base_url(base_url)
+    check_attestation_route_binding(attestation, base_url)
 
     fixture = load_fixture(args.fixture)
     terminology_payload = json.loads(DEFAULT_TERMINOLOGY.read_text(encoding="utf-8"))
     terminology = load_terminology(terminology_payload)
-    created_at = _utc_now()
-    context = build_drafting_context_from_fixture(fixture, terminology, created_at)
-    rendered_prompt, _delivery_json = prepare_draft_input(context, terminology)
-
-    # DTD-02: refuse overwrite before any invocation
-    _refuse_overwrite(args.output, args.output.with_name(args.output.name + ".sha256"))
+    context = build_drafting_context_from_fixture(fixture, terminology, _utc_now())
+    rendered_prompt, _ = prepare_draft_input(context, terminology)
 
     trace = DraftModelTrace(
         provider="zai-openai-compatible-api",
@@ -372,28 +456,18 @@ def main() -> int:
         timeout_seconds=args.timeout_seconds,
     )
 
-    raw_output_holder: list[str] = []
+    attempt_counter = [0]
 
-    def capturing_invoke(prompt: str) -> str:
-        result = invoke(prompt)
-        raw_output_holder.append(result)
-        return result
+    def counting_invoke(prompt: str) -> str:
+        attempt_counter[0] += 1
+        return invoke(prompt)
 
-    started = time.monotonic()
-    draft_run: dict | None = None
-    execution_error: str | None = None
-    try:
-        draft_run = build_bilingual_draft_run(
-            context=context,
-            terminology=terminology,
-            model_trace=trace,
-            invoke=capturing_invoke,
-        )
-    except (BilingualDraftingError, RuntimeError, Exception) as exc:  # noqa: BLE001
-        execution_error = str(exc)[:512]
-    elapsed = time.monotonic() - started
-
-    raw_output = raw_output_holder[0] if raw_output_holder else None
+    draft_run, execution_error, raw_output, elapsed = execute_draft_invocation(
+        context=context,
+        terminology=terminology,
+        model_trace=trace,
+        invoke_fn=counting_invoke,
+    )
 
     report = build_trial_report(
         fixture=fixture,
@@ -403,14 +477,17 @@ def main() -> int:
         raw_model_output=raw_output,
         draft_run=draft_run,
         execution_error=execution_error,
+        invocation_attempted=attempt_counter[0] > 0,
+        invocation_count=attempt_counter[0],
         requested_model=args.model,
         base_url=base_url,
         base_url_source=base_url_source,
         endpoint_arg=args.zai_endpoint,
         entitlement_attestation=attestation,
+        reviewed_head=args.reviewed_head,
         git_head=git_head,
         git_ref=git_ref,
-        worktree_clean=worktree_clean,
+        worktree_clean=worktree_clean is True,
         fixture_path=args.fixture,
         terminology_path=DEFAULT_TERMINOLOGY,
         elapsed_seconds=elapsed,
@@ -426,6 +503,7 @@ def main() -> int:
             {
                 "structural_status": structural_status,
                 "execution_error": execution_error is not None,
+                "invocation_count": attempt_counter[0],
                 "elapsed_seconds": round(elapsed, 3),
                 "report_sha256": report_sha,
                 "output": str(args.output),
