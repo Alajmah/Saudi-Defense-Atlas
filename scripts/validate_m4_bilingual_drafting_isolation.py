@@ -33,6 +33,7 @@ from services.intelligence.bilingual_drafting import (  # noqa: E402
     build_approved_drafting_context,
     build_bilingual_draft_run,
     load_terminology,
+    derive_terminology_delivery_payload,
     render_draft_prompt,
     split_rendered_prompt,
 )
@@ -172,20 +173,36 @@ def main() -> int:
     for marker in ("CAND-", "readiness", "patrol", "stock level", "live unit", "جاهزية", "مخزون"):
         expect(marker not in prompt, f"model input leaked {marker!r}", failures)
     expect(
-        prompt == render_draft_prompt(context),
-        "model input is not exactly the rendered wrapper input",
+        prompt == render_draft_prompt(context, terminology),
+        "model input is not exactly the rendered two-block input",
         failures,
     )
-    _, extracted_json, _ = split_rendered_prompt(prompt)
+    _, extracted_json, _, extracted_terms, _ = split_rendered_prompt(prompt)
     parsed_prompt = json.loads(extracted_json)
     expect(
         set(parsed_prompt) == set(context),
-        "the context inside the wrapper is not exactly the context object",
+        "the context inside the template is not exactly the context object",
         failures,
     )
     expect(
         "terminology_sha256" in parsed_prompt,
         "model input lost the terminology digest binding",
+        failures,
+    )
+    # The terminology block is exactly the least-privilege delivery payload,
+    # and the registry's own version/term-id metadata never reaches the model.
+    delivered = json.loads(extracted_terms)
+    expected_delivery = derive_terminology_delivery_payload(terminology)
+    import json as _json
+
+    expect(
+        delivered == expected_delivery,
+        "the terminology block is not the least-privilege delivery payload",
+        failures,
+    )
+    expect(
+        "version" not in extracted_terms and "term_id" not in extracted_terms,
+        "terminology block leaked registry version or term identity",
         failures,
     )
     # Enumerated template property: stripping the wrapper reproduces the
@@ -201,8 +218,8 @@ def main() -> int:
         "stripped context bytes differ from the canonical serialization",
         failures,
     )
-    before, _, after = split_rendered_prompt(prompt)
-    wrapper_text = before + after
+    before, _, mid, _, after = split_rendered_prompt(prompt)
+    wrapper_text = before + mid + after
     for item in context["entities"]:
         for name in item["names"].values():
             expect(
@@ -214,7 +231,20 @@ def main() -> int:
             item["entity_id"] not in wrapper_text,
             f"wrapper text carries the entity identity {item['entity_id']!r}",
             failures,
-    )
+        )
+    # Registry renderings live in the terminology block, never in the static
+    # template segments; official Entity names remain context-owned.
+    for term in terminology["terms"]:
+        expect(
+            term["en"].casefold() not in wrapper_text.casefold(),
+            f"static segments carry registry English rendering {term['term_id']}",
+            failures,
+        )
+        expect(
+            term["ar"] not in wrapper_text,
+            f"static segments carry registry Arabic rendering {term['term_id']}",
+            failures,
+        )
     expect(
         not any(char.isdigit() for char in wrapper_text),
         "wrapper text contains digits",

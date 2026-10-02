@@ -244,6 +244,8 @@
         "template_id",
         "template_version",
         "template_sha256",
+        "terminology_registry_sha256",
+        "terminology_delivery_sha256",
         "rendered_input_sha256"
       ],
       "additionalProperties": false,
@@ -263,6 +265,14 @@
           "pattern": "^[0-9a-f]{64}$"
         },
         "rendered_input_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "terminology_registry_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "terminology_delivery_sha256": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$"
         }

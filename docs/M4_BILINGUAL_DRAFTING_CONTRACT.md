@@ -16,9 +16,9 @@ Deterministic, provider-independent first increment. No live model call has been
 
 The context is canonically typed: `predicate_id` uses the canonical enum, Claim `value` reuses `common.schema.json#$defs/claim_value`, `scope.quantity_type` uses the canonical procurement-stage enum, `validity` reuses `validity_interval`, `entity_type` uses the canonical enum, and Evidence locators mirror the canonical locator shape — so a hand-assembled context with noncanonical predicate, quantity stage, value shape, or locator fails the schema gate before invocation. Only that bounded object reaches the drafting adapter. A **deterministic drafting-eligibility gate** first rejects restricted operational detail in any factual field, in either locale, before any model invocation. The adapter **independently re-validates the full context contract** (schema plus builder invariants).
 
-## Model input: the reviewed drafting wrapper
+## Model input: reviewed wrapper with two typed data blocks
 
-The complete model input is the reviewed instruction wrapper (`m4-bilingual-drafting-prompt` template **v0.1**) rendered around the canonical JSON serialization of the context — nothing else reaches the model. The run records four trace values: the wrapper `template_id`, `template_version`, the wrapper `template_sha256`, and `rendered_input_sha256` over the complete input, while `input_context_sha256` continues to hash the context alone, so the wrapper's contribution to the input is separately auditable.
+The complete model input is the reviewed instruction wrapper (`m4-bilingual-drafting-prompt` template **v0.2**) rendered around **two typed data blocks**: the canonical JSON serialization of the context (the only factual authority), then a **terminology block** carrying the least-privilege delivery payload (`category` + `en` + `ar` per registry term, registry order, no version/term-id/scope). The renderer owns the full registry-to-input dataflow (`prepare_draft_input`): load and freeze-check categories, verify registry version and acceptance digest against the context binding, apply the lexical-safety and Entity-name collision gates, derive the payload, and token-replace both blocks. The run records six trace values: template id/version/hash, `terminology_registry_sha256` (the context binding), `terminology_delivery_sha256` (the delivered projection), `rendered_input_sha256` (the complete input), while `input_context_sha256` continues to hash the context alone. Terminology digits never enlarge the factual-number allowlist.
 
 The wrapper is reviewed as instructions-only. The validators mechanically prove a precise, enumerated set of properties — not a generic no-factual-payload theorem:
 
@@ -31,7 +31,7 @@ The wrapper is reviewed as instructions-only. The validators mechanically prove 
 
 The judgment that the reviewed static template is itself instruction-only is review evidence carried by the first-pass and remediation records, not a validator theorem: the checks above constrain the template's syntax and its overlap with the evaluated context and registry, and a template is a fixed, reviewed artifact rather than model output.
 
-One open question is recorded for the live drafting trial: how registry renderings reach the model. The context binds the registry by version and digest but does not embed the terms; the live increment must decide (for example, a registry section appended inside the rendered input, covered by the rendered-input hash and the context's registry binding) and must be reviewed before any live call.
+The registry-delivery question is resolved by the merged terminology-delivery design (`docs/M4_BILINGUAL_DRAFTING_TERMINOLOGY_DELIVERY_DESIGN.md`), implemented here: a second typed block, bounded categories, shared forbidden-vocabulary scanning over every delivered string, exact registry/Entity-name collision refusal, and separate registry/delivery hashes.
 
 The adapter also records the SHA-256 of the exact model response (`raw_output_sha256`).
 
