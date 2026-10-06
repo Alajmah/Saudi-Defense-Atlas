@@ -635,57 +635,6 @@ def verify_case_report(
     }
 
 
-def _pid_alive_windows(pid: int) -> bool:
-    import ctypes
-    from ctypes import wintypes
-
-    process_query_limited_information = 0x1000
-    still_active = 259
-    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
-    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.CloseHandle.restype = wintypes.BOOL
-
-    handle = kernel32.OpenProcess(
-        process_query_limited_information, False, pid
-    )
-    if not handle:
-        error = ctypes.get_last_error()
-        if error in {5}:  # access denied -> process exists but is not queryable
-            return True
-        if error in {87}:  # invalid parameter -> no such PID
-            return False
-        return True
-    try:
-        exit_code = wintypes.DWORD()
-        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
-            return True
-        return exit_code.value == still_active
-    finally:
-        kernel32.CloseHandle(handle)
-
-
-def _pid_alive_posix(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    except OSError:
-        return True
-    return True
-
-
-def _pid_alive(pid: int) -> bool:
-    if os.name == "nt":
-        return _pid_alive_windows(pid)
-    return _pid_alive_posix(pid)
-
-
 @dataclass
 class CampaignLock:
     path: Path
@@ -695,34 +644,21 @@ class CampaignLock:
 def acquire_lock(
     path: Path,
     manifest_sha256: str,
-    *,
-    pid_alive: Callable[[int], bool] = _pid_alive,
 ) -> CampaignLock:
+    """Acquire the campaign lock exclusively; never reclaim an existing lock.
+
+    Any existing lock, including an apparent same-host crash residue, requires
+    explicit operator reconciliation/removal. This avoids stale-lock TOCTOU
+    races that could otherwise admit concurrent campaign controllers.
+    """
+
     path.parent.mkdir(parents=True, exist_ok=True)
     host = socket.gethostname()
     token = _sha256_text(f"{host}:{os.getpid()}:{manifest_sha256}")
     if path.exists():
-        try:
-            existing = json.loads(path.read_text(encoding="utf-8"))
-        except Exception as exc:  # noqa: BLE001
-            raise CampaignGateError(
-                "campaign lock exists but cannot be validated"
-            ) from exc
-        if existing.get("manifest_sha256") != manifest_sha256:
-            raise CampaignGateError(
-                "campaign evidence directory is locked by another manifest"
-            )
-        if existing.get("hostname") != host:
-            raise CampaignGateError(
-                "campaign lock belongs to another host; "
-                "refuse automatic stale-lock recovery"
-            )
-        pid = existing.get("pid")
-        if not isinstance(pid, int) or pid_alive(pid):
-            raise CampaignGateError(
-                "campaign is already locked by a live/unknown process"
-            )
-        path.unlink()
+        raise CampaignGateError(
+            "campaign lock already exists; refuse automatic stale-lock recovery"
+        )
     payload = {
         "campaign_controller_version": CAMPAIGN_CONTROLLER_VERSION,
         "manifest_sha256": manifest_sha256,
@@ -878,13 +814,13 @@ def _case_payload(
     }
 
 
-def _verify_terminal_case_evidence(
+def _verify_recorded_case_evidence(
     manifest: dict[str, Any],
     events: list[dict[str, Any]],
     evidence_dir: Path,
     attestation: str,
 ) -> None:
-    """Re-close terminal ledger records over their immutable case evidence."""
+    """Re-close recorded case ledger events over immutable case evidence."""
 
     cases_by_id = {case["case_id"]: case for case in manifest["cases"]}
     terminal_cases = _case_events(events)
@@ -990,11 +926,55 @@ def run_campaign(
                 raise CampaignGateError(
                     "campaign entitlement attestation changed across resume"
                 )
-        terminal = _terminal_event(events)
-        if terminal is not None:
-            _verify_terminal_case_evidence(
+        recorded = _case_events(events)
+        if recorded:
+            _verify_recorded_case_evidence(
                 manifest, events, evidence_dir, attestation
             )
+
+        terminal = _terminal_event(events)
+        if terminal is None:
+            failed_events = [
+                event
+                for event in recorded.values()
+                if event["event_type"] == "case_execution_failure"
+            ]
+            if failed_events:
+                if len(failed_events) != 1:
+                    raise CampaignGateError(
+                        "campaign ledger has multiple recorded execution failures"
+                    )
+                failed_event = failed_events[0]
+                later_case_events = [
+                    event
+                    for event in events
+                    if event["event_type"] in {
+                        "case_completed",
+                        "case_execution_failure",
+                    }
+                    and event["sequence"] > failed_event["sequence"]
+                ]
+                if later_case_events:
+                    raise CampaignGateError(
+                        "campaign ledger contains case results after an execution failure"
+                    )
+                append_event(
+                    ledger_path,
+                    campaign_id=manifest["campaign_id"],
+                    manifest_sha256=manifest_sha256,
+                    event_type="campaign_stopped",
+                    payload={
+                        "status": "stopped_execution_failure",
+                        "case_id": failed_event["payload"]["case_id"],
+                    },
+                    clock=clock,
+                )
+                events = load_ledger(
+                    ledger_path, manifest["campaign_id"], manifest_sha256
+                )
+                terminal = _terminal_event(events)
+
+        if terminal is not None:
             expected_summary = _summary_from_events(
                 manifest,
                 manifest_sha256,
@@ -1228,7 +1208,7 @@ def run_campaign(
             terminal["payload"]["status"] if terminal else "running"
         )
         if terminal is not None:
-            _verify_terminal_case_evidence(
+            _verify_recorded_case_evidence(
                 manifest, events, evidence_dir, attestation
             )
         summary = _summary_from_events(
