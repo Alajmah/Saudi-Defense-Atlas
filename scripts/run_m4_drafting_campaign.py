@@ -269,11 +269,21 @@ def check_campaign_entitlement(
     value = attestation.strip()
     if not value:
         raise CampaignGateError("campaign entitlement attestation must be non-empty")
-    if manifest["entitlement_id"].casefold() not in value.casefold():
+    manifest_sha256 = _sha256_text(_canonical_json(manifest))
+    folded = value.casefold()
+    if manifest["entitlement_id"].casefold() not in folded:
         raise CampaignGateError(
             "campaign entitlement attestation is not bound to the manifest entitlement_id"
         )
-    route_text = value.casefold()
+    if manifest["campaign_id"].casefold() not in folded:
+        raise CampaignGateError(
+            "campaign entitlement attestation is not bound to the campaign_id"
+        )
+    if manifest_sha256.casefold() not in folded:
+        raise CampaignGateError(
+            "campaign entitlement attestation is not bound to the exact manifest SHA-256"
+        )
+    route_text = folded
     if manifest["route"] == "coding-plan" and "coding-plan" not in route_text:
         raise CampaignGateError(
             "campaign entitlement attestation does not name the coding-plan route"
@@ -466,9 +476,9 @@ def verify_case_report(
         raise CampaignGateError("case report terminology hash mismatch")
     invocation = report.get("invocation", {})
     invocation_count = invocation.get("count")
-    if invocation_count not in {0, 1}:
+    if invocation.get("attempted") is not True or invocation_count != 1:
         raise CampaignGateError(
-            "case report invocation count is outside single-case boundary"
+            "campaign case report must prove exactly one attempted provider invocation"
         )
 
     # Recovery is a separate trust boundary: independently re-verify the exact
@@ -633,6 +643,17 @@ def verify_case_report(
         "report_sha256": report_sha,
         "invocation_count": invocation_count,
     }
+
+
+def campaign_lock_path(manifest_sha256: str) -> Path:
+    """Return the single-checkout lock namespace for one exact manifest."""
+
+    return (
+        ROOT
+        / ".runtime"
+        / "m4-drafting-campaign-locks"
+        / f"{manifest_sha256}.lock"
+    )
 
 
 @dataclass
@@ -897,7 +918,7 @@ def run_campaign(
     ledger_path = evidence_dir / "campaign-ledger.jsonl"
     frozen_manifest_path = evidence_dir / "campaign-manifest.json"
     summary_path = evidence_dir / "campaign-summary.json"
-    lock = acquire_lock(evidence_dir / ".campaign.lock", manifest_sha256)
+    lock = acquire_lock(campaign_lock_path(manifest_sha256), manifest_sha256)
     try:
         if frozen_manifest_path.exists() or sidecar_path(frozen_manifest_path).exists():
             frozen_manifest, _ = _verify_immutable_json(frozen_manifest_path)
