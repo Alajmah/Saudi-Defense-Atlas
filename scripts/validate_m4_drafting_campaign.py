@@ -156,6 +156,14 @@ def attestation_for(manifest_path: Path) -> str:
     )
 
 
+def run_test_campaign(**kwargs):
+    manifest_path = Path(kwargs["manifest_path"])
+    kwargs.setdefault(
+        "runtime_root", manifest_path.parent / ".campaign-runtime"
+    )
+    return run_campaign(**kwargs)
+
+
 def main() -> int:
     failures: list[str] = []
     raw_good = json.dumps(good_output(), ensure_ascii=False)
@@ -233,7 +241,7 @@ def main() -> int:
 
             expect_gate(
                 f"manifest-bound entitlement {label}",
-                lambda: run_campaign(
+                lambda: run_test_campaign(
                     manifest_path=drifted_path,
                     evidence_dir=td / f"evidence-{label}",
                     entitlement_attestation=original_attestation,
@@ -301,7 +309,9 @@ def main() -> int:
 
         # DCC-LOCK-01: lock namespace is keyed by exact manifest and checkout,
         # independent of caller-selected evidence directory.
-        global_path = campaign_lock_path(digest)
+        global_path = campaign_lock_path(
+            digest, runtime_root=td / ".campaign-runtime"
+        )
         global_lock = acquire_lock(global_path, digest)
         blocked_key_reads: list[int] = []
         blocked_provider_calls: list[str] = []
@@ -319,7 +329,7 @@ def main() -> int:
         try:
             expect_gate(
                 "same manifest different evidence directory while locked",
-                lambda: run_campaign(
+                lambda: run_test_campaign(
                     manifest_path=manifest_path,
                     evidence_dir=td / "different-evidence-directory",
                     entitlement_attestation=attestation_for(manifest_path),
@@ -333,7 +343,7 @@ def main() -> int:
             )
             expect(
                 not blocked_key_reads and not blocked_provider_calls,
-                "manifest-global lock allowed credentials/provider from another evidence directory",
+                "manifest-global live lock allowed credentials/provider from another evidence directory",
                 failures,
             )
         finally:
@@ -362,7 +372,7 @@ def main() -> int:
 
             return invoke
 
-        summary = run_campaign(
+        summary = run_test_campaign(
             manifest_path=manifest_path,
             evidence_dir=evidence_dir,
             entitlement_attestation=attestation_for(manifest_path),
@@ -452,7 +462,7 @@ def main() -> int:
         )
 
         # Re-running a terminal campaign performs no additional invocation.
-        second = run_campaign(
+        second = run_test_campaign(
             manifest_path=manifest_path,
             evidence_dir=evidence_dir,
             entitlement_attestation=attestation_for(manifest_path),
@@ -468,6 +478,43 @@ def main() -> int:
             failures,
         )
 
+        # DCC-LOCK-01 residual: the transient live lock is not enough. The
+        # persistent manifest binding must survive normal completion so the
+        # same exact approval cannot spend the ceiling again in another
+        # evidence directory.
+        second_dir_key_reads: list[int] = []
+        second_dir_calls: list[str] = []
+
+        def second_dir_key() -> str:
+            second_dir_key_reads.append(1)
+            return "test-key"
+
+        def second_dir_factory(**kwargs):
+            def invoke(prompt: str) -> str:
+                second_dir_calls.append(prompt)
+                return raw_good
+            return invoke
+
+        expect_gate(
+            "same completed manifest second evidence directory",
+            lambda: run_test_campaign(
+                manifest_path=manifest_path,
+                evidence_dir=td / "evidence-second-after-completion",
+                entitlement_attestation=attestation_for(manifest_path),
+                require_api_key=second_dir_key,
+                invoke_factory=second_dir_factory,
+                git_state_provider=fixed_git_state,
+                env_url_provider=empty_env,
+                clock=fixed_clock,
+            ),
+            failures,
+        )
+        expect(
+            not second_dir_key_reads and not second_dir_calls,
+            "persistent campaign binding allowed the call ceiling to be replayed",
+            failures,
+        )
+
         # DCC-01: a terminal rerun must re-close the ledger over every
         # referenced immutable per-case report before trusting the summary.
         case_report = evidence_dir / "CASE-01.json"
@@ -478,7 +525,7 @@ def main() -> int:
         case_report.unlink()
         expect_gate(
             "terminal missing case report",
-            lambda: run_campaign(
+            lambda: run_test_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
                 entitlement_attestation=attestation_for(manifest_path),
@@ -496,7 +543,7 @@ def main() -> int:
         case_sidecar.unlink()
         expect_gate(
             "terminal missing case sidecar",
-            lambda: run_campaign(
+            lambda: run_test_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
                 entitlement_attestation=attestation_for(manifest_path),
@@ -514,7 +561,7 @@ def main() -> int:
         case_report.write_bytes(original_case_report + b" ")
         expect_gate(
             "terminal case byte tamper",
-            lambda: run_campaign(
+            lambda: run_test_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
                 entitlement_attestation=attestation_for(manifest_path),
@@ -542,7 +589,7 @@ def main() -> int:
         )
         expect_gate(
             "terminal rehashed semantic case tamper",
-            lambda: run_campaign(
+            lambda: run_test_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
                 entitlement_attestation=attestation_for(manifest_path),
@@ -561,7 +608,7 @@ def main() -> int:
         # Resume must keep the exact campaign-start entitlement attestation.
         expect_gate(
             "resume entitlement drift",
-            lambda: run_campaign(
+            lambda: run_test_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
                 entitlement_attestation=attestation_for(manifest_path) + " CHANGED",
@@ -586,7 +633,7 @@ def main() -> int:
         summary_path.write_text(json.dumps(tampered_summary), encoding="utf-8")
         expect_gate(
             "terminal summary tamper",
-            lambda: run_campaign(
+            lambda: run_test_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
                 entitlement_attestation=attestation_for(manifest_path),
@@ -615,7 +662,7 @@ def main() -> int:
         )
         expect_gate(
             "ledger tamper",
-            lambda: run_campaign(
+            lambda: run_test_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
                 entitlement_attestation=attestation_for(manifest_path),
@@ -684,7 +731,7 @@ def main() -> int:
 
         expect_gate(
             "ambiguous prior invocation without terminal evidence",
-            lambda: run_campaign(
+            lambda: run_test_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
                 entitlement_attestation=attestation,
@@ -720,7 +767,7 @@ def main() -> int:
             evidence_dir = td / "evidence"
             provider_calls: list[str] = []
             try:
-                run_campaign(
+                run_test_campaign(
                     manifest_path=manifest_path,
                     evidence_dir=evidence_dir,
                     entitlement_attestation=attestation_for(manifest_path),
@@ -805,7 +852,7 @@ def main() -> int:
 
             return invoke
 
-        stopped = run_campaign(
+        stopped = run_test_campaign(
             manifest_path=manifest_path,
             evidence_dir=evidence_dir,
             entitlement_attestation=attestation_for(manifest_path),
@@ -864,7 +911,7 @@ def main() -> int:
                 return raw_good
             return invoke
 
-        resumed_failure = run_campaign(
+        resumed_failure = run_test_campaign(
             manifest_path=manifest_path,
             evidence_dir=evidence_dir,
             entitlement_attestation=attestation_for(manifest_path),
@@ -1002,7 +1049,7 @@ def main() -> int:
 
         expect_gate(
             "nonterminal recorded evidence damage",
-            lambda: run_campaign(
+            lambda: run_test_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
                 entitlement_attestation=attestation,
@@ -1190,7 +1237,7 @@ def main() -> int:
                 return raw_good
             return invoke
 
-        resumed = run_campaign(
+        resumed = run_test_campaign(
             manifest_path=manifest_path,
             evidence_dir=evidence_dir,
             entitlement_attestation=attestation,
@@ -1269,7 +1316,7 @@ def main() -> int:
 
         expect_gate(
             "foreign report without campaign invocation-start marker",
-            lambda: run_campaign(
+            lambda: run_test_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
                 entitlement_attestation=attestation,

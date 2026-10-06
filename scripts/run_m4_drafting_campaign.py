@@ -645,15 +645,106 @@ def verify_case_report(
     }
 
 
-def campaign_lock_path(manifest_sha256: str) -> Path:
-    """Return the single-checkout lock namespace for one exact manifest."""
+def _default_campaign_runtime_root() -> Path:
+    """Return the repository runtime namespace shared by campaign evidence dirs."""
+
+    result = subprocess.run(
+        ["git", "-C", str(ROOT), "rev-parse", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0 or not result.stdout.strip():
+        raise CampaignGateError(
+            "cannot resolve git common directory for campaign runtime"
+        )
+    common = Path(result.stdout.strip())
+    if not common.is_absolute():
+        common = (ROOT / common).resolve()
+    return common / "sda-m4-drafting-campaigns"
+
+
+def campaign_runtime_dir(
+    manifest_sha256: str, runtime_root: Path | None = None
+) -> Path:
+    root = (
+        _default_campaign_runtime_root()
+        if runtime_root is None
+        else runtime_root.resolve()
+    )
+    return root / manifest_sha256
+
+
+def campaign_lock_path(
+    manifest_sha256: str, runtime_root: Path | None = None
+) -> Path:
+    """Return the transient live-controller lock for one exact manifest."""
+
+    return campaign_runtime_dir(manifest_sha256, runtime_root) / ".campaign.lock"
+
+
+def campaign_binding_path(
+    manifest_sha256: str, runtime_root: Path | None = None
+) -> Path:
+    """Return the persistent manifest-to-evidence-directory binding."""
 
     return (
-        ROOT
-        / ".runtime"
-        / "m4-drafting-campaign-locks"
-        / f"{manifest_sha256}.lock"
+        campaign_runtime_dir(manifest_sha256, runtime_root)
+        / "evidence-binding.json"
     )
+
+
+def bind_campaign_evidence_dir(
+    path: Path,
+    *,
+    manifest_sha256: str,
+    campaign_id: str,
+    evidence_dir: Path,
+) -> None:
+    """Persistently bind one approved manifest to one evidence directory.
+
+    The binding survives normal lock release and campaign completion. This
+    prevents replaying one exact approved manifest into another evidence
+    directory to consume the campaign invocation ceiling again.
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    expected = {
+        "campaign_controller_version": CAMPAIGN_CONTROLLER_VERSION,
+        "manifest_sha256": manifest_sha256,
+        "campaign_id": campaign_id,
+        "evidence_dir": str(evidence_dir.resolve()),
+    }
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            raise CampaignGateError(
+                "campaign evidence binding exists but cannot be validated"
+            ) from exc
+        if existing != expected:
+            raise CampaignGateError(
+                "campaign manifest is already bound to a different evidence directory"
+            )
+        return
+    try:
+        with open(path, "x", encoding="utf-8", newline="\n") as handle:
+            handle.write(_canonical_json(expected) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+    except FileExistsError:
+        # Another controller won the atomic create race. Accept only the same
+        # exact binding; a different evidence directory fails closed.
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            raise CampaignGateError(
+                "campaign evidence binding raced and cannot be validated"
+            ) from exc
+        if existing != expected:
+            raise CampaignGateError(
+                "campaign manifest was concurrently bound to another evidence directory"
+            )
 
 
 @dataclass
@@ -893,6 +984,7 @@ def run_campaign(
     ) = None,
     env_url_provider: Callable[[], str] | None = None,
     clock: Callable[[], str] | None = None,
+    runtime_root: Path | None = None,
 ) -> dict[str, Any]:
     from datetime import datetime, timezone
 
@@ -914,11 +1006,20 @@ def run_campaign(
     manifest, manifest_sha256 = load_manifest(manifest_path)
     attestation = check_campaign_entitlement(manifest, entitlement_attestation)
     evidence_dir = evidence_dir.resolve()
+    bind_campaign_evidence_dir(
+        campaign_binding_path(manifest_sha256, runtime_root),
+        manifest_sha256=manifest_sha256,
+        campaign_id=manifest["campaign_id"],
+        evidence_dir=evidence_dir,
+    )
     evidence_dir.mkdir(parents=True, exist_ok=True)
     ledger_path = evidence_dir / "campaign-ledger.jsonl"
     frozen_manifest_path = evidence_dir / "campaign-manifest.json"
     summary_path = evidence_dir / "campaign-summary.json"
-    lock = acquire_lock(campaign_lock_path(manifest_sha256), manifest_sha256)
+    lock = acquire_lock(
+        campaign_lock_path(manifest_sha256, runtime_root),
+        manifest_sha256,
+    )
     try:
         if frozen_manifest_path.exists() or sidecar_path(frozen_manifest_path).exists():
             frozen_manifest, _ = _verify_immutable_json(frozen_manifest_path)

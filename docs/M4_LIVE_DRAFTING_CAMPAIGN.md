@@ -153,19 +153,23 @@ It never reruns an ambiguous or already-frozen case merely because the ledger ev
 
 An incomplete report/sidecar pair is ambiguous evidence and stops the campaign.
 
-## Concurrency lock
+## Campaign instance binding and concurrency lock
 
-Each exact manifest has one deterministic **checkout-level** lock namespace independent of `--evidence-dir`:
+Each exact manifest has one deterministic runtime namespace under the repository's Git common directory, keyed by the canonical `manifest_sha256` and independent of `--evidence-dir`.
 
-`.runtime/m4-drafting-campaign-locks/<manifest_sha256>.lock`
+The first campaign start atomically creates a **persistent manifest-to-evidence-directory binding** in that namespace. The binding survives normal completion and live-lock release. A later attempt to run the same exact approved manifest with a different evidence directory is rejected before credential or provider activity. To authorize a distinct campaign run, create and approve a distinct manifest (normally with a new `campaign_id` / entitlement identity), rather than deleting the binding and replaying the old approval.
 
-- the same authorized manifest cannot run concurrently into two different evidence directories in the same checkout;
-- any existing lock blocks another controller, regardless of recorded PID/host/manifest;
+The same manifest namespace carries a transient exclusive `.campaign.lock` while a controller is live:
+
+- the same authorized manifest cannot run concurrently into two different evidence directories in the same repository runtime namespace;
+- any existing lock blocks another controller;
 - the controller never automatically unlinks or reclaims an existing lock;
 - normal shutdown releases only the token-bound lock it owns;
 - a crash-residue lock requires explicit operator reconciliation/removal after confirming no campaign controller is live.
 
-This conservative policy removes stale-lock time-of-check/time-of-use races and prevents two campaign processes in the supported **single-host/single-checkout** operating scope from independently consuming the same call budget. **Cross-host global exclusion is not claimed**; that would require a shared coordinator.
+Together, persistent instance binding plus the transient live lock prevent one approved manifest from independently consuming its invocation ceiling twice in the supported **single-repository-runtime** scope, including sequential attempts with different evidence directories.
+
+**Cross-host / independent-clone global exclusion is not claimed**; that would require a shared atomic coordinator.
 
 ## Hash-chained ledger
 

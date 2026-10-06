@@ -322,3 +322,25 @@ The validator re-hashes reports after independently changing `attempted` to fals
 ### Authority boundary
 
 These changes strengthen the exact authorization/call-budget evidence boundary only. No live model call, drafting entitlement consumption, scheduler/recurrence authority, publication authority, or canonical-mutation authority is introduced.
+
+
+## DCC-LOCK-01 residual closure after exact-head re-review 5431974629
+
+The prior remediation moved the live lock out of the evidence directory and correctly prevented **concurrent** duplicate execution of one manifest. Exact-head re-review identified a remaining sequential replay path: after normal completion the live lock is released, so the same exact approved manifest/attestation could previously be started again with a different evidence directory and consume its full invocation ceiling a second time.
+
+### DCC-LOCK-01 — FULLY REMEDIATED FOR THE QUALIFIED REPOSITORY-RUNTIME SCOPE
+
+The controller now maintains two separate manifest-keyed coordination artifacts under the repository Git-common-dir runtime namespace:
+
+1. a **persistent evidence-directory binding** for the canonical `manifest_sha256`; and
+2. the existing transient live-process lock.
+
+The persistent binding is atomically created on first start and is not removed on normal completion. The same manifest can resume or terminally re-open only against the same canonical evidence-directory path. A different evidence directory fails before credential retrieval or provider construction, including after the original campaign has completed and released its live lock.
+
+The deterministic validator now proves both boundaries:
+- while a manifest lock is live, a second evidence directory performs zero credential/provider activity;
+- after a campaign completes and releases its live lock, the same manifest aimed at another evidence directory is still refused with zero credential/provider activity.
+
+A distinct future campaign must use a distinct approved manifest rather than replaying the old manifest approval.
+
+The qualified scope remains repository-runtime-local. Cross-host / independent-clone global exclusion is explicitly not claimed; that still requires the separately deferred shared atomic coordinator.
