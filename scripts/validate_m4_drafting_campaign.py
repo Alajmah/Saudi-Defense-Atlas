@@ -198,43 +198,38 @@ def main() -> int:
         finally:
             untracked.unlink(missing_ok=True)
 
-        # Lock liveness is injectable: a live PID refuses, a demonstrably dead
-        # same-host PID is safely reclaimable without platform-specific kill probes.
+        # DCC-13: lock acquisition never auto-reclaims an existing file.
+        # This removes stale-lock TOCTOU races; crash residues require explicit
+        # operator reconciliation/removal after confirming no controller is live.
         lock_path = td / "lock-test" / ".campaign.lock"
-        lock = acquire_lock(lock_path, digest, pid_alive=lambda pid: False)
-        release_lock(lock)
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_path.write_text(
-            json.dumps(
-                {
-                    "campaign_controller_version": CAMPAIGN_CONTROLLER_VERSION,
-                    "manifest_sha256": digest,
-                    "hostname": __import__("socket").gethostname(),
-                    "pid": 999999,
-                    "token": "stale",
-                }
-            ),
-            encoding="utf-8",
-        )
-        reclaimed = acquire_lock(lock_path, digest, pid_alive=lambda pid: False)
-        release_lock(reclaimed)
-        lock_path.write_text(
-            json.dumps(
-                {
-                    "campaign_controller_version": CAMPAIGN_CONTROLLER_VERSION,
-                    "manifest_sha256": digest,
-                    "hostname": __import__("socket").gethostname(),
-                    "pid": 1,
-                    "token": "live",
-                }
-            ),
-            encoding="utf-8",
-        )
+        lock = acquire_lock(lock_path, digest)
         expect_gate(
-            "live campaign lock",
-            lambda: acquire_lock(lock_path, digest, pid_alive=lambda pid: True),
+            "second campaign lock while owned",
+            lambda: acquire_lock(lock_path, digest),
             failures,
         )
+        release_lock(lock)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        stale_payload = {
+            "campaign_controller_version": CAMPAIGN_CONTROLLER_VERSION,
+            "manifest_sha256": digest,
+            "hostname": __import__("socket").gethostname(),
+            "pid": 999999,
+            "token": "stale",
+        }
+        lock_path.write_text(json.dumps(stale_payload), encoding="utf-8")
+        stale_before = lock_path.read_bytes()
+        expect_gate(
+            "stale-shaped campaign lock",
+            lambda: acquire_lock(lock_path, digest),
+            failures,
+        )
+        expect(
+            lock_path.read_bytes() == stale_before,
+            "stale-shaped lock was automatically modified/reclaimed",
+            failures,
+        )
+        lock_path.unlink()
 
     # Complete campaign: first output is structurally rejected, second accepted;
     # rejection is evidence and does not stop the campaign.
