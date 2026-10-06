@@ -59,7 +59,7 @@ Unknown manifest keys are rejected. Absolute/out-of-repository fixture or termin
 
 The invocation ceiling must equal the number of frozen cases. There is no retry authority, so any larger ceiling would be unused authority and any smaller ceiling could not cover the frozen corpus.
 
-The supplied runtime entitlement attestation must contain the manifest's `entitlement_id` and name the manifest route. The campaign controller records the entitlement identity and a SHA-256 of the attestation in the first ledger event; **every resume must supply the same attestation bytes**, proven by that SHA-256, before additional provider activity. Each single-case report still records the attestation under the reviewed driver contract.
+The supplied runtime entitlement attestation must contain the manifest's `entitlement_id` and name the manifest route exactly enough for deterministic binding: `coding-plan` for the Coding Plan route, or `prepaid` / `general` for the prepaid/general route. The campaign controller records the entitlement identity and a SHA-256 of the attestation in the first ledger event; **every resume must supply the same attestation bytes**, proven by that SHA-256, before additional provider activity. Each single-case report still records the attestation under the reviewed driver contract.
 
 Example shape:
 
@@ -140,11 +140,12 @@ If the process dies **during** a provider call and restart sees `case_invocation
 
 If the process dies in the narrower interval **after** the single-case report is frozen but **before** the terminal case ledger event is appended, the next campaign start:
 
-1. finds the report + sidecar;
-2. verifies their hash;
-3. verifies report version, reviewed head, model, fixture hash, terminology hash, and invocation count;
-4. records the case as `recovered_without_invocation: true`;
-5. continues to the next case if the recovered result is not an execution failure.
+1. requires the matching prior `case_invocation_started` event; a complete report with no campaign start marker is foreign/ambiguous evidence and is rejected;
+2. finds the report + sidecar;
+3. verifies their hash;
+4. verifies report version, reviewed head, model, fixture hash, terminology hash, invocation count, **exact campaign attestation**, requested route, and both resolved-route fields against the manifest's official route URL;
+5. records the case as `recovered_without_invocation: true`;
+6. continues to the next case if the recovered result is not an execution failure.
 
 It never reruns an ambiguous or already-frozen case merely because the ledger event is missing.
 
@@ -228,7 +229,9 @@ Arabic/English editorial review remains a separate human activity over the froze
 - success invokes exactly once per fresh case;
 - provider failure stops after one call and does not continue;
 - terminal rerun performs zero new calls;
-- completed-but-unledgered case evidence is recovered without reinvocation;
+- completed-but-unledgered case evidence is recovered without reinvocation only when a matching campaign invocation-start marker exists;
+- recovered case evidence must match the exact campaign attestation and manifest route;
+- a standalone report without a campaign invocation-start marker is rejected as foreign/ambiguous evidence;
 - an invocation-start marker without terminal evidence blocks automatic retry;
 - ledger tampering is rejected before more provider activity;
 - terminal summary byte/sidecar/semantic tampering is rejected before provider activity;
