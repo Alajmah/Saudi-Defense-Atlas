@@ -41,7 +41,11 @@ from scripts.run_m4_drafting_trial import (  # noqa: E402
     sidecar_path,
     zai_invoker,
 )
-from scripts.run_m4_model_extraction_trial import ZAI_BASE_URL_ENV, _file_sha256  # noqa: E402
+from scripts.run_m4_model_extraction_trial import (  # noqa: E402
+    ZAI_BASE_URL_ENV,
+    ZAI_ENDPOINT_URLS,
+    _file_sha256,
+)
 
 CAMPAIGN_MANIFEST_VERSION = "m4-drafting-campaign-v0.1"
 CAMPAIGN_LEDGER_VERSION = "m4-drafting-campaign-ledger-v0.1"
@@ -260,7 +264,7 @@ def check_campaign_entitlement(
             "campaign entitlement attestation is not bound to the manifest entitlement_id"
         )
     route_text = value.casefold()
-    if manifest["route"] == "coding-plan" and "coding" not in route_text:
+    if manifest["route"] == "coding-plan" and "coding-plan" not in route_text:
         raise CampaignGateError(
             "campaign entitlement attestation does not name the coding-plan route"
         )
@@ -396,7 +400,10 @@ def _read_sidecar(sidecar: Path, report_name: str) -> str:
 
 
 def verify_case_report(
-    report_path: Path, case: dict[str, Any], manifest: dict[str, Any]
+    report_path: Path,
+    case: dict[str, Any],
+    manifest: dict[str, Any],
+    expected_attestation: str,
 ) -> dict[str, Any]:
     sidecar = sidecar_path(report_path)
     if not report_path.exists() or not sidecar.exists():
@@ -422,6 +429,21 @@ def verify_case_report(
         raise CampaignGateError("case report reviewed-head mismatch")
     if report.get("requested_model") != manifest["model"]:
         raise CampaignGateError("case report model mismatch")
+    expected_route_url = ZAI_ENDPOINT_URLS[manifest["route"]]
+    if report.get("entitlement", {}).get("attestation") != expected_attestation:
+        raise CampaignGateError("case report entitlement attestation mismatch")
+    if (
+        report.get("provider_edge", {}).get("requested_endpoint_mode")
+        != manifest["route"]
+    ):
+        raise CampaignGateError("case report requested route mismatch")
+    if (
+        report.get("provider_edge", {}).get("resolved_base_url")
+        != expected_route_url
+        or report.get("entitlement", {}).get("resolved_base_url")
+        != expected_route_url
+    ):
+        raise CampaignGateError("case report resolved route mismatch")
     if (
         report.get("trial_context", {}).get("fixture_sha256")
         != case["fixture_sha256"]
@@ -814,7 +836,12 @@ def run_campaign(
                     raise CampaignGateError(
                         f"ambiguous crash evidence for {case['case_id']}"
                     )
-                verified = verify_case_report(report_path, case, manifest)
+                if case["case_id"] not in started:
+                    raise CampaignGateError(
+                        f"foreign/ambiguous case evidence for {case['case_id']}: "
+                        "complete report exists without campaign invocation-start marker"
+                    )
+                verified = verify_case_report(report_path, case, manifest, attestation)
                 payload = _case_payload(case, report_path, verified)
                 if case["case_id"] not in started:
                     invocations_used += int(payload["invocation_count"])
@@ -907,7 +934,7 @@ def run_campaign(
                 invoke_factory=invoke_factory,
                 created_at_fn=clock,
             )
-            verified = verify_case_report(report_path, case, manifest)
+            verified = verify_case_report(report_path, case, manifest, attestation)
             payload = _case_payload(case, report_path, verified)
             if invocations_used > manifest["max_invocations"]:
                 raise CampaignGateError(
