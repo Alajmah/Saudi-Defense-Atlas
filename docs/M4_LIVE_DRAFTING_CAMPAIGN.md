@@ -59,7 +59,7 @@ Unknown manifest keys are rejected. Absolute/out-of-repository fixture or termin
 
 The invocation ceiling must equal the number of frozen cases. There is no retry authority, so any larger ceiling would be unused authority and any smaller ceiling could not cover the frozen corpus.
 
-The supplied runtime entitlement attestation must bind the **exact campaign manifest**. It must contain the manifest's `entitlement_id`, `campaign_id`, full canonical `manifest_sha256`, and the manifest route (`coding-plan`, or `prepaid` / `general`). Reusing an entitlement ID and route with a changed model, corpus ordering, case count/call ceiling, or any other manifest field is rejected because the canonical manifest hash changes. The campaign controller records the entitlement identity and a SHA-256 of the exact attestation in the first ledger event; **every resume must supply the same attestation bytes**, proven by that SHA-256, before additional provider activity. Each single-case report still records the attestation under the reviewed driver contract.
+The supplied runtime entitlement attestation must bind the **exact campaign manifest**. It must contain the manifest's `entitlement_id`, `campaign_id`, full canonical `manifest_sha256`, and the manifest route (`coding-plan`, or `prepaid` / `general`). Reusing an entitlement ID and route with a changed model, corpus ordering, case count/call ceiling, or any other manifest field is rejected because the canonical manifest hash changes. The campaign controller preserves the supplied attestation string exactly and records a SHA-256 of those exact UTF-8 bytes in the first ledger event; validation may inspect a stripped/case-folded view, but evidence is never normalized. **Every resume must supply the same attestation bytes, including leading/trailing whitespace**, proven by that SHA-256, before additional provider activity. Each single-case report records the same exact supplied attestation under the reviewed driver contract.
 
 Example shape:
 
@@ -103,7 +103,7 @@ The controller then processes the ordered corpus without returning to chat betwe
 
 Before any case invocation, the canonical manifest is also frozen into the evidence directory as immutable `campaign-manifest.json` + SHA-256 sidecar. Resume requires that frozen manifest to remain semantically identical to the supplied manifest.
 
-Before each fresh case, source state is checked again. Local HEAD must remain the manifest's reviewed SHA and the tracked worktree must remain clean. The campaign therefore cannot silently continue after code/source drift during a long process.
+Before each fresh case, source state is checked again. Local HEAD must remain the manifest's reviewed SHA and the tracked worktree must remain clean. At the **actual provider-call boundary**, the campaign checks source state again, recomputes the manifest-bound fixture and terminology SHA-256 values, reconstructs the expected ApprovedDraftingContext and complete rendered prompt from freshly reread bytes using the prompt's frozen `created_at`, and requires exact equality with the prompt about to be sent. This closes the interval between initial rendering and provider entry: mutated source bytes cannot be transmitted merely because post-call verification would later detect them.
 
 The route remains manifest-bound. The campaign supplies exactly one route selector to the reviewed single-case driver; a conflicting `ZAI_BASE_URL` remains subject to the driver's fail-closed ambiguity gate.
 
@@ -119,7 +119,7 @@ Examples include schema/grounding/accounting/terminology/restricted-detail rejec
 
 The campaign stops without moving to the next case when:
 
-- provider/transport execution fails;
+- provider/transport execution fails (including exceptions whose string message is empty; those are normalized to a non-empty exception-type diagnostic);
 - case evidence is incomplete, hash-invalid, or internally inconsistent;
 - fixture or terminology bytes no longer match the manifest;
 - reviewed HEAD or worktree cleanliness drifts;
@@ -134,7 +134,7 @@ No retry is performed.
 
 ## Crash-safe resume
 
-`case_invocation_started` is written through the single-case driver's `before_invoke` hook at the exact provider-call boundary. The hook is invoked from `execute_draft_invocation()`'s capturing invoker only after `build_bilingual_draft_run()` has completed all deterministic pre-invocation validation/rendering/accounting work, and immediately before the actual provider closure is entered. This is the conservative no-duplicate-call marker.
+`case_invocation_started` is written through the single-case driver's `before_invoke` hook at the exact provider-call boundary. The hook receives the exact rendered prompt, revalidates reviewed source state and manifest-bound fixture/terminology bytes, reconstructs the expected prompt from those fresh bytes, and only then writes the marker. It is invoked from `execute_draft_invocation()`'s capturing invoker after `build_bilingual_draft_run()` has completed deterministic pre-invocation validation/rendering/accounting work and immediately before the actual provider closure is entered. This is the conservative no-duplicate-call marker.
 
 If the process dies after that narrow start marker and restart sees `case_invocation_started` without a complete immutable report + sidecar, the invocation is ambiguous. The campaign stops for operator reconciliation and **does not automatically retry** that case. Failures before the hook—including route/env conflict, missing credential, provider-construction failure, single-case preflight refusal, or deterministic `build_bilingual_draft_run()` work before the wrapped invoker is reached—create no invocation-start marker and therefore do not falsely consume an ambiguous case slot.
 
@@ -232,14 +232,14 @@ Arabic/English editorial review remains a separate human activity over the froze
 `scripts/validate_m4_drafting_campaign.py` runs with fake provider factories only and proves:
 
 - manifest version/file-hash/exact call-ceiling gates;
-- exact-manifest campaign authorization binding: entitlement ID + campaign ID + full canonical manifest SHA-256 + route, with exact attestation-hash continuity across resume;
+- exact-manifest campaign authorization binding: entitlement ID + campaign ID + full canonical manifest SHA-256 + route, with exact **un-normalized attestation-byte** hash continuity across resume;
 - frozen campaign-manifest artifact binding;
 - git-tracked corpus/terminology enforcement in addition to SHA-256 binding;
 - structural rejection continues to the next case;
 - success invokes exactly once per fresh case;
-- provider failure stops after one call and does not continue;
+- provider failure stops after one call and does not continue, including empty-message exceptions normalized to a non-empty diagnostic;
 - terminal rerun performs zero new calls while re-verifying every referenced per-case report against the terminal ledger;
-- route/env ambiguity, missing credential, provider-construction failure, and deterministic pre-invoker boundary failure occur before `case_invocation_started` and leave zero invocations plus no ambiguous start marker;
+- route/env ambiguity, missing credential, provider-construction failure, deterministic pre-invoker failure, and provider-boundary source/prompt drift occur before `case_invocation_started` and leave zero invocations plus no ambiguous start marker;
 - completed-but-unledgered case evidence is recovered without reinvocation only when a matching campaign invocation-start marker exists;
 - recovered case evidence must match the exact campaign attestation and manifest route and prove exactly one attempted provider invocation;
 - recovered case evidence is deterministically replayed from its frozen input/raw-output bytes, and any re-hashed structural-result/evidence tamper is rejected;
