@@ -365,6 +365,96 @@ def main() -> int:
             failures,
         )
 
+        # DCC-01: a terminal rerun must re-close the ledger over every
+        # referenced immutable per-case report before trusting the summary.
+        case_report = evidence_dir / "CASE-01.json"
+        case_sidecar = evidence_dir / "CASE-01.json.sha256"
+        original_case_report = case_report.read_bytes()
+        original_case_sidecar = case_sidecar.read_bytes()
+
+        case_report.unlink()
+        expect_gate(
+            "terminal missing case report",
+            lambda: run_campaign(
+                manifest_path=manifest_path,
+                evidence_dir=evidence_dir,
+                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                require_api_key=require_key,
+                invoke_factory=factory,
+                git_state_provider=fixed_git_state,
+                env_url_provider=empty_env,
+                clock=fixed_clock,
+            ),
+            failures,
+        )
+        expect(len(calls) == 2, "missing terminal case report reached provider", failures)
+        case_report.write_bytes(original_case_report)
+
+        case_sidecar.unlink()
+        expect_gate(
+            "terminal missing case sidecar",
+            lambda: run_campaign(
+                manifest_path=manifest_path,
+                evidence_dir=evidence_dir,
+                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                require_api_key=require_key,
+                invoke_factory=factory,
+                git_state_provider=fixed_git_state,
+                env_url_provider=empty_env,
+                clock=fixed_clock,
+            ),
+            failures,
+        )
+        expect(len(calls) == 2, "missing terminal case sidecar reached provider", failures)
+        case_sidecar.write_bytes(original_case_sidecar)
+
+        case_report.write_bytes(original_case_report + b" ")
+        expect_gate(
+            "terminal case byte tamper",
+            lambda: run_campaign(
+                manifest_path=manifest_path,
+                evidence_dir=evidence_dir,
+                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                require_api_key=require_key,
+                invoke_factory=factory,
+                git_state_provider=fixed_git_state,
+                env_url_provider=empty_env,
+                clock=fixed_clock,
+            ),
+            failures,
+        )
+        expect(len(calls) == 2, "terminal case byte tamper reached provider", failures)
+        case_report.write_bytes(original_case_report)
+
+        semantic = json.loads(original_case_report.decode("utf-8"))
+        semantic["qualification"]["publication_authority"] = True
+        semantic_bytes = (
+            json.dumps(semantic, ensure_ascii=False, indent=2, allow_nan=False) + "\n"
+        ).encode("utf-8")
+        case_report.write_bytes(semantic_bytes)
+        semantic_sha = hashlib.sha256(semantic_bytes).hexdigest()
+        case_sidecar.write_text(
+            f"{semantic_sha}  {case_report.name}\n",
+            encoding="utf-8",
+        )
+        expect_gate(
+            "terminal rehashed semantic case tamper",
+            lambda: run_campaign(
+                manifest_path=manifest_path,
+                evidence_dir=evidence_dir,
+                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                require_api_key=require_key,
+                invoke_factory=factory,
+                git_state_provider=fixed_git_state,
+                env_url_provider=empty_env,
+                clock=fixed_clock,
+            ),
+            failures,
+        )
+        expect(len(calls) == 2, "semantic terminal case tamper reached provider", failures)
+        case_report.write_bytes(original_case_report)
+        case_sidecar.write_bytes(original_case_sidecar)
+
         # Resume must keep the exact campaign-start entitlement attestation.
         expect_gate(
             "resume entitlement drift",
@@ -508,6 +598,93 @@ def main() -> int:
             "ambiguous prior invocation was automatically retried",
             failures,
         )
+
+    # DCC-02: campaign invocation-start provenance is emitted only at
+    # the single-case driver's immediate pre-provider boundary. Deterministic
+    # failures before that point must leave no ambiguous start marker.
+    def assert_preinvoke_failure(
+        label: str,
+        *,
+        env_provider,
+        key_provider,
+        provider_factory,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            td = Path(tmpdir)
+            manifest_path = td / "manifest.json"
+            manifest = write_manifest(manifest_path)
+            loaded, manifest_sha = load_manifest(manifest_path)
+            evidence_dir = td / "evidence"
+            provider_calls: list[str] = []
+            try:
+                run_campaign(
+                    manifest_path=manifest_path,
+                    evidence_dir=evidence_dir,
+                    entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                    require_api_key=key_provider,
+                    invoke_factory=provider_factory(provider_calls),
+                    git_state_provider=fixed_git_state,
+                    env_url_provider=env_provider,
+                    clock=fixed_clock,
+                )
+                failures.append(f"{label} did not fail before invocation")
+            except (CampaignGateError, SystemExit, RuntimeError):
+                pass
+            events = load_ledger(
+                evidence_dir / "campaign-ledger.jsonl",
+                loaded["campaign_id"],
+                manifest_sha,
+            )
+            expect(
+                not any(
+                    event["event_type"] == "case_invocation_started"
+                    for event in events
+                ),
+                f"{label} wrote an invocation-start marker before provider boundary",
+                failures,
+            )
+            expect(
+                not provider_calls,
+                f"{label} reached the provider invoker",
+                failures,
+            )
+
+    def spy_factory(call_log):
+        def factory(**kwargs):
+            def invoke(prompt: str) -> str:
+                call_log.append(prompt)
+                return raw_good
+            return invoke
+        return factory
+
+    assert_preinvoke_failure(
+        "route-env ambiguity",
+        env_provider=lambda: "https://api.z.ai/api/coding/paas/v4",
+        key_provider=lambda: "test-key",
+        provider_factory=spy_factory,
+    )
+
+    def missing_key():
+        raise SystemExit("synthetic missing credential")
+
+    assert_preinvoke_failure(
+        "missing credential",
+        env_provider=empty_env,
+        key_provider=missing_key,
+        provider_factory=spy_factory,
+    )
+
+    def failing_factory_builder(call_log):
+        def factory(**kwargs):
+            raise RuntimeError("synthetic provider construction failure")
+        return factory
+
+    assert_preinvoke_failure(
+        "provider factory failure",
+        env_provider=empty_env,
+        key_provider=lambda: "test-key",
+        provider_factory=failing_factory_builder,
+    )
 
     # Provider/transport failure is terminal: one call, frozen failure evidence,
     # second case is never invoked.
