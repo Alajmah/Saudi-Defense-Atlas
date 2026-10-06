@@ -150,3 +150,53 @@ The validator rewrites a valid report's structural validation status, recomputes
 Recovery also reconstructs the exact expected ApprovedDraftingContext and complete rendered model input from the manifest-bound tracked fixture, manifest-bound terminology registry, and the frozen context's `created_at`. The recovered rendered input must equal this deterministic reconstruction exactly.
 
 This check applies even when `structural_result` is null because the original provider/execution path failed, so failure evidence cannot bypass fixture-to-input integrity merely because no structural run exists to replay.
+
+
+## Residual remediation after review 5431227374
+
+The exact-head collaborator review at `1cd2a2c5bd282c7c6529e514ef3cbcb883550dc5` found two additional long-running evidence-boundary residuals. The frozen first-pass artifact remains unchanged.
+
+### DCC-08 — terminal summary did not re-close over per-case evidence — REMEDIATED
+
+Terminal fast-path execution now re-verifies every case-terminal ledger event before trusting or returning the aggregate campaign summary.
+
+For each recorded case the controller:
+
+1. resolves the manifest case and expected immutable report path;
+2. requires the report + sidecar pair;
+3. calls `verify_case_report(...)` against the exact campaign manifest and attestation;
+4. rebuilds the deterministic case payload;
+5. requires report SHA-256, invocation count, structural status, execution error, fixture hash/path, and report path to equal the ledger payload;
+6. validates the recovery flag type;
+7. only then rebuilds and verifies the terminal aggregate summary.
+
+Deterministic regressions now delete a terminal case report, delete its sidecar, alter report bytes without updating the sidecar, and rewrite semantic report content with a freshly recomputed sidecar. Every case fails closed with zero additional provider activity.
+
+### DCC-09 — invocation-start marker was wider than the provider boundary — REMEDIATED
+
+The reviewed single-case `run_trial()` primitive now accepts an optional orchestration-only `before_invoke` callback. Default behavior is unchanged.
+
+The callback is invoked only after:
+
+- single-case deterministic gates pass;
+- context/rendering preparation succeeds;
+- credential retrieval succeeds;
+- provider construction succeeds;
+
+and immediately before `execute_draft_invocation()` can enter the provider-call boundary.
+
+The campaign now appends `case_invocation_started` and charges the conservative call ceiling from that callback instead of before calling `run_trial()`.
+
+The ambiguity policy remains intentionally conservative after the marker: if the process dies after the marker without complete immutable evidence, automatic retry remains forbidden.
+
+New deterministic regressions prove that:
+
+- route/environment ambiguity;
+- missing credential;
+- provider-factory construction failure
+
+all produce zero invoker calls **and no invocation-start marker**. A successful fresh case still records exactly one marker and remains one-call/no-retry bounded.
+
+### Authority / live-action boundary
+
+These residual fixes change only campaign provenance and recovery mechanics. They do not grant scheduler, recurrence, publication, canonical-mutation, or model authority. No live drafting call or drafting entitlement consumption is performed by this remediation.
