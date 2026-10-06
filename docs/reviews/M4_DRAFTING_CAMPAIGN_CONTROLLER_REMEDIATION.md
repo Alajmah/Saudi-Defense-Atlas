@@ -124,3 +124,22 @@ A separate regression creates a standalone single-case report with no campaign s
 ## Residual claim ceiling
 
 These changes only strengthen campaign provenance/recovery mechanics. They do not authorize or perform a live drafting call and do not broaden model, publication, canonical-mutation, scheduler, or recurrence authority.
+
+
+### DCC-07 — recovered case report internal evidence consistency — REMEDIATED
+
+Campaign recovery no longer treats a matching sidecar plus selected provenance fields as sufficient.
+
+`verify_case_report()` now independently re-verifies:
+
+- exact rendered-input SHA-256 from `evidence.rendered_model_input`;
+- exact raw-output SHA-256 from `evidence.raw_model_output`;
+- terminology registry digest from the manifest-bound tracked registry;
+- terminology delivery digest from the frozen rendered-input block;
+- report-level structural/editorial/publication/canonical qualification flags.
+
+When `structural_result` exists, recovery reconstructs the frozen drafting context and terminology blocks, recreates the original `DraftModelTrace`, reuses the structural run's original `started_at` / `completed_at` timestamps through an injected deterministic clock, returns the frozen raw response through a no-network replay invoker, and calls the reviewed `build_bilingual_draft_run()` boundary again.
+
+The replayed run must equal the stored structural result exactly, including validation status, units, accounting, authority, IDs, and all prompt/context/output hashes.
+
+The validator rewrites a valid report's structural validation status, recomputes a matching report sidecar, and proves recovery still rejects the artifact. No provider call is involved in replay.
