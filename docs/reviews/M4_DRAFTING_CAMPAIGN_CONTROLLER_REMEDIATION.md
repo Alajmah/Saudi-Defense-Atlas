@@ -357,3 +357,52 @@ The provider-boundary hook was hardened to receive the exact rendered prompt, ch
 - provider-failure and success regressions additionally require the hook-observed prompt to equal the provider-observed prompt exactly.
 
 No live provider call, entitlement consumption, report-schema change, scheduler/recurrence authority, publication authority, or canonical-mutation authority is introduced.
+
+
+## Codex remediation after review 5432104787
+
+Codex review `5432068642` on `edfe5194737e7da302b02ebe08a6e838e8d95f1b` identified three additional provider-boundary/evidence issues that remained applicable after the independent-maintainer remediation. They were accepted in reconciliation review `5432104787`.
+
+### DCC-SRC-01 — source/corpus could drift before provider entry — REMEDIATED
+
+The single-case `before_invoke` hook now receives the exact rendered prompt that is about to be sent.
+
+The campaign callback performs a second fail-closed source check at that exact provider boundary before writing `case_invocation_started`:
+
+1. re-resolve reviewed HEAD / tracked-worktree cleanliness;
+2. re-hash the manifest-bound case fixture and terminology file;
+3. split the actual rendered prompt and recover its canonical context / frozen `created_at`;
+4. freshly reread the manifest-bound fixture and terminology registry;
+5. rebuild the ApprovedDraftingContext and complete rendered prompt;
+6. require exact context and prompt equality.
+
+This catches both persistent source mutation and mutate-then-restore races: the former fails manifest hashes; the latter fails exact prompt reconstruction. Only after this check succeeds is the conservative invocation-start marker appended.
+
+Deterministic validation proves a valid prompt passes, a tampered rendered prompt fails, and source-state drift between the outer case check and the provider-boundary callback produces no marker and no provider call.
+
+### DCC-ERR-01 — empty exception message broke failure classification — REMEDIATED
+
+`execute_draft_invocation()` now normalizes an empty `str(exc)` to:
+
+`<ExceptionType>: invocation failed`
+
+before truncating/storing the execution diagnostic.
+
+Campaign event classification now distinguishes `execution_error is not None` rather than relying on string truthiness.
+
+The single-case validator proves `TimeoutError()` produces one attempt and a non-empty diagnostic containing `TimeoutError`. The campaign validator proves the same path freezes failure evidence and terminalizes as `stopped_execution_failure` without retry or continuation.
+
+### DCC-ATT-01 — attestation whitespace was normalized — REMEDIATED
+
+Both single-case and campaign entitlement gates now use a stripped copy only for validation while preserving and returning the original supplied attestation string.
+
+The campaign-start ledger hash and single-case report therefore bind the exact supplied UTF-8 string, including leading/trailing whitespace.
+
+Deterministic validation proves:
+- a whitespace-only attestation remains invalid;
+- a valid whitespace-bearing single-case attestation is preserved exactly in the report;
+- resume with leading-whitespace drift from the frozen campaign attestation fails before provider activity.
+
+### Authority boundary
+
+These changes close provider-boundary source/evidence precision only. They do not authorize or perform a live model call and do not add retry, publication, canonical mutation, scheduler, recurrence, or cross-host coordination authority.
