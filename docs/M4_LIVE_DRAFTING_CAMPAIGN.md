@@ -45,6 +45,7 @@ The manifest is canonical JSON for hashing purposes and contains exactly:
 - `campaign_id`;
 - `reviewed_head` — the exact independently reviewed execution SHA;
 - `route` — `coding-plan` or `prepaid`;
+- `entitlement_id` — the explicit campaign-specific drafting approval identity;
 - `model`;
 - `timeout_seconds`;
 - `max_invocations`;
@@ -56,7 +57,9 @@ The manifest is canonical JSON for hashing purposes and contains exactly:
 
 Unknown manifest keys are rejected. Absolute/out-of-repository fixture or terminology paths are rejected. Every bound file hash is recomputed before the campaign begins.
 
-The invocation ceiling must be at least the number of frozen cases. There is no retry authority, so the controller has no legitimate reason to exceed one call per fresh case.
+The invocation ceiling must equal the number of frozen cases. There is no retry authority, so any larger ceiling would be unused authority and any smaller ceiling could not cover the frozen corpus.
+
+The supplied runtime entitlement attestation must contain the manifest's `entitlement_id` and name the manifest route. The campaign controller records the entitlement identity and a SHA-256 of the attestation in the ledger; each single-case report still records the attestation under the reviewed driver contract.
 
 Example shape:
 
@@ -66,6 +69,7 @@ Example shape:
   "campaign_id": "M4-DRAFT-CAMPAIGN-001",
   "reviewed_head": "<40-hex reviewed controller head>",
   "route": "coding-plan",
+  "entitlement_id": "M4-DRAFT-CAMPAIGN-001-AUTH",
   "model": "glm-5.3",
   "timeout_seconds": 180,
   "max_invocations": 10,
@@ -97,6 +101,8 @@ python scripts/run_m4_drafting_campaign.py \
 
 The controller then processes the ordered corpus without returning to chat between cases.
 
+Before any case invocation, the canonical manifest is also frozen into the evidence directory as immutable `campaign-manifest.json` + SHA-256 sidecar. Resume requires that frozen manifest to remain semantically identical to the supplied manifest.
+
 Before each fresh case, source state is checked again. Local HEAD must remain the manifest's reviewed SHA and the tracked worktree must remain clean. The campaign therefore cannot silently continue after code/source drift during a long process.
 
 The route remains manifest-bound. The campaign supplies exactly one route selector to the reviewed single-case driver; a conflicting `ZAI_BASE_URL` remains subject to the driver's fail-closed ambiguity gate.
@@ -120,6 +126,7 @@ The campaign stops without moving to the next case when:
 - route/entitlement gates fail;
 - the invocation ceiling would be exceeded;
 - ledger integrity fails;
+- an invocation-start marker exists without complete immutable case evidence;
 - another live/unknown campaign process owns the campaign lock;
 - an existing campaign artifact cannot be safely reconciled.
 
@@ -127,9 +134,11 @@ No retry is performed.
 
 ## Crash-safe resume
 
-Each successful or failed single-case invocation first produces the single-case immutable report and sidecar. The campaign then records the case in its ledger.
+Immediately before each fresh case, the ledger records `case_invocation_started`. This is a conservative no-duplicate-call marker.
 
-If the process dies in the narrow interval **after** the single-case report is frozen but **before** the ledger event is appended, the next campaign start:
+If the process dies **during** a provider call and restart sees `case_invocation_started` without a complete immutable report + sidecar, the invocation is ambiguous. The campaign stops for operator reconciliation and **does not automatically retry** that case.
+
+If the process dies in the narrower interval **after** the single-case report is frozen but **before** the terminal case ledger event is appended, the next campaign start:
 
 1. finds the report + sidecar;
 2. verifies their hash;
@@ -208,12 +217,15 @@ Arabic/English editorial review remains a separate human activity over the froze
 
 `scripts/validate_m4_drafting_campaign.py` runs with fake provider factories only and proves:
 
-- manifest version/file-hash/call-ceiling gates;
+- manifest version/file-hash/exact call-ceiling gates;
+- campaign-specific entitlement ID + route binding;
+- frozen campaign-manifest artifact binding;
 - structural rejection continues to the next case;
 - success invokes exactly once per fresh case;
 - provider failure stops after one call and does not continue;
 - terminal rerun performs zero new calls;
 - completed-but-unledgered case evidence is recovered without reinvocation;
+- an invocation-start marker without terminal evidence blocks automatic retry;
 - ledger tampering is rejected before more provider activity;
 - campaign summary authority and editorial qualification remain false.
 
