@@ -225,6 +225,31 @@ def main() -> int:
     except TrialGateError:
         failures.append("route-bound attestation was rejected")
 
+    # --- DCC-10: before_invoke fires only at the actual provider boundary ---
+    preboundary_hooks: list[str] = []
+    preboundary_calls: list[str] = []
+    invalid_context = copy.deepcopy(context)
+    invalid_context["claims"][0]["predicate_id"] = ""
+
+    def preboundary_hook() -> None:
+        preboundary_hooks.append("hook")
+
+    def preboundary_invoke(prompt: str) -> str:
+        preboundary_calls.append(prompt)
+        return raw_good
+
+    bad_run, bad_error, bad_raw, _, bad_attempts = execute_draft_invocation(
+        context=invalid_context,
+        terminology=terminology,
+        model_trace=trace,
+        invoke_fn=preboundary_invoke,
+        before_invoke=preboundary_hook,
+    )
+    expect(bad_run is None and bad_error is not None, "pre-invoker boundary failure was not captured", failures)
+    expect(bad_raw is None and bad_attempts == 0, "pre-invoker failure consumed an attempt", failures)
+    expect(not preboundary_hooks, "before_invoke fired before the actual provider boundary", failures)
+    expect(not preboundary_calls, "pre-invoker boundary failure reached provider", failures)
+
     # --- DTD-04R: orchestration path with failing invoker ---
     failing_calls: list[str] = []
 
@@ -232,12 +257,15 @@ def main() -> int:
         failing_calls.append(prompt)
         raise RuntimeError("Z.ai API returned HTTP 500: internal error")
 
+    failing_hooks: list[str] = []
+
     fail_run, fail_error, fail_raw, fail_elapsed, fail_attempts = (
         execute_draft_invocation(
             context=context,
             terminology=terminology,
             model_trace=trace,
             invoke_fn=failing_invoke,
+            before_invoke=lambda: failing_hooks.append("hook"),
         )
     )
     expect(fail_run is None, "failing invoker produced a draft run", failures)
@@ -250,6 +278,11 @@ def main() -> int:
         f"failing invocation count {fail_attempts} != invoker-observed {len(failing_calls)}",
         failures,
     )
+    expect(
+        len(failing_hooks) == 1,
+        f"failing invocation hook count {len(failing_hooks)} != 1",
+        failures,
+    )
 
     # --- Success path through the orchestration ---
     ok_calls: list[str] = []
@@ -258,17 +291,24 @@ def main() -> int:
         ok_calls.append(prompt)
         return raw_good
 
+    ok_hooks: list[str] = []
     ok_run, ok_error, ok_raw, ok_elapsed, ok_attempts = execute_draft_invocation(
         context=context,
         terminology=terminology,
         model_trace=trace,
         invoke_fn=fake_invoke,
+        before_invoke=lambda: ok_hooks.append("hook"),
     )
     expect(ok_error is None, f"succeeding invoker errored: {ok_error}", failures)
     expect(ok_raw == raw_good, "raw output was not captured verbatim", failures)
     expect(
         ok_attempts == len(ok_calls) == 1,
         f"success invocation count {ok_attempts} != invoker-observed {len(ok_calls)}",
+        failures,
+    )
+    expect(
+        len(ok_hooks) == 1,
+        f"success invocation hook count {len(ok_hooks)} != 1",
         failures,
     )
     expect(
