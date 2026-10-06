@@ -766,7 +766,7 @@ def main() -> int:
             failures,
         )
 
-        if failures:
+    if failures:
         print("M4 drafting campaign validation FAILED:")
         for failure in failures:
             print(f"- {failure}")
@@ -777,8 +777,10 @@ def main() -> int:
         "manifest/corpus hashes and reviewed versions are frozen; structural rejection "
         "continues while provider/execution failure stops; each fresh case invokes at most "
         "once with no retry; completed-but-unledgered immutable evidence is recovered "
-        "without duplicate invocation; the append-only ledger is hash-chained and tamper "
-        "detecting; terminal reruns do not invoke again; campaign summaries remain "
+        "without duplicate invocation and only when a matching campaign invocation-start "
+        "marker exists; recovered reports are bound to the exact campaign attestation "
+        "and route; the append-only ledger is hash-chained and tamper detecting; "
+        "terminal reruns do not invoke again; campaign summaries remain "
         "structural-evidence-only with editorial/publication/canonical authority false."
     )
     return 0
