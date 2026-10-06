@@ -157,13 +157,12 @@ An incomplete report/sidecar pair is ambiguous evidence and stops the campaign.
 
 A campaign evidence directory carries an exclusive `.campaign.lock`.
 
-- a live same-host PID blocks another controller;
-- a lock from another host fails closed;
-- a same-host lock whose recorded PID is demonstrably dead is treated as a crash residue and may be reclaimed for the same manifest;
-- liveness probing is platform-specific and non-destructive: POSIX uses signal-0 semantics, while Windows queries the process handle/exit code rather than calling `os.kill(pid, 0)`;
-- a lock bound to another manifest is rejected.
+- any existing lock blocks another controller, regardless of recorded PID/host/manifest;
+- the controller never automatically unlinks or reclaims an existing lock;
+- normal shutdown releases only the token-bound lock it owns;
+- a crash-residue lock requires explicit operator reconciliation/removal after confirming no campaign controller is live.
 
-This lock prevents two campaign processes from independently consuming the same call budget.
+This conservative policy removes stale-lock time-of-check/time-of-use races and prevents two campaign processes from independently consuming the same call budget.
 
 ## Hash-chained ledger
 
@@ -180,7 +179,9 @@ Every event carries:
 - timestamp;
 - its own SHA-256 over the canonical event material.
 
-Ledger replay verifies the complete chain before additional provider work.
+Ledger replay verifies the complete chain before additional provider work. On every nonterminal resume, all already-recorded case-terminal events are also re-closed over their immutable report/sidecar and deterministic `verify_case_report()` boundary **before any fresh provider invocation**. A missing/corrupted recorded case therefore stops the campaign without spending additional entitlement.
+
+If a `case_execution_failure` record exists but the process died before `campaign_stopped` was appended, resume verifies that failure evidence, finalizes `stopped_execution_failure`, and returns without invoking later cases. Any later case-terminal record after an execution failure is rejected as invalid campaign history.
 
 Case terminal events record case ID, fixture hash, report path/hash, invocation count, structural status, execution error, and whether the event was recovered from pre-existing immutable evidence.
 
@@ -239,7 +240,9 @@ Arabic/English editorial review remains a separate human activity over the froze
 - an invocation-start marker without terminal evidence blocks automatic retry;
 - ledger tampering is rejected before more provider activity;
 - terminal summary byte/sidecar/semantic tampering is rejected before provider activity;
-- stale/live campaign-lock behavior is testable through injected liveness decisions without unsafe platform assumptions;
+- any pre-existing campaign lock—including a stale/dead-PID-shaped residue—is fail-closed and never auto-reclaimed;
+- nonterminal resume re-verifies recorded case evidence before fresh provider work;
+- a recorded execution failure with a missing campaign-stopped event is terminalized on resume with zero later invocations;
 - campaign summary authority and editorial qualification remain false.
 
 ## Relationship to the single-case driver
