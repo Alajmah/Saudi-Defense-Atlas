@@ -294,7 +294,7 @@ def check_campaign_entitlement(
         raise CampaignGateError(
             "campaign entitlement attestation does not name the prepaid/general route"
         )
-    return value
+    return attestation
 
 
 def _event_hash(event_without_hash: dict[str, Any]) -> str:
@@ -972,6 +972,68 @@ def _verify_recorded_case_evidence(
             )
 
 
+def verify_provider_boundary_source(
+    *,
+    prompt: str,
+    case: dict[str, Any],
+    manifest: dict[str, Any],
+    git_state_provider: Callable[[], tuple[str, str, bool | None]],
+) -> None:
+    """Revalidate reviewed source bytes against the exact prompt about to be sent."""
+
+    git_head, _git_ref_value, clean = git_state_provider()
+    if git_head != manifest["reviewed_head"] or clean is not True:
+        raise CampaignGateError(
+            "campaign source state drifted at the provider boundary"
+        )
+
+    fixture_path = _repo_path(case["fixture"])
+    terminology_path = _repo_path(manifest["terminology_file"])
+    if _file_sha256(fixture_path) != case["fixture_sha256"]:
+        raise CampaignGateError(
+            f"campaign fixture hash drifted at provider boundary: {case['case_id']}"
+        )
+    if _file_sha256(terminology_path) != manifest["terminology_file_sha256"]:
+        raise CampaignGateError(
+            "campaign terminology hash drifted at provider boundary"
+        )
+
+    try:
+        _, context_json, _, _delivery_json, _ = split_rendered_prompt(prompt)
+        prompt_context = json.loads(context_json)
+        if not isinstance(prompt_context, dict):
+            raise CampaignGateError(
+                "provider-boundary prompt context is not an object"
+            )
+        created_at = prompt_context.get("created_at")
+        if not isinstance(created_at, str) or not created_at:
+            raise CampaignGateError(
+                "provider-boundary prompt context lacks created_at"
+            )
+        fixture = load_fixture(fixture_path)
+        terminology_payload = json.loads(
+            terminology_path.read_text(encoding="utf-8")
+        )
+        terminology = load_terminology(terminology_payload)
+        expected_context = build_drafting_context_from_fixture(
+            fixture, terminology, created_at
+        )
+        expected_prompt, _ = prepare_draft_input(
+            expected_context, terminology
+        )
+    except CampaignGateError:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise CampaignGateError(
+            "provider-boundary source/prompt reconstruction failed"
+        ) from exc
+
+    if expected_context != prompt_context or expected_prompt != prompt:
+        raise CampaignGateError(
+            "provider-boundary prompt does not match fresh manifest-bound source bytes"
+        )
+
+
 def run_campaign(
     *,
     manifest_path: Path,
@@ -1167,7 +1229,7 @@ def run_campaign(
                     invocations_used += int(payload["invocation_count"])
                 event_type = (
                     "case_execution_failure"
-                    if payload["execution_error"]
+                    if payload["execution_error"] is not None
                     else "case_completed"
                 )
                 append_event(
@@ -1228,8 +1290,14 @@ def run_campaign(
             )
             marker_written = False
 
-            def mark_invocation_started(_rendered_prompt: str) -> None:
+            def mark_invocation_started(rendered_prompt: str) -> None:
                 nonlocal invocations_used, marker_written
+                verify_provider_boundary_source(
+                    prompt=rendered_prompt,
+                    case=case,
+                    manifest=manifest,
+                    git_state_provider=git_state_provider,
+                )
                 if marker_written or case["case_id"] in started:
                     raise CampaignGateError(
                         f"duplicate invocation-start marker for {case['case_id']}"
@@ -1278,7 +1346,7 @@ def run_campaign(
                 )
             event_type = (
                 "case_execution_failure"
-                if payload["execution_error"]
+                if payload["execution_error"] is not None
                 else "case_completed"
             )
             append_event(
