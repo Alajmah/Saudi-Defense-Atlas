@@ -878,6 +878,52 @@ def _case_payload(
     }
 
 
+def _verify_terminal_case_evidence(
+    manifest: dict[str, Any],
+    events: list[dict[str, Any]],
+    evidence_dir: Path,
+    attestation: str,
+) -> None:
+    """Re-close terminal ledger records over their immutable case evidence."""
+
+    cases_by_id = {case["case_id"]: case for case in manifest["cases"]}
+    terminal_cases = _case_events(events)
+    for case_id, event in terminal_cases.items():
+        case = cases_by_id.get(case_id)
+        if case is None:
+            raise CampaignGateError(
+                f"terminal ledger references unknown campaign case {case_id}"
+            )
+        report_path = evidence_dir / f"{case_id}.json"
+        payload = event["payload"]
+        if payload.get("report_path") != report_path.name:
+            raise CampaignGateError(
+                f"terminal ledger report path mismatch for {case_id}"
+            )
+        verified = verify_case_report(
+            report_path, case, manifest, attestation
+        )
+        rebuilt = _case_payload(case, report_path, verified)
+        for field in (
+            "case_id",
+            "fixture",
+            "fixture_sha256",
+            "report_path",
+            "report_sha256",
+            "invocation_count",
+            "structural_status",
+            "execution_error",
+        ):
+            if payload.get(field) != rebuilt[field]:
+                raise CampaignGateError(
+                    f"terminal ledger/evidence mismatch for {case_id}: {field}"
+                )
+        if not isinstance(payload.get("recovered_without_invocation"), bool):
+            raise CampaignGateError(
+                f"terminal ledger recovery flag is invalid for {case_id}"
+            )
+
+
 def run_campaign(
     *,
     manifest_path: Path,
@@ -946,6 +992,9 @@ def run_campaign(
                 )
         terminal = _terminal_event(events)
         if terminal is not None:
+            _verify_terminal_case_evidence(
+                manifest, events, evidence_dir, attestation
+            )
             expected_summary = _summary_from_events(
                 manifest,
                 manifest_sha256,
@@ -1065,24 +1114,6 @@ def run_campaign(
                     "campaign source state drifted from reviewed clean head"
                 )
 
-            append_event(
-                ledger_path,
-                campaign_id=manifest["campaign_id"],
-                manifest_sha256=manifest_sha256,
-                event_type="case_invocation_started",
-                payload={
-                    "case_id": case["case_id"],
-                    "fixture": case["fixture"],
-                    "fixture_sha256": case["fixture_sha256"],
-                    "conservative_call_budget_charge": 1,
-                },
-                clock=clock,
-            )
-            started[case["case_id"]] = load_ledger(
-                ledger_path, manifest["campaign_id"], manifest_sha256
-            )[-1]
-            invocations_used += 1
-
             case_args = argparse.Namespace(
                 fixture=_repo_path(case["fixture"]),
                 model=manifest["model"],
@@ -1093,6 +1124,35 @@ def run_campaign(
                 timeout_seconds=manifest["timeout_seconds"],
                 output=report_path,
             )
+            marker_written = False
+
+            def mark_invocation_started() -> None:
+                nonlocal invocations_used, marker_written
+                if marker_written or case["case_id"] in started:
+                    raise CampaignGateError(
+                        f"duplicate invocation-start marker for {case['case_id']}"
+                    )
+                if invocations_used >= manifest["max_invocations"]:
+                    raise CampaignGateError(
+                        "campaign invocation ceiling reached before provider invocation"
+                    )
+                event = append_event(
+                    ledger_path,
+                    campaign_id=manifest["campaign_id"],
+                    manifest_sha256=manifest_sha256,
+                    event_type="case_invocation_started",
+                    payload={
+                        "case_id": case["case_id"],
+                        "fixture": case["fixture"],
+                        "fixture_sha256": case["fixture_sha256"],
+                        "conservative_call_budget_charge": 1,
+                    },
+                    clock=clock,
+                )
+                started[case["case_id"]] = event
+                invocations_used += 1
+                marker_written = True
+
             run_trial(
                 args=case_args,
                 env_url=env_url_provider(),
@@ -1102,7 +1162,12 @@ def run_campaign(
                 require_api_key=require_api_key,
                 invoke_factory=invoke_factory,
                 created_at_fn=clock,
+                before_invoke=mark_invocation_started,
             )
+            if not marker_written:
+                raise CampaignGateError(
+                    f"single-case driver returned without invocation marker for {case['case_id']}"
+                )
             verified = verify_case_report(report_path, case, manifest, attestation)
             payload = _case_payload(case, report_path, verified)
             if invocations_used > manifest["max_invocations"]:
@@ -1162,6 +1227,10 @@ def run_campaign(
         status = (
             terminal["payload"]["status"] if terminal else "running"
         )
+        if terminal is not None:
+            _verify_terminal_case_evidence(
+                manifest, events, evidence_dir, attestation
+            )
         summary = _summary_from_events(
             manifest, manifest_sha256, events, status
         )
