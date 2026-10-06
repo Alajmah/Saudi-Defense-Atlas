@@ -36,6 +36,8 @@ from scripts.run_m4_drafting_trial import (  # noqa: E402
     _git_head,
     _git_ref,
     _worktree_clean,
+    build_drafting_context_from_fixture,
+    load_fixture,
     require_zai_api_key,
     run_trial,
     sidecar_path,
@@ -50,6 +52,7 @@ from services.intelligence.bilingual_drafting import (  # noqa: E402
     DraftModelTrace,
     build_bilingual_draft_run,
     load_terminology,
+    prepare_draft_input,
     split_rendered_prompt,
     terminology_digest,
 )
@@ -501,6 +504,23 @@ def verify_case_report(
     terminology = load_terminology(terminology_payload)
     registry_sha = terminology_digest(terminology)
     delivery_sha = _sha256_text(delivery_json)
+    created_at = context.get("created_at")
+    if not isinstance(created_at, str) or not created_at:
+        raise CampaignGateError("case report frozen context lacks created_at")
+    fixture = load_fixture(_repo_path(case["fixture"]))
+    try:
+        expected_context = build_drafting_context_from_fixture(
+            fixture, terminology, created_at
+        )
+        expected_rendered, _ = prepare_draft_input(expected_context, terminology)
+    except Exception as exc:  # noqa: BLE001
+        raise CampaignGateError(
+            "case report fixture-to-input deterministic reconstruction failed"
+        ) from exc
+    if expected_context != context or expected_rendered != rendered_prompt:
+        raise CampaignGateError(
+            "case report frozen input does not match manifest-bound fixture reconstruction"
+        )
     terminology_trace = report.get("terminology", {})
     if terminology_trace.get("registry_acceptance_sha256") != registry_sha:
         raise CampaignGateError("case report terminology registry digest mismatch")
