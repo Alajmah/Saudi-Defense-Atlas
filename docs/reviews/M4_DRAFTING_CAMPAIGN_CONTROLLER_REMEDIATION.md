@@ -224,3 +224,47 @@ The single-case deterministic validator now proves:
 - successful provider response -> exactly one hook and one attempt.
 
 This change does not broaden model, publication, canonical-mutation, scheduler, retry, or recurrence authority. No live model call or entitlement consumption is performed by the remediation.
+
+
+## Codex P1 reconciliation after review 5431950125
+
+The completed Codex review on commit `4408755f312e0e3ba19927b9d2a0f1ca5f5d410e` identified three additional long-running failure-mode defects. They were independently checked against current head `0a25023f2be22980cb538ad4eb6a6bc558ecc0b0` and confirmed applicable.
+
+### DCC-11 — recorded execution failure could resume into later cases — REMEDIATED
+
+On nonterminal resume the controller now inspects already-recorded case-terminal events before processing any fresh case.
+
+If a recorded `case_execution_failure` exists and no campaign terminal event exists:
+
+- the failure report is re-verified against the manifest/attestation/evidence boundary;
+- any later case-terminal record after that failure is rejected as invalid history;
+- the controller appends `campaign_stopped` with `stopped_execution_failure`;
+- terminal evidence/summary verification runs;
+- no later case is invoked.
+
+A deterministic regression simulates the exact crash window by removing only the final `campaign_stopped` event from a real failure ledger, deleting the old summary, and resuming. The campaign re-finalizes the stop with zero provider calls.
+
+### DCC-12 — nonterminal resume trusted recorded evidence before spending more calls — REMEDIATED
+
+Every already-recorded `case_completed` / `case_execution_failure` event is now re-closed over its actual immutable report + sidecar immediately after ledger loading and **before any fresh invocation**.
+
+The verified report SHA, invocation count, structural status, execution error, fixture/path binding, and report path must match the ledger payload.
+
+A deterministic regression builds a legitimate first-case completed ledger state, removes its report sidecar, and proves resume fails closed before case 2 can reach the provider.
+
+### DCC-13 — stale-lock auto-reclamation race — REMEDIATED BY POLICY REDUCTION
+
+Automatic stale-lock reclamation has been removed.
+
+Any existing `.campaign.lock` now fails closed. The controller does not inspect a dead PID and then unlink the lock, eliminating the stale-lock TOCTOU race where concurrent reclaimers could delete each other's newly created live locks.
+
+Normal shutdown still releases its own token-bound lock. A crash-residue lock requires explicit operator reconciliation/removal after confirming no controller is live.
+
+The deterministic validator proves:
+- a second acquisition while a lock is owned fails;
+- a stale/dead-PID-shaped lock also fails;
+- the stale-shaped lock bytes are not modified or automatically reclaimed.
+
+This deliberately trades automatic crash-lock recovery for a stronger no-concurrent-controller guarantee. It does not alter manifest, entitlement, model, publication, canonical-mutation, retry, scheduler, or recurrence authority.
+
+No live model call or drafting entitlement consumption occurred.
