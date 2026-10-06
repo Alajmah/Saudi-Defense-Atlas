@@ -27,6 +27,7 @@ from scripts.run_m4_drafting_campaign import (  # noqa: E402
     CAMPAIGN_MANIFEST_VERSION,
     CAMPAIGN_SUMMARY_VERSION,
     CampaignGateError,
+    append_event,
     load_ledger,
     load_manifest,
     run_campaign,
@@ -42,6 +43,7 @@ from scripts.run_m4_drafting_trial import (  # noqa: E402
 from scripts.run_m4_model_extraction_trial import _file_sha256  # noqa: E402
 
 REVIEWED_HEAD = "a" * 40
+ENTITLEMENT_ID = "M4-DRAFT-CAMPAIGN-TEST-AUTH"
 
 
 def expect(condition: bool, message: str, failures: list[str]) -> None:
@@ -103,6 +105,7 @@ def write_manifest(
         "campaign_id": "M4-DRAFT-CAMPAIGN-TEST",
         "reviewed_head": REVIEWED_HEAD,
         "route": "coding-plan",
+        "entitlement_id": ENTITLEMENT_ID,
         "model": "glm-5.3",
         "timeout_seconds": 30,
         "max_invocations": max_invocations,
@@ -200,7 +203,7 @@ def main() -> int:
         summary = run_campaign(
             manifest_path=manifest_path,
             evidence_dir=evidence_dir,
-            entitlement_attestation="coding-plan bounded drafting campaign test",
+            entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
             require_api_key=require_key,
             invoke_factory=factory,
             git_state_provider=fixed_git_state,
@@ -269,6 +272,12 @@ def main() -> int:
             "campaign summary sidecar missing",
             failures,
         )
+        expect(
+            (evidence_dir / "campaign-manifest.json").exists()
+            and (evidence_dir / "campaign-manifest.json.sha256").exists(),
+            "frozen campaign manifest artifact/sidecar missing",
+            failures,
+        )
         ledger = load_ledger(
             evidence_dir / "campaign-ledger.jsonl",
             manifest["campaign_id"],
@@ -284,7 +293,7 @@ def main() -> int:
         second = run_campaign(
             manifest_path=manifest_path,
             evidence_dir=evidence_dir,
-            entitlement_attestation="coding-plan bounded drafting campaign test",
+            entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
             require_api_key=require_key,
             invoke_factory=factory,
             git_state_provider=fixed_git_state,
@@ -313,7 +322,7 @@ def main() -> int:
             lambda: run_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
-                entitlement_attestation="coding-plan bounded drafting campaign test",
+                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
                 require_api_key=require_key,
                 invoke_factory=factory,
                 git_state_provider=fixed_git_state,
@@ -325,6 +334,56 @@ def main() -> int:
         expect(
             len(calls) == 2,
             "ledger tamper reached the provider",
+            failures,
+        )
+
+    # An invocation-start ledger marker without terminal case evidence is
+    # ambiguous after a process death and must never be retried automatically.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        td = Path(tmpdir)
+        manifest_path = td / "manifest.json"
+        manifest = write_manifest(manifest_path)
+        loaded, manifest_sha = load_manifest(manifest_path)
+        evidence_dir = td / "evidence"
+        evidence_dir.mkdir()
+        append_event(
+            evidence_dir / "campaign-ledger.jsonl",
+            campaign_id=loaded["campaign_id"],
+            manifest_sha256=manifest_sha,
+            event_type="case_invocation_started",
+            payload={
+                "case_id": loaded["cases"][0]["case_id"],
+                "fixture": loaded["cases"][0]["fixture"],
+                "fixture_sha256": loaded["cases"][0]["fixture_sha256"],
+                "conservative_call_budget_charge": 1,
+            },
+            clock=fixed_clock,
+        )
+        ambiguous_calls: list[str] = []
+
+        def ambiguous_factory(**kwargs):
+            def invoke(prompt: str) -> str:
+                ambiguous_calls.append(prompt)
+                return raw_good
+            return invoke
+
+        expect_gate(
+            "ambiguous prior invocation without terminal evidence",
+            lambda: run_campaign(
+                manifest_path=manifest_path,
+                evidence_dir=evidence_dir,
+                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                require_api_key=lambda: "test-key",
+                invoke_factory=ambiguous_factory,
+                git_state_provider=fixed_git_state,
+                env_url_provider=empty_env,
+                clock=fixed_clock,
+            ),
+            failures,
+        )
+        expect(
+            not ambiguous_calls,
+            "ambiguous prior invocation was automatically retried",
             failures,
         )
 
@@ -347,7 +406,7 @@ def main() -> int:
         stopped = run_campaign(
             manifest_path=manifest_path,
             evidence_dir=evidence_dir,
-            entitlement_attestation="coding-plan bounded drafting campaign test",
+            entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
             require_api_key=lambda: "test-key",
             invoke_factory=fail_factory,
             git_state_provider=fixed_git_state,
@@ -401,7 +460,7 @@ def main() -> int:
                 zai_endpoint=manifest["route"],
                 base_url=None,
                 reviewed_head=REVIEWED_HEAD,
-                entitlement_attestation="coding-plan bounded drafting campaign test",
+                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
                 timeout_seconds=30,
                 output=evidence_dir / "CASE-01.json",
             ),
@@ -431,7 +490,7 @@ def main() -> int:
         resumed = run_campaign(
             manifest_path=manifest_path,
             evidence_dir=evidence_dir,
-            entitlement_attestation="coding-plan bounded drafting campaign test",
+            entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
             require_api_key=lambda: "test-key",
             invoke_factory=resume_factory,
             git_state_provider=fixed_git_state,
