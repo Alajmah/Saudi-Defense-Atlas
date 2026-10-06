@@ -176,8 +176,14 @@ def main() -> int:
     # Entitlement
     expect_gate_error("empty attestation", lambda: check_entitlement(""), failures)
     expect_gate_error("blank attestation", lambda: check_entitlement("   "), failures)
+    exact_attestation = "  non-empty exact attestation  "
     try:
-        check_entitlement("  non-empty  ")
+        preserved_attestation = check_entitlement(exact_attestation)
+        expect(
+            preserved_attestation == exact_attestation,
+            "valid attestation bytes/text were normalized",
+            failures,
+        )
     except TrialGateError:
         failures.append("valid attestation was rejected")
 
@@ -286,6 +292,34 @@ def main() -> int:
     expect(
         failing_hooks == failing_calls,
         "failing invocation hook did not receive the exact provider prompt",
+        failures,
+    )
+
+    # DCC-ERR-01: provider exceptions with an empty string representation still
+    # produce a non-empty, bounded execution diagnostic.
+    empty_error_calls: list[str] = []
+
+    def empty_error_invoke(prompt: str) -> str:
+        empty_error_calls.append(prompt)
+        raise TimeoutError()
+
+    empty_run, empty_error, empty_raw, _, empty_attempts = execute_draft_invocation(
+        context=context,
+        terminology=terminology,
+        model_trace=trace,
+        invoke_fn=empty_error_invoke,
+    )
+    expect(empty_run is None and empty_raw is None, "empty-error invoker produced evidence", failures)
+    expect(
+        empty_attempts == len(empty_error_calls) == 1,
+        "empty-error provider path did not preserve one-attempt semantics",
+        failures,
+    )
+    expect(
+        isinstance(empty_error, str)
+        and bool(empty_error)
+        and "TimeoutError" in empty_error,
+        f"empty exception message was not normalized: {empty_error!r}",
         failures,
     )
 
@@ -542,7 +576,11 @@ def main() -> int:
             output=output,
         )
 
-    def spy_launch(output: Path, reviewed_head: str = "a" * 40):
+    def spy_launch(
+        output: Path,
+        reviewed_head: str = "a" * 40,
+        attestation: str = "coding-plan drafting attestation",
+    ):
         key_reads: list[int] = []
         constructions: list[dict] = []
         invoker_calls: list[str] = []
@@ -562,6 +600,7 @@ def main() -> int:
 
         args = make_launch_args(output)
         args.reviewed_head = reviewed_head
+        args.entitlement_attestation = attestation
         try:
             summary = run_trial(
                 args=args,
@@ -633,7 +672,10 @@ def main() -> int:
         # Fresh paths: the launch runs end to end through the same sequence —
         # one credential read, one provider construction, one invoker call.
         fresh = Path(tmpdir) / "fresh" / "report.json"
-        outcome, summary, key_reads, constructions, invoker_calls = spy_launch(fresh)
+        exact_launch_attestation = "  coding-plan drafting attestation  "
+        outcome, summary, key_reads, constructions, invoker_calls = spy_launch(
+            fresh, attestation=exact_launch_attestation
+        )
         expect(outcome == "ran", f"fresh launch refused: {summary}", failures)
         expect(len(key_reads) == 1, "fresh launch read the credential more than once", failures)
         expect(len(constructions) == 1, "fresh launch built the provider edge more than once", failures)
@@ -649,6 +691,11 @@ def main() -> int:
             written["evidence"]["raw_model_output"] == raw_good
             and written["invocation"]["count"] == 1,
             "launch-written report lost frozen evidence or provenance",
+            failures,
+        )
+        expect(
+            written["entitlement"]["attestation"] == exact_launch_attestation,
+            "launch-written report normalized the exact supplied attestation",
             failures,
         )
         expect(
