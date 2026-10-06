@@ -86,3 +86,41 @@ The campaign validator now covers:
 ## Claim ceiling
 
 These remediations qualify only deterministic campaign-control mechanics if exact-head CI and re-review pass. They do not qualify live model quality, editorial quality, production reliability, representative throughput, scheduler operation, publication, or canonical mutation.
+
+
+## Residual remediation after review 5431026967
+
+### DCC-05 — recovered evidence not bound to exact campaign authorization/route — REMEDIATED
+
+`verify_case_report(...)` now requires the campaign's exact normalized entitlement attestation and verifies it against the single-case report.
+
+It also verifies route provenance against the manifest:
+
+- `provider_edge.requested_endpoint_mode` must equal the manifest route;
+- `provider_edge.resolved_base_url` must equal the official URL for that route;
+- `entitlement.resolved_base_url` must equal the same official URL.
+
+The campaign-level Coding Plan wording gate was tightened from a loose `coding` substring to `coding-plan`.
+
+The deterministic validator proves a valid recovered report passes while wrong-attestation and wrong-route variants fail closed.
+
+### DCC-06 — out-of-band report could be absorbed without campaign start marker — REMEDIATED
+
+Every fresh campaign case already records `case_invocation_started` before invoking the reviewed single-case driver. Recovery now requires that matching ledger event before any complete pre-existing report can be adopted.
+
+A complete report + sidecar without a matching campaign invocation-start marker is rejected as foreign/ambiguous evidence.
+
+The crash-recovery regression now constructs the legitimate recovery state explicitly:
+
+1. `campaign_started`;
+2. `case_invocation_started`;
+3. single-case immutable report + sidecar;
+4. no terminal case event.
+
+Resume then adopts that report without reinvocation and proceeds to the next case.
+
+A separate regression creates a standalone single-case report with no campaign start marker and proves the campaign rejects it without any new provider call.
+
+## Residual claim ceiling
+
+These changes only strengthen campaign provenance/recovery mechanics. They do not authorize or perform a live drafting call and do not broaden model, publication, canonical-mutation, scheduler, or recurrence authority.
