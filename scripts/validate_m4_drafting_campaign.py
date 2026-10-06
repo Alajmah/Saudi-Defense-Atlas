@@ -207,6 +207,64 @@ def main() -> int:
         finally:
             untracked.unlink(missing_ok=True)
 
+        # DCC-AUTH-01: one approval is bound to the exact canonical
+        # manifest, not merely entitlement ID + route.
+        original_attestation = attestation_for(manifest_path)
+
+        def assert_manifest_drift_rejected(label: str, drifted: dict[str, Any]) -> None:
+            drifted_path = td / f"{label}.json"
+            drifted_path.write_text(
+                json.dumps(drifted, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            credential_reads: list[int] = []
+            provider_calls: list[str] = []
+
+            def drift_key() -> str:
+                credential_reads.append(1)
+                return "test-key"
+
+            def drift_factory(**kwargs):
+                def invoke(prompt: str) -> str:
+                    provider_calls.append(prompt)
+                    return raw_good
+                return invoke
+
+            expect_gate(
+                f"manifest-bound entitlement {label}",
+                lambda: run_campaign(
+                    manifest_path=drifted_path,
+                    evidence_dir=td / f"evidence-{label}",
+                    entitlement_attestation=original_attestation,
+                    require_api_key=drift_key,
+                    invoke_factory=drift_factory,
+                    git_state_provider=fixed_git_state,
+                    env_url_provider=empty_env,
+                    clock=fixed_clock,
+                ),
+                failures,
+            )
+            expect(
+                not credential_reads and not provider_calls,
+                f"manifest drift {label} reached credentials/provider",
+                failures,
+            )
+
+        changed_model = copy.deepcopy(manifest)
+        changed_model["model"] = "glm-5.3-drift"
+        assert_manifest_drift_rejected("changed-model", changed_model)
+
+        reordered = copy.deepcopy(manifest)
+        reordered["cases"] = list(reversed(reordered["cases"]))
+        assert_manifest_drift_rejected("reordered-corpus", reordered)
+
+        enlarged = copy.deepcopy(manifest)
+        extra_case = dict(enlarged["cases"][-1])
+        extra_case["case_id"] = "CASE-03"
+        enlarged["cases"].append(extra_case)
+        enlarged["max_invocations"] = len(enlarged["cases"])
+        assert_manifest_drift_rejected("changed-ceiling", enlarged)
+
         # DCC-13: lock acquisition never auto-reclaims an existing file.
         # This removes stale-lock TOCTOU races; crash residues require explicit
         # operator reconciliation/removal after confirming no controller is live.
@@ -239,6 +297,46 @@ def main() -> int:
             failures,
         )
         lock_path.unlink()
+
+        # DCC-LOCK-01: lock namespace is keyed by exact manifest and checkout,
+        # independent of caller-selected evidence directory.
+        global_path = campaign_lock_path(digest)
+        global_lock = acquire_lock(global_path, digest)
+        blocked_key_reads: list[int] = []
+        blocked_provider_calls: list[str] = []
+
+        def blocked_key() -> str:
+            blocked_key_reads.append(1)
+            return "test-key"
+
+        def blocked_factory(**kwargs):
+            def invoke(prompt: str) -> str:
+                blocked_provider_calls.append(prompt)
+                return raw_good
+            return invoke
+
+        try:
+            expect_gate(
+                "same manifest different evidence directory while locked",
+                lambda: run_campaign(
+                    manifest_path=manifest_path,
+                    evidence_dir=td / "different-evidence-directory",
+                    entitlement_attestation=attestation_for(manifest_path),
+                    require_api_key=blocked_key,
+                    invoke_factory=blocked_factory,
+                    git_state_provider=fixed_git_state,
+                    env_url_provider=empty_env,
+                    clock=fixed_clock,
+                ),
+                failures,
+            )
+            expect(
+                not blocked_key_reads and not blocked_provider_calls,
+                "manifest-global lock allowed credentials/provider from another evidence directory",
+                failures,
+            )
+        finally:
+            release_lock(global_lock)
 
     # Complete campaign: first output is structurally rejected, second accepted;
     # rejection is evidence and does not stop the campaign.
