@@ -18,6 +18,7 @@ import hashlib
 import json
 import os
 import socket
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -85,6 +86,23 @@ def _repo_path(value: str) -> Path:
             f"campaign manifest path must be repository-relative: {value}"
         )
     return _inside_root(ROOT / path)
+
+
+def _require_tracked_repo_file(path: Path) -> None:
+    try:
+        relative = path.resolve().relative_to(ROOT.resolve()).as_posix()
+    except ValueError as exc:
+        raise CampaignGateError(f"campaign file is outside repository root: {path}") from exc
+    result = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "--error-unmatch", "--", relative],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise CampaignGateError(
+            f"campaign file is not tracked by the reviewed repository state: {relative}"
+        )
 
 
 def parse_args() -> argparse.Namespace:
@@ -180,6 +198,7 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
     terminology_path = _repo_path(payload["terminology_file"])
     if not terminology_path.is_file():
         raise CampaignGateError("campaign terminology file does not exist")
+    _require_tracked_repo_file(terminology_path)
     if _file_sha256(terminology_path) != payload["terminology_file_sha256"]:
         raise CampaignGateError("campaign terminology file hash mismatch")
     if terminology_path.resolve() != DEFAULT_TERMINOLOGY.resolve():
@@ -223,6 +242,7 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
             raise CampaignGateError(
                 f"campaign fixture does not exist: {case['fixture']}"
             )
+        _require_tracked_repo_file(fixture_path)
         if _file_sha256(fixture_path) != case["fixture_sha256"]:
             raise CampaignGateError(f"campaign fixture hash mismatch: {case_id}")
 
@@ -424,7 +444,40 @@ def verify_case_report(
     }
 
 
-def _pid_alive(pid: int) -> bool:
+def _pid_alive_windows(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    process_query_limited_information = 0x1000
+    still_active = 259
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel32.OpenProcess.restype = wintypes.HANDLE
+    kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+    kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    handle = kernel32.OpenProcess(
+        process_query_limited_information, False, pid
+    )
+    if not handle:
+        error = ctypes.get_last_error()
+        if error in {5}:  # access denied -> process exists but is not queryable
+            return True
+        if error in {87}:  # invalid parameter -> no such PID
+            return False
+        return True
+    try:
+        exit_code = wintypes.DWORD()
+        if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+            return True
+        return exit_code.value == still_active
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def _pid_alive_posix(pid: int) -> bool:
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -436,13 +489,24 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+def _pid_alive(pid: int) -> bool:
+    if os.name == "nt":
+        return _pid_alive_windows(pid)
+    return _pid_alive_posix(pid)
+
+
 @dataclass
 class CampaignLock:
     path: Path
     token: str
 
 
-def acquire_lock(path: Path, manifest_sha256: str) -> CampaignLock:
+def acquire_lock(
+    path: Path,
+    manifest_sha256: str,
+    *,
+    pid_alive: Callable[[int], bool] = _pid_alive,
+) -> CampaignLock:
     path.parent.mkdir(parents=True, exist_ok=True)
     host = socket.gethostname()
     token = _sha256_text(f"{host}:{os.getpid()}:{manifest_sha256}")
@@ -463,7 +527,7 @@ def acquire_lock(path: Path, manifest_sha256: str) -> CampaignLock:
                 "refuse automatic stale-lock recovery"
             )
         pid = existing.get("pid")
-        if not isinstance(pid, int) or _pid_alive(pid):
+        if not isinstance(pid, int) or pid_alive(pid):
             raise CampaignGateError(
                 "campaign is already locked by a live/unknown process"
             )
@@ -674,17 +738,38 @@ def run_campaign(
         events = load_ledger(
             ledger_path, manifest["campaign_id"], manifest_sha256
         )
+        if events:
+            campaign_starts = [
+                event for event in events if event["event_type"] == "campaign_started"
+            ]
+            if len(campaign_starts) != 1 or campaign_starts[0]["sequence"] != 1:
+                raise CampaignGateError(
+                    "campaign ledger must contain exactly one leading campaign_started event"
+                )
+            frozen_attestation_sha = campaign_starts[0]["payload"].get(
+                "entitlement_attestation_sha256"
+            )
+            if frozen_attestation_sha != _sha256_text(attestation):
+                raise CampaignGateError(
+                    "campaign entitlement attestation changed across resume"
+                )
         terminal = _terminal_event(events)
         if terminal is not None:
-            if not summary_path.exists() or not sidecar_path(summary_path).exists():
-                summary = _summary_from_events(
-                    manifest,
-                    manifest_sha256,
-                    events,
-                    terminal["payload"]["status"],
-                )
-                _write_immutable_json(summary_path, summary)
-            return json.loads(summary_path.read_text(encoding="utf-8"))
+            expected_summary = _summary_from_events(
+                manifest,
+                manifest_sha256,
+                events,
+                terminal["payload"]["status"],
+            )
+            if summary_path.exists() or sidecar_path(summary_path).exists():
+                stored_summary, _ = _verify_immutable_json(summary_path)
+                if stored_summary != expected_summary:
+                    raise CampaignGateError(
+                        "terminal campaign summary does not match the verified ledger"
+                    )
+            else:
+                _write_immutable_json(summary_path, expected_summary)
+            return expected_summary
 
         if not events:
             append_event(
@@ -889,10 +974,13 @@ def run_campaign(
             "stopped_execution_failure",
             "stopped_call_ceiling",
         }:
-            if (
-                not summary_path.exists()
-                and not sidecar_path(summary_path).exists()
-            ):
+            if summary_path.exists() or sidecar_path(summary_path).exists():
+                stored_summary, _ = _verify_immutable_json(summary_path)
+                if stored_summary != summary:
+                    raise CampaignGateError(
+                        "campaign summary does not match the verified ledger"
+                    )
+            else:
                 _write_immutable_json(summary_path, summary)
         return summary
     finally:
