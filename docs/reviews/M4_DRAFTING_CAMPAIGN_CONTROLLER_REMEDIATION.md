@@ -268,3 +268,57 @@ The deterministic validator proves:
 This deliberately trades automatic crash-lock recovery for a stronger no-concurrent-controller guarantee. It does not alter manifest, entitlement, model, publication, canonical-mutation, retry, scheduler, or recurrence authority.
 
 No live model call or drafting entitlement consumption occurred.
+
+
+## Independent maintainer remediation after review PRR_kwDOUrt-R88AAAABQ8Va5Q
+
+The independent exact-head maintainer review identified three additional authorization/concurrency/recovery blockers on `0a25023f2be22980cb538ad4eb6a6bc558ecc0b0`. They remained applicable after the DCC-11..13 remediation and were accepted in reconciliation review `5432040779`.
+
+### DCC-AUTH-01 — campaign approval was not bound to the exact manifest — REMEDIATED
+
+`check_campaign_entitlement()` now derives the canonical manifest SHA-256 and requires the runtime attestation to contain all of:
+
+- `entitlement_id`;
+- `campaign_id`;
+- the full canonical `manifest_sha256`;
+- the selected route token.
+
+Changing model, ordered corpus, case count/invocation ceiling, terminology binding, reviewed head, or any other manifest field changes the manifest hash and invalidates the old attestation before credential/provider activity.
+
+The validator proves that an attestation for the original manifest cannot authorize:
+- a changed model;
+- reordered cases;
+- an enlarged corpus/call ceiling.
+
+### DCC-LOCK-01 — hard ceiling was scoped to evidence directory — REMEDIATED FOR SINGLE-HOST/SINGLE-CHECKOUT SCOPE
+
+Campaign locking moved from:
+
+`<evidence_dir>/.campaign.lock`
+
+to one deterministic checkout-level namespace keyed only by the exact manifest SHA-256:
+
+`.runtime/m4-drafting-campaign-locks/<manifest_sha256>.lock`
+
+The same approved manifest therefore cannot obtain independent locks merely by selecting different evidence directories within the supported checkout.
+
+The existing fail-closed lock policy remains: no automatic stale-lock reclamation; crash residue requires explicit operator reconciliation.
+
+The validator holds the manifest lock and attempts the same manifest with a different evidence directory, proving zero credential/provider activity.
+
+This is **not** a cross-host global lock claim. Multi-host exclusion still requires a future shared coordinator.
+
+### DCC-REC-01 — campaign recovery admitted impossible zero-attempt provenance — REMEDIATED
+
+`verify_case_report()` now requires every campaign-bound case report to prove exactly:
+
+- `invocation.attempted == true`;
+- `invocation.count == 1`.
+
+Because `case_invocation_started` is emitted at the actual provider-call boundary, zero-attempt evidence cannot legitimately be adopted by campaign recovery or terminal verification.
+
+The validator re-hashes reports after independently changing `attempted` to false and `count` to zero; both are rejected without provider activity.
+
+### Authority boundary
+
+These changes strengthen the exact authorization/call-budget evidence boundary only. No live model call, drafting entitlement consumption, scheduler/recurrence authority, publication authority, or canonical-mutation authority is introduced.
