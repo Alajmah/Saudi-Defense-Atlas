@@ -200,3 +200,27 @@ all produce zero invoker calls **and no invocation-start marker**. A successful 
 ### Authority / live-action boundary
 
 These residual fixes change only campaign provenance and recovery mechanics. They do not grant scheduler, recurrence, publication, canonical-mutation, or model authority. No live drafting call or drafting entitlement consumption is performed by this remediation.
+
+
+## Residual remediation after review 5431879576
+
+### DCC-10 — campaign start marker still preceded deterministic drafting-boundary work — REMEDIATED
+
+The optional `before_invoke` callback moved from `run_trial()` immediately before `execute_draft_invocation()` into `execute_draft_invocation()`'s capturing invoker itself.
+
+The exact order at the actual provider boundary is now:
+
+1. `build_bilingual_draft_run()` completes all deterministic pre-invocation context validation, prompt preparation, terminology loading, factual-number/support/accounting setup, and structural start-time acquisition;
+2. the capturing invoker is reached;
+3. `before_invoke()` appends the campaign's `case_invocation_started` event and charges the conservative call ceiling;
+4. the orchestration increments its provider-attempt count;
+5. the provider closure is called.
+
+If any deterministic boundary work fails before step 2, the hook does not fire, the provider attempt count remains zero, and the campaign acquires no false ambiguous invocation marker. If the hook itself fails, the provider is not called.
+
+The single-case deterministic validator now proves:
+- invalid context rejected inside `build_bilingual_draft_run()` -> zero hook calls, zero provider calls, zero attempts;
+- provider failure -> exactly one hook and one attempt;
+- successful provider response -> exactly one hook and one attempt.
+
+This change does not broaden model, publication, canonical-mutation, scheduler, retry, or recurrence authority. No live model call or entitlement consumption is performed by the remediation.
