@@ -248,6 +248,14 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
             )
         ):
             raise CampaignGateError(f"case {index} has invalid case_id")
+        if case_id in {
+            "campaign-manifest",
+            "campaign-summary",
+            "campaign-ledger",
+        }:
+            raise CampaignGateError(
+                f"campaign case_id is reserved for controller artifacts: {case_id}"
+            )
         if case_id in seen:
             raise CampaignGateError(f"duplicate campaign case_id: {case_id}")
         seen.add(case_id)
