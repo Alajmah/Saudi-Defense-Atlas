@@ -34,6 +34,7 @@ from scripts.run_m4_drafting_campaign import (  # noqa: E402
     load_manifest,
     release_lock,
     run_campaign,
+    verify_case_report,
 )
 from scripts.run_m4_drafting_trial import (  # noqa: E402
     DEFAULT_FIXTURE,
@@ -555,24 +556,57 @@ def main() -> int:
             failures,
         )
 
-    # Crash recovery: a valid case report may exist before its ledger event.
-    # The controller must recover it and continue with the next case without
-    # invoking case 1 again.
+    # Recovery authorization binding and campaign-start provenance.
     with tempfile.TemporaryDirectory() as tmpdir:
         td = Path(tmpdir)
         manifest_path = td / "manifest.json"
         manifest = write_manifest(manifest_path)
+        loaded, manifest_sha = load_manifest(manifest_path)
         evidence_dir = td / "evidence"
         evidence_dir.mkdir()
         case1 = manifest["cases"][0]
+        attestation = f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test"
         pre_calls: list[str] = []
 
         def pre_factory(**kwargs):
             def invoke(prompt: str) -> str:
                 pre_calls.append(prompt)
                 return raw_good
-
             return invoke
+
+        # A valid campaign crash-recovery window necessarily has both the
+        # leading campaign-start event and the per-case invocation-start marker.
+        append_event(
+            evidence_dir / "campaign-ledger.jsonl",
+            campaign_id=loaded["campaign_id"],
+            manifest_sha256=manifest_sha,
+            event_type="campaign_started",
+            payload={
+                "reviewed_head": loaded["reviewed_head"],
+                "route": loaded["route"],
+                "entitlement_id": loaded["entitlement_id"],
+                "entitlement_attestation_sha256": hashlib.sha256(
+                    attestation.encode("utf-8")
+                ).hexdigest(),
+                "model": loaded["model"],
+                "max_invocations": loaded["max_invocations"],
+                "case_count": len(loaded["cases"]),
+            },
+            clock=fixed_clock,
+        )
+        append_event(
+            evidence_dir / "campaign-ledger.jsonl",
+            campaign_id=loaded["campaign_id"],
+            manifest_sha256=manifest_sha,
+            event_type="case_invocation_started",
+            payload={
+                "case_id": case1["case_id"],
+                "fixture": case1["fixture"],
+                "fixture_sha256": case1["fixture_sha256"],
+                "conservative_call_budget_charge": 1,
+            },
+            clock=fixed_clock,
+        )
 
         run_trial(
             args=argparse.Namespace(
@@ -581,7 +615,7 @@ def main() -> int:
                 zai_endpoint=manifest["route"],
                 base_url=None,
                 reviewed_head=REVIEWED_HEAD,
-                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                entitlement_attestation=attestation,
                 timeout_seconds=30,
                 output=evidence_dir / "CASE-01.json",
             ),
@@ -599,19 +633,46 @@ def main() -> int:
             failures,
         )
 
+        # DCC-05: recovery verification binds exact attestation and route.
+        report_path = evidence_dir / "CASE-01.json"
+        try:
+            verify_case_report(
+                report_path, case1, manifest, attestation
+            )
+        except CampaignGateError:
+            failures.append("valid campaign-bound case report was rejected")
+        expect_gate(
+            "recovery wrong attestation",
+            lambda: verify_case_report(
+                report_path,
+                case1,
+                manifest,
+                f"{ENTITLEMENT_ID} coding-plan DIFFERENT approval",
+            ),
+            failures,
+        )
+        prepaid_manifest = dict(manifest)
+        prepaid_manifest["route"] = "prepaid"
+        expect_gate(
+            "recovery wrong route",
+            lambda: verify_case_report(
+                report_path, case1, prepaid_manifest, attestation
+            ),
+            failures,
+        )
+
         resume_calls: list[str] = []
 
         def resume_factory(**kwargs):
             def invoke(prompt: str) -> str:
                 resume_calls.append(prompt)
                 return raw_good
-
             return invoke
 
         resumed = run_campaign(
             manifest_path=manifest_path,
             evidence_dir=evidence_dir,
-            entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+            entitlement_attestation=attestation,
             require_api_key=lambda: "test-key",
             invoke_factory=resume_factory,
             git_state_provider=fixed_git_state,
@@ -628,9 +689,7 @@ def main() -> int:
             "crash recovery re-invoked the already-frozen case",
             failures,
         )
-        case_rows = {
-            row["case_id"]: row for row in resumed["cases"]
-        }
+        case_rows = {row["case_id"]: row for row in resumed["cases"]}
         expect(
             case_rows["CASE-01"]["recovered_without_invocation"] is True,
             "recovered case not marked",
@@ -642,7 +701,72 @@ def main() -> int:
             failures,
         )
 
-    if failures:
+    # DCC-06: a complete standalone report without a campaign invocation-start
+    # marker is foreign evidence and must not be absorbed into the campaign.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        td = Path(tmpdir)
+        manifest_path = td / "manifest.json"
+        manifest = write_manifest(manifest_path)
+        evidence_dir = td / "evidence"
+        evidence_dir.mkdir()
+        attestation = f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test"
+        standalone_calls: list[str] = []
+
+        def standalone_factory(**kwargs):
+            def invoke(prompt: str) -> str:
+                standalone_calls.append(prompt)
+                return raw_good
+            return invoke
+
+        run_trial(
+            args=argparse.Namespace(
+                fixture=ROOT / manifest["cases"][0]["fixture"],
+                model=manifest["model"],
+                zai_endpoint=manifest["route"],
+                base_url=None,
+                reviewed_head=REVIEWED_HEAD,
+                entitlement_attestation=attestation,
+                timeout_seconds=30,
+                output=evidence_dir / "CASE-01.json",
+            ),
+            env_url="",
+            git_head=REVIEWED_HEAD,
+            git_ref="refs/heads/test",
+            worktree_clean=True,
+            require_api_key=lambda: "test-key",
+            invoke_factory=standalone_factory,
+            created_at_fn=fixed_clock,
+        )
+        expect(len(standalone_calls) == 1, "standalone fixture setup failed", failures)
+        campaign_calls: list[str] = []
+
+        def campaign_factory(**kwargs):
+            def invoke(prompt: str) -> str:
+                campaign_calls.append(prompt)
+                return raw_good
+            return invoke
+
+        expect_gate(
+            "foreign report without campaign invocation-start marker",
+            lambda: run_campaign(
+                manifest_path=manifest_path,
+                evidence_dir=evidence_dir,
+                entitlement_attestation=attestation,
+                require_api_key=lambda: "test-key",
+                invoke_factory=campaign_factory,
+                git_state_provider=fixed_git_state,
+                env_url_provider=empty_env,
+                clock=fixed_clock,
+            ),
+            failures,
+        )
+        expect(
+            not campaign_calls,
+            "foreign standalone report caused campaign provider activity",
+            failures,
+        )
+
+        if failures:
         print("M4 drafting campaign validation FAILED:")
         for failure in failures:
             print(f"- {failure}")
