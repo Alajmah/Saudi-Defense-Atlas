@@ -143,3 +143,10 @@ When `structural_result` exists, recovery reconstructs the frozen drafting conte
 The replayed run must equal the stored structural result exactly, including validation status, units, accounting, authority, IDs, and all prompt/context/output hashes.
 
 The validator rewrites a valid report's structural validation status, recomputes a matching report sidecar, and proves recovery still rejects the artifact. No provider call is involved in replay.
+
+
+#### DCC-07 additional failure-path binding
+
+Recovery also reconstructs the exact expected ApprovedDraftingContext and complete rendered model input from the manifest-bound tracked fixture, manifest-bound terminology registry, and the frozen context's `created_at`. The recovered rendered input must equal this deterministic reconstruction exactly.
+
+This check applies even when `structural_result` is null because the original provider/execution path failed, so failure evidence cannot bypass fixture-to-input integrity merely because no structural run exists to replay.
