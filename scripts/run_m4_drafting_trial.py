@@ -217,6 +217,7 @@ def execute_draft_invocation(
     terminology: dict,
     model_trace: DraftModelTrace,
     invoke_fn: Callable[[str], str],
+    before_invoke: Callable[[], None] | None = None,
 ) -> tuple[dict[str, Any] | None, str | None, str | None, float, int]:
     """Run one invocation; return (draft_run, error, raw_output, elapsed, attempts).
 
@@ -230,6 +231,8 @@ def execute_draft_invocation(
 
     def capturing(prompt: str) -> str:
         nonlocal attempts
+        if before_invoke is not None:
+            before_invoke()
         attempts += 1
         result = invoke_fn(prompt)
         raw_holder.append(result)
@@ -506,11 +509,12 @@ def run_trial(
     pre-existing report or sidecar — means zero credential reads, zero
     provider constructions, and zero invoker calls (DTD-02RRR).
 
-    before_invoke is an optional orchestration-only hook called after all
-    deterministic gates, credential retrieval, and provider construction, and
-    immediately before the single invocation boundary. It carries no model,
-    publication, or mutation authority; campaign control uses it only to freeze
-    the conservative invocation-start ledger marker at the narrowest boundary.
+    before_invoke is an optional orchestration-only hook passed into the
+    capturing invoker and called immediately before the actual provider closure.
+    All build_bilingual_draft_run deterministic work therefore remains before
+    the marker. The hook carries no model, publication, or mutation authority;
+    campaign control uses it only to freeze the conservative invocation-start
+    ledger marker at the narrowest provider-call boundary.
     """
 
     if args.timeout_seconds < 1:
@@ -542,15 +546,13 @@ def run_trial(
         base_url=base_url,
         timeout_seconds=args.timeout_seconds,
     )
-    if before_invoke is not None:
-        before_invoke()
-
     draft_run, execution_error, raw_output, elapsed, invocation_count = (
         execute_draft_invocation(
             context=context,
             terminology=terminology,
             model_trace=trace,
             invoke_fn=invoke,
+            before_invoke=before_invoke,
         )
     )
 
