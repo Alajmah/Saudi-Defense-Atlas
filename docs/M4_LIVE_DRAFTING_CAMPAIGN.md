@@ -134,9 +134,9 @@ No retry is performed.
 
 ## Crash-safe resume
 
-`case_invocation_started` is written through the single-case driver's `before_invoke` hook at the narrowest provider boundary: only after the driver's deterministic gates, credential read, and provider construction have succeeded, and immediately before `execute_draft_invocation()` can call the provider. This is the conservative no-duplicate-call marker.
+`case_invocation_started` is written through the single-case driver's `before_invoke` hook at the exact provider-call boundary. The hook is invoked from `execute_draft_invocation()`'s capturing invoker only after `build_bilingual_draft_run()` has completed all deterministic pre-invocation validation/rendering/accounting work, and immediately before the actual provider closure is entered. This is the conservative no-duplicate-call marker.
 
-If the process dies after that narrow start marker and restart sees `case_invocation_started` without a complete immutable report + sidecar, the invocation is ambiguous. The campaign stops for operator reconciliation and **does not automatically retry** that case. Failures before the hook (route/env conflict, missing credential, provider-construction failure, or another single-case preflight refusal) create no invocation-start marker and therefore do not falsely consume an ambiguous case slot.
+If the process dies after that narrow start marker and restart sees `case_invocation_started` without a complete immutable report + sidecar, the invocation is ambiguous. The campaign stops for operator reconciliation and **does not automatically retry** that case. Failures before the hook—including route/env conflict, missing credential, provider-construction failure, single-case preflight refusal, or deterministic `build_bilingual_draft_run()` work before the wrapped invoker is reached—create no invocation-start marker and therefore do not falsely consume an ambiguous case slot.
 
 If the process dies in the narrower interval **after** the single-case report is frozen but **before** the terminal case ledger event is appended, the next campaign start:
 
@@ -231,7 +231,7 @@ Arabic/English editorial review remains a separate human activity over the froze
 - success invokes exactly once per fresh case;
 - provider failure stops after one call and does not continue;
 - terminal rerun performs zero new calls while re-verifying every referenced per-case report against the terminal ledger;
-- route/env ambiguity, missing credential, and provider-construction failure occur before `case_invocation_started` and leave zero invocations plus no ambiguous start marker;
+- route/env ambiguity, missing credential, provider-construction failure, and deterministic pre-invoker boundary failure occur before `case_invocation_started` and leave zero invocations plus no ambiguous start marker;
 - completed-but-unledgered case evidence is recovered without reinvocation only when a matching campaign invocation-start marker exists;
 - recovered case evidence must match the exact campaign attestation and manifest route;
 - recovered case evidence is deterministically replayed from its frozen input/raw-output bytes, and any re-hashed structural-result/evidence tamper is rejected;
