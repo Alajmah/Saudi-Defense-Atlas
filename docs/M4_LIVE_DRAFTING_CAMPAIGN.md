@@ -144,9 +144,10 @@ If the process dies in the narrower interval **after** the single-case report is
 2. finds the report + sidecar;
 3. verifies their hash;
 4. verifies report version, reviewed head, model, fixture hash, terminology hash, invocation count, **exact campaign attestation**, requested route, and both resolved-route fields against the manifest's official route URL;
-5. recomputes the frozen rendered-input/raw-output hashes, reconstructs the context and terminology-delivery blocks, and **replays the deterministic bilingual-drafting boundary** from the frozen raw response using the original structural timestamps/model trace; the replayed structural run must exactly equal the stored structural result, and candidate-only/no-publication/no-canonical authority must still hold;
-6. records the case as `recovered_without_invocation: true`;
-7. continues to the next case if the recovered result is not an execution failure.
+5. recomputes the frozen rendered-input/raw-output hashes, reconstructs the context and terminology-delivery blocks, and independently rebuilds the expected context/rendered input from the manifest-bound fixture + terminology registry + frozen context `created_at`; exact equality is required even when the original provider execution failed before producing a structural result;
+6. when a structural result exists, **replays the deterministic bilingual-drafting boundary** from the frozen raw response using the original structural timestamps/model trace; the replayed structural run must exactly equal the stored structural result, and candidate-only/no-publication/no-canonical authority must still hold;
+7. records the case as `recovered_without_invocation: true`;
+8. continues to the next case if the recovered result is not an execution failure.
 
 It never reruns an ambiguous or already-frozen case merely because the ledger event is missing.
 
