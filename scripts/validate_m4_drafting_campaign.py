@@ -12,6 +12,7 @@ aggregate qualification limits, and no canonical/publication authority.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 import tempfile
@@ -27,9 +28,11 @@ from scripts.run_m4_drafting_campaign import (  # noqa: E402
     CAMPAIGN_MANIFEST_VERSION,
     CAMPAIGN_SUMMARY_VERSION,
     CampaignGateError,
+    acquire_lock,
     append_event,
     load_ledger,
     load_manifest,
+    release_lock,
     run_campaign,
 )
 from scripts.run_m4_drafting_trial import (  # noqa: E402
@@ -177,6 +180,61 @@ def main() -> int:
             failures,
         )
 
+        # Corpus bytes must be tracked by git, not merely present under ROOT.
+        untracked = ROOT / ".m4-drafting-campaign-untracked-fixture.json"
+        untracked.write_text(DEFAULT_FIXTURE.read_text(encoding="utf-8"), encoding="utf-8")
+        try:
+            untracked_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            untracked_manifest["cases"][0]["fixture"] = untracked.name
+            untracked_manifest["cases"][0]["fixture_sha256"] = _file_sha256(untracked)
+            untracked_path = td / "untracked.json"
+            untracked_path.write_text(json.dumps(untracked_manifest), encoding="utf-8")
+            expect_gate(
+                "untracked campaign fixture",
+                lambda: load_manifest(untracked_path),
+                failures,
+            )
+        finally:
+            untracked.unlink(missing_ok=True)
+
+        # Lock liveness is injectable: a live PID refuses, a demonstrably dead
+        # same-host PID is safely reclaimable without platform-specific kill probes.
+        lock_path = td / "lock-test" / ".campaign.lock"
+        lock = acquire_lock(lock_path, digest, pid_alive=lambda pid: False)
+        release_lock(lock)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path.write_text(
+            json.dumps(
+                {
+                    "campaign_controller_version": CAMPAIGN_CONTROLLER_VERSION,
+                    "manifest_sha256": digest,
+                    "hostname": __import__("socket").gethostname(),
+                    "pid": 999999,
+                    "token": "stale",
+                }
+            ),
+            encoding="utf-8",
+        )
+        reclaimed = acquire_lock(lock_path, digest, pid_alive=lambda pid: False)
+        release_lock(reclaimed)
+        lock_path.write_text(
+            json.dumps(
+                {
+                    "campaign_controller_version": CAMPAIGN_CONTROLLER_VERSION,
+                    "manifest_sha256": digest,
+                    "hostname": __import__("socket").gethostname(),
+                    "pid": 1,
+                    "token": "live",
+                }
+            ),
+            encoding="utf-8",
+        )
+        expect_gate(
+            "live campaign lock",
+            lambda: acquire_lock(lock_path, digest, pid_alive=lambda pid: True),
+            failures,
+        )
+
     # Complete campaign: first output is structurally rejected, second accepted;
     # rejection is evidence and does not stop the campaign.
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -306,6 +364,50 @@ def main() -> int:
             failures,
         )
 
+        # Resume must keep the exact campaign-start entitlement attestation.
+        expect_gate(
+            "resume entitlement drift",
+            lambda: run_campaign(
+                manifest_path=manifest_path,
+                evidence_dir=evidence_dir,
+                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan CHANGED attestation",
+                require_api_key=require_key,
+                invoke_factory=factory,
+                git_state_provider=fixed_git_state,
+                env_url_provider=empty_env,
+                clock=fixed_clock,
+            ),
+            failures,
+        )
+        expect(len(calls) == 2, "entitlement drift reached the provider", failures)
+
+        # Terminal summary bytes/sidecar are re-verified and compared with the
+        # deterministic ledger projection before being trusted.
+        summary_path = evidence_dir / "campaign-summary.json"
+        summary_sidecar = evidence_dir / "campaign-summary.json.sha256"
+        original_summary = summary_path.read_bytes()
+        original_sidecar = summary_sidecar.read_bytes()
+        tampered_summary = json.loads(original_summary.decode("utf-8"))
+        tampered_summary["status"] = "tampered"
+        summary_path.write_text(json.dumps(tampered_summary), encoding="utf-8")
+        expect_gate(
+            "terminal summary tamper",
+            lambda: run_campaign(
+                manifest_path=manifest_path,
+                evidence_dir=evidence_dir,
+                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                require_api_key=require_key,
+                invoke_factory=factory,
+                git_state_provider=fixed_git_state,
+                env_url_provider=empty_env,
+                clock=fixed_clock,
+            ),
+            failures,
+        )
+        expect(len(calls) == 2, "summary tamper reached the provider", failures)
+        summary_path.write_bytes(original_summary)
+        summary_sidecar.write_bytes(original_sidecar)
+
         # Ledger tampering is detected before any new provider work.
         ledger_path = evidence_dir / "campaign-ledger.jsonl"
         ledger_text = ledger_path.read_text(encoding="utf-8")
@@ -346,6 +448,25 @@ def main() -> int:
         loaded, manifest_sha = load_manifest(manifest_path)
         evidence_dir = td / "evidence"
         evidence_dir.mkdir()
+        attestation = f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test"
+        append_event(
+            evidence_dir / "campaign-ledger.jsonl",
+            campaign_id=loaded["campaign_id"],
+            manifest_sha256=manifest_sha,
+            event_type="campaign_started",
+            payload={
+                "reviewed_head": loaded["reviewed_head"],
+                "route": loaded["route"],
+                "entitlement_id": loaded["entitlement_id"],
+                "entitlement_attestation_sha256": hashlib.sha256(
+                    attestation.encode("utf-8")
+                ).hexdigest(),
+                "model": loaded["model"],
+                "max_invocations": loaded["max_invocations"],
+                "case_count": len(loaded["cases"]),
+            },
+            clock=fixed_clock,
+        )
         append_event(
             evidence_dir / "campaign-ledger.jsonl",
             campaign_id=loaded["campaign_id"],
@@ -372,7 +493,7 @@ def main() -> int:
             lambda: run_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
-                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                entitlement_attestation=attestation,
                 require_api_key=lambda: "test-key",
                 invoke_factory=ambiguous_factory,
                 git_state_provider=fixed_git_state,
