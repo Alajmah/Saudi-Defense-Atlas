@@ -12,6 +12,7 @@ aggregate qualification limits, and no canonical/publication authority.
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import sys
@@ -1104,6 +1105,40 @@ def main() -> int:
             )
         except CampaignGateError:
             failures.append("valid campaign-bound case report was rejected")
+
+        # DCC-REC-01: any campaign-bound recoverable report has a matching
+        # provider-boundary start marker, so attempted must be true and count exactly 1.
+        for field, value, label in (
+            ("attempted", False, "false-attempt"),
+            ("count", 0, "zero-count"),
+        ):
+            provenance_tamper = json.loads(report_path.read_text(encoding="utf-8"))
+            provenance_tamper["invocation"][field] = value
+            provenance_path = evidence_dir / f"PROVENANCE-{label}.json"
+            provenance_bytes = (
+                json.dumps(
+                    provenance_tamper,
+                    ensure_ascii=False,
+                    indent=2,
+                    allow_nan=False,
+                )
+                + "\n"
+            ).encode("utf-8")
+            provenance_path.write_bytes(provenance_bytes)
+            provenance_sha = hashlib.sha256(provenance_bytes).hexdigest()
+            provenance_path.with_name(
+                provenance_path.name + ".sha256"
+            ).write_text(
+                f"{provenance_sha}  {provenance_path.name}\n",
+                encoding="utf-8",
+            )
+            expect_gate(
+                f"rehashed invocation provenance tamper {label}",
+                lambda p=provenance_path: verify_case_report(
+                    p, case1, manifest, attestation
+                ),
+                failures,
+            )
 
         # DCC-07: even a tampered report with a freshly recomputed sidecar must
         # fail deterministic recovery replay.
