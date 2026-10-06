@@ -55,11 +55,11 @@ The manifest is canonical JSON for hashing purposes and contains exactly:
 - repository-relative terminology file path + SHA-256;
 - ordered cases, each carrying `case_id`, repository-relative fixture path, and fixture SHA-256.
 
-Unknown manifest keys are rejected. Absolute/out-of-repository fixture or terminology paths are rejected. Every bound file hash is recomputed before the campaign begins.
+Unknown manifest keys are rejected. Absolute/out-of-repository fixture or terminology paths are rejected. The terminology registry and every case fixture must also be **git-tracked** in the reviewed checkout; an untracked local corpus file is not accepted merely because it is under the repository root. Every bound file hash is recomputed before the campaign begins.
 
 The invocation ceiling must equal the number of frozen cases. There is no retry authority, so any larger ceiling would be unused authority and any smaller ceiling could not cover the frozen corpus.
 
-The supplied runtime entitlement attestation must contain the manifest's `entitlement_id` and name the manifest route. The campaign controller records the entitlement identity and a SHA-256 of the attestation in the ledger; each single-case report still records the attestation under the reviewed driver contract.
+The supplied runtime entitlement attestation must contain the manifest's `entitlement_id` and name the manifest route. The campaign controller records the entitlement identity and a SHA-256 of the attestation in the first ledger event; **every resume must supply the same attestation bytes**, proven by that SHA-256, before additional provider activity. Each single-case report still records the attestation under the reviewed driver contract.
 
 Example shape:
 
@@ -157,6 +157,7 @@ A campaign evidence directory carries an exclusive `.campaign.lock`.
 - a live same-host PID blocks another controller;
 - a lock from another host fails closed;
 - a same-host lock whose recorded PID is demonstrably dead is treated as a crash residue and may be reclaimed for the same manifest;
+- liveness probing is platform-specific and non-destructive: POSIX uses signal-0 semantics, while Windows queries the process handle/exit code rather than calling `os.kill(pid, 0)`;
 - a lock bound to another manifest is rejected.
 
 This lock prevents two campaign processes from independently consuming the same call budget.
@@ -193,6 +194,8 @@ Terminal campaigns write immutable:
 - `campaign-summary.json`;
 - `campaign-summary.json.sha256`.
 
+On every terminal rerun the controller re-verifies the summary sidecar and bytes, rebuilds the expected summary from the already-validated ledger, and requires exact semantic equality before returning it. A corrupted or replaced summary is never trusted merely because both files exist.
+
 Summary version: `m4-drafting-campaign-summary-v0.1`.
 
 The summary reports only deterministic campaign evidence:
@@ -218,8 +221,9 @@ Arabic/English editorial review remains a separate human activity over the froze
 `scripts/validate_m4_drafting_campaign.py` runs with fake provider factories only and proves:
 
 - manifest version/file-hash/exact call-ceiling gates;
-- campaign-specific entitlement ID + route binding;
+- campaign-specific entitlement ID + route binding and exact attestation-hash continuity across resume;
 - frozen campaign-manifest artifact binding;
+- git-tracked corpus/terminology enforcement in addition to SHA-256 binding;
 - structural rejection continues to the next case;
 - success invokes exactly once per fresh case;
 - provider failure stops after one call and does not continue;
@@ -227,6 +231,8 @@ Arabic/English editorial review remains a separate human activity over the froze
 - completed-but-unledgered case evidence is recovered without reinvocation;
 - an invocation-start marker without terminal evidence blocks automatic retry;
 - ledger tampering is rejected before more provider activity;
+- terminal summary byte/sidecar/semantic tampering is rejected before provider activity;
+- stale/live campaign-lock behavior is testable through injected liveness decisions without unsafe platform assumptions;
 - campaign summary authority and editorial qualification remain false.
 
 ## Relationship to the single-case driver
