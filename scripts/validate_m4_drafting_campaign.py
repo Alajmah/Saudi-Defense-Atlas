@@ -641,6 +641,29 @@ def main() -> int:
             )
         except CampaignGateError:
             failures.append("valid campaign-bound case report was rejected")
+
+        # DCC-07: even a tampered report with a freshly recomputed sidecar must
+        # fail deterministic recovery replay.
+        tampered_report = json.loads(report_path.read_text(encoding="utf-8"))
+        tampered_report["structural_result"]["validation"]["status"] = "rejected"
+        tampered_path = evidence_dir / "TAMPERED-CASE-01.json"
+        tampered_bytes = (
+            json.dumps(tampered_report, ensure_ascii=False, indent=2, allow_nan=False)
+            + "\n"
+        ).encode("utf-8")
+        tampered_path.write_bytes(tampered_bytes)
+        tampered_sha = hashlib.sha256(tampered_bytes).hexdigest()
+        tampered_path.with_name(tampered_path.name + ".sha256").write_text(
+            f"{tampered_sha}  {tampered_path.name}\n",
+            encoding="utf-8",
+        )
+        expect_gate(
+            "rehashed structural-result tamper",
+            lambda: verify_case_report(
+                tampered_path, case1, manifest, attestation
+            ),
+            failures,
+        )
         expect_gate(
             "recovery wrong attestation",
             lambda: verify_case_report(
