@@ -497,6 +497,7 @@ def run_trial(
     require_api_key: Callable[[], str],
     invoke_factory: Callable[..., Callable[[str], str]] = zai_invoker,
     created_at_fn: Callable[[], str] = _utc_now,
+    before_invoke: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """The full launch sequence: gates in order, one invocation, report write.
 
@@ -504,6 +505,12 @@ def run_trial(
     every pre-invocation gate passes, so any gate refusal — including a
     pre-existing report or sidecar — means zero credential reads, zero
     provider constructions, and zero invoker calls (DTD-02RRR).
+
+    before_invoke is an optional orchestration-only hook called after all
+    deterministic gates, credential retrieval, and provider construction, and
+    immediately before the single invocation boundary. It carries no model,
+    publication, or mutation authority; campaign control uses it only to freeze
+    the conservative invocation-start ledger marker at the narrowest boundary.
     """
 
     if args.timeout_seconds < 1:
@@ -535,6 +542,8 @@ def run_trial(
         base_url=base_url,
         timeout_seconds=args.timeout_seconds,
     )
+    if before_invoke is not None:
+        before_invoke()
 
     draft_run, execution_error, raw_output, elapsed, invocation_count = (
         execute_draft_invocation(
