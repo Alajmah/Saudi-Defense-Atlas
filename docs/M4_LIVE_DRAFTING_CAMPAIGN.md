@@ -134,9 +134,9 @@ No retry is performed.
 
 ## Crash-safe resume
 
-Immediately before each fresh case, the ledger records `case_invocation_started`. This is a conservative no-duplicate-call marker.
+`case_invocation_started` is written through the single-case driver's `before_invoke` hook at the narrowest provider boundary: only after the driver's deterministic gates, credential read, and provider construction have succeeded, and immediately before `execute_draft_invocation()` can call the provider. This is the conservative no-duplicate-call marker.
 
-If the process dies **during** a provider call and restart sees `case_invocation_started` without a complete immutable report + sidecar, the invocation is ambiguous. The campaign stops for operator reconciliation and **does not automatically retry** that case.
+If the process dies after that narrow start marker and restart sees `case_invocation_started` without a complete immutable report + sidecar, the invocation is ambiguous. The campaign stops for operator reconciliation and **does not automatically retry** that case. Failures before the hook (route/env conflict, missing credential, provider-construction failure, or another single-case preflight refusal) create no invocation-start marker and therefore do not falsely consume an ambiguous case slot.
 
 If the process dies in the narrower interval **after** the single-case report is frozen but **before** the terminal case ledger event is appended, the next campaign start:
 
@@ -197,7 +197,7 @@ Terminal campaigns write immutable:
 - `campaign-summary.json`;
 - `campaign-summary.json.sha256`.
 
-On every terminal rerun the controller re-verifies the summary sidecar and bytes, rebuilds the expected summary from the already-validated ledger, and requires exact semantic equality before returning it. A corrupted or replaced summary is never trusted merely because both files exist.
+On every terminal rerun the controller first re-closes every case-terminal ledger event over its actual immutable per-case report: report + sidecar are required, `verify_case_report()` replays the manifest/route/attestation/evidence boundary, and the verified report hash/invocation count/structural status/execution error/path/fixture binding must match the ledger payload. Only then does the controller re-verify the summary sidecar and bytes, rebuild the expected summary from the validated ledger, and require exact semantic equality before returning it. A corrupted, missing, or replaced case artifact or summary is never trusted merely because the ledger is terminal.
 
 Summary version: `m4-drafting-campaign-summary-v0.1`.
 
@@ -230,7 +230,8 @@ Arabic/English editorial review remains a separate human activity over the froze
 - structural rejection continues to the next case;
 - success invokes exactly once per fresh case;
 - provider failure stops after one call and does not continue;
-- terminal rerun performs zero new calls;
+- terminal rerun performs zero new calls while re-verifying every referenced per-case report against the terminal ledger;
+- route/env ambiguity, missing credential, and provider-construction failure occur before `case_invocation_started` and leave zero invocations plus no ambiguous start marker;
 - completed-but-unledgered case evidence is recovered without reinvocation only when a matching campaign invocation-start marker exists;
 - recovered case evidence must match the exact campaign attestation and manifest route;
 - recovered case evidence is deterministically replayed from its frozen input/raw-output bytes, and any re-hashed structural-result/evidence tamper is rejected;
