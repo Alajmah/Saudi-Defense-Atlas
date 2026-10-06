@@ -1228,7 +1228,7 @@ def run_campaign(
             )
             marker_written = False
 
-            def mark_invocation_started() -> None:
+            def mark_invocation_started(_rendered_prompt: str) -> None:
                 nonlocal invocations_used, marker_written
                 if marker_written or case["case_id"] in started:
                     raise CampaignGateError(

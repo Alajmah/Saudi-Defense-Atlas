@@ -344,3 +344,16 @@ The deterministic validator now proves both boundaries:
 A distinct future campaign must use a distinct approved manifest rather than replaying the old manifest approval.
 
 The qualified scope remains repository-runtime-local. Cross-host / independent-clone global exclusion is explicitly not claimed; that still requires the separately deferred shared atomic coordinator.
+
+
+## Exact-head hook compatibility remediation after `9cf4e30af469e605d2330103de721ea10c54a7d1`
+
+The provider-boundary hook was hardened to receive the exact rendered prompt, changing its contract from `Callable[[], None]` to `Callable[[str], None]`. The first exact-head CI on that interface change correctly failed at `Validate M4 drafting trial driver` because the existing validator and campaign marker still supplied zero-argument callbacks.
+
+### Hook-interface regression — REMEDIATED
+
+- the campaign's `mark_invocation_started` callback now accepts the rendered prompt argument while retaining the same ledger-only authority and marker-before-attempt ordering;
+- the single-case deterministic validator's pre-boundary/provider-failure/success hooks now accept that argument;
+- provider-failure and success regressions additionally require the hook-observed prompt to equal the provider-observed prompt exactly.
+
+No live provider call, entitlement consumption, report-schema change, scheduler/recurrence authority, publication authority, or canonical-mutation authority is introduced.

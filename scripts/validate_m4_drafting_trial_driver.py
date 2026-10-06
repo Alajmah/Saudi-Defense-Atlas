@@ -231,8 +231,8 @@ def main() -> int:
     invalid_context = copy.deepcopy(context)
     invalid_context["claims"][0]["predicate_id"] = ""
 
-    def preboundary_hook() -> None:
-        preboundary_hooks.append("hook")
+    def preboundary_hook(prompt: str) -> None:
+        preboundary_hooks.append(prompt)
 
     def preboundary_invoke(prompt: str) -> str:
         preboundary_calls.append(prompt)
@@ -265,7 +265,7 @@ def main() -> int:
             terminology=terminology,
             model_trace=trace,
             invoke_fn=failing_invoke,
-            before_invoke=lambda: failing_hooks.append("hook"),
+            before_invoke=lambda prompt: failing_hooks.append(prompt),
         )
     )
     expect(fail_run is None, "failing invoker produced a draft run", failures)
@@ -283,6 +283,11 @@ def main() -> int:
         f"failing invocation hook count {len(failing_hooks)} != 1",
         failures,
     )
+    expect(
+        failing_hooks == failing_calls,
+        "failing invocation hook did not receive the exact provider prompt",
+        failures,
+    )
 
     # --- Success path through the orchestration ---
     ok_calls: list[str] = []
@@ -297,7 +302,7 @@ def main() -> int:
         terminology=terminology,
         model_trace=trace,
         invoke_fn=fake_invoke,
-        before_invoke=lambda: ok_hooks.append("hook"),
+        before_invoke=lambda prompt: ok_hooks.append(prompt),
     )
     expect(ok_error is None, f"succeeding invoker errored: {ok_error}", failures)
     expect(ok_raw == raw_good, "raw output was not captured verbatim", failures)
@@ -309,6 +314,11 @@ def main() -> int:
     expect(
         len(ok_hooks) == 1,
         f"success invocation hook count {len(ok_hooks)} != 1",
+        failures,
+    )
+    expect(
+        ok_hooks == ok_calls,
+        "success invocation hook did not receive the exact provider prompt",
         failures,
     )
     expect(
