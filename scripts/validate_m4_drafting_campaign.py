@@ -190,6 +190,25 @@ def main() -> int:
             failures,
         )
 
+        # DCC-PATH-01: case IDs may not alias controller artifact stems.
+        for reserved_case_id in (
+            "campaign-manifest",
+            "campaign-summary",
+            "campaign-ledger",
+        ):
+            reserved = json.loads(manifest_path.read_text(encoding="utf-8"))
+            reserved["cases"][0]["case_id"] = reserved_case_id
+            reserved_path = td / f"reserved-{reserved_case_id}.json"
+            reserved_path.write_text(
+                json.dumps(reserved, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            expect_gate(
+                f"reserved campaign case_id {reserved_case_id}",
+                lambda p=reserved_path: load_manifest(p),
+                failures,
+            )
+
         tampered = json.loads(manifest_path.read_text(encoding="utf-8"))
         tampered["cases"][0]["fixture_sha256"] = "0" * 64
         tampered_path = td / "tampered.json"
