@@ -37,6 +37,7 @@ from scripts.run_m4_drafting_campaign import (  # noqa: E402
     release_lock,
     run_campaign,
     verify_case_report,
+    verify_provider_boundary_source,
 )
 from scripts.run_m4_drafting_trial import (  # noqa: E402
     DEFAULT_FIXTURE,
@@ -461,6 +462,42 @@ def main() -> int:
             failures,
         )
 
+        # DCC-SRC-01: the exact prompt about to be sent must still reconstruct
+        # from freshly read manifest-bound bytes at the provider boundary.
+        try:
+            verify_provider_boundary_source(
+                prompt=calls[0],
+                case=manifest["cases"][0],
+                manifest=manifest,
+                git_state_provider=fixed_git_state,
+            )
+        except CampaignGateError:
+            failures.append("valid provider-boundary source/prompt was rejected")
+        expect_gate(
+            "provider-boundary rendered prompt drift",
+            lambda: verify_provider_boundary_source(
+                prompt=calls[0] + " ",
+                case=manifest["cases"][0],
+                manifest=manifest,
+                git_state_provider=fixed_git_state,
+            ),
+            failures,
+        )
+        expect_gate(
+            "provider-boundary source-state drift",
+            lambda: verify_provider_boundary_source(
+                prompt=calls[0],
+                case=manifest["cases"][0],
+                manifest=manifest,
+                git_state_provider=lambda: (
+                    REVIEWED_HEAD,
+                    "refs/heads/test",
+                    False,
+                ),
+            ),
+            failures,
+        )
+
         # Re-running a terminal campaign performs no additional invocation.
         second = run_test_campaign(
             manifest_path=manifest_path,
@@ -622,6 +659,28 @@ def main() -> int:
         )
         expect(len(calls) == 2, "entitlement drift reached the provider", failures)
 
+        # DCC-ATT-01: exact attestation bytes are frozen; whitespace drift is
+        # not normalized away on resume.
+        expect_gate(
+            "resume entitlement whitespace drift",
+            lambda: run_test_campaign(
+                manifest_path=manifest_path,
+                evidence_dir=evidence_dir,
+                entitlement_attestation=" " + attestation_for(manifest_path),
+                require_api_key=require_key,
+                invoke_factory=factory,
+                git_state_provider=fixed_git_state,
+                env_url_provider=empty_env,
+                clock=fixed_clock,
+            ),
+            failures,
+        )
+        expect(
+            len(calls) == 2,
+            "attestation whitespace drift reached the provider",
+            failures,
+        )
+
         # Terminal summary bytes/sidecar are re-verified and compared with the
         # deterministic ledger projection before being trusted.
         summary_path = evidence_dir / "campaign-summary.json"
@@ -758,6 +817,7 @@ def main() -> int:
         env_provider,
         key_provider,
         provider_factory,
+        git_provider=fixed_git_state,
     ) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             td = Path(tmpdir)
@@ -773,7 +833,7 @@ def main() -> int:
                     entitlement_attestation=attestation_for(manifest_path),
                     require_api_key=key_provider,
                     invoke_factory=provider_factory(provider_calls),
-                    git_state_provider=fixed_git_state,
+                    git_state_provider=git_provider,
                     env_url_provider=env_provider,
                     clock=fixed_clock,
                 )
@@ -834,6 +894,27 @@ def main() -> int:
         env_provider=empty_env,
         key_provider=lambda: "test-key",
         provider_factory=failing_factory_builder,
+    )
+
+    source_state_checks: list[int] = []
+
+    def drift_between_outer_check_and_provider():
+        source_state_checks.append(1)
+        if len(source_state_checks) == 1:
+            return REVIEWED_HEAD, "refs/heads/test", True
+        return REVIEWED_HEAD, "refs/heads/test", False
+
+    assert_preinvoke_failure(
+        "provider-boundary source-state drift",
+        env_provider=empty_env,
+        key_provider=lambda: "test-key",
+        provider_factory=spy_factory,
+        git_provider=drift_between_outer_check_and_provider,
+    )
+    expect(
+        len(source_state_checks) == 2,
+        "provider-boundary source-state regression did not exercise both checks",
+        failures,
     )
 
     # Provider/transport failure is terminal: one call, frozen failure evidence,
@@ -939,6 +1020,51 @@ def main() -> int:
         expect(
             resumed_ledger[-1]["event_type"] == "campaign_stopped",
             "resume did not append campaign_stopped after recorded execution failure",
+            failures,
+        )
+
+    # DCC-ERR-01: an exception with an empty string message is still a
+    # recoverable/terminal execution failure with one attempted provider call.
+    with tempfile.TemporaryDirectory() as tmpdir:
+        td = Path(tmpdir)
+        manifest_path = td / "manifest.json"
+        write_manifest(manifest_path)
+        evidence_dir = td / "evidence"
+        timeout_calls: list[str] = []
+
+        def timeout_factory(**kwargs):
+            def invoke(prompt: str) -> str:
+                timeout_calls.append(prompt)
+                raise TimeoutError()
+            return invoke
+
+        timeout_summary = run_test_campaign(
+            manifest_path=manifest_path,
+            evidence_dir=evidence_dir,
+            entitlement_attestation=attestation_for(manifest_path),
+            require_api_key=lambda: "test-key",
+            invoke_factory=timeout_factory,
+            git_state_provider=fixed_git_state,
+            env_url_provider=empty_env,
+            clock=fixed_clock,
+        )
+        expect(
+            timeout_summary["status"] == "stopped_execution_failure",
+            "empty-message provider exception did not terminalize the campaign",
+            failures,
+        )
+        expect(
+            len(timeout_calls) == 1,
+            "empty-message provider exception retried or continued",
+            failures,
+        )
+        timeout_report = json.loads(
+            (evidence_dir / "CASE-01.json").read_text(encoding="utf-8")
+        )
+        expect(
+            isinstance(timeout_report.get("execution_error"), str)
+            and "TimeoutError" in timeout_report["execution_error"],
+            "empty-message provider exception was not normalized to a non-empty diagnostic",
             failures,
         )
 
