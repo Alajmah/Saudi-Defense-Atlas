@@ -109,6 +109,7 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
         "campaign_id",
         "reviewed_head",
         "route",
+        "entitlement_id",
         "model",
         "timeout_seconds",
         "max_invocations",
@@ -146,6 +147,11 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
         raise CampaignGateError("reviewed_head must be a 40-character hex commit SHA")
     if payload["route"] not in {"coding-plan", "prepaid"}:
         raise CampaignGateError("route must be coding-plan or prepaid")
+    if (
+        not isinstance(payload["entitlement_id"], str)
+        or not payload["entitlement_id"].strip()
+    ):
+        raise CampaignGateError("entitlement_id must be non-empty")
     if not isinstance(payload["model"], str) or not payload["model"].strip():
         raise CampaignGateError("model must be non-empty")
     if (
@@ -184,9 +190,9 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
     cases = payload["cases"]
     if not isinstance(cases, list) or not cases:
         raise CampaignGateError("campaign cases must be a non-empty list")
-    if payload["max_invocations"] < len(cases):
+    if payload["max_invocations"] != len(cases):
         raise CampaignGateError(
-            "max_invocations must cover the frozen corpus; retries are not allowed"
+            "max_invocations must equal the frozen case count; retries are not allowed"
         )
 
     seen: set[str] = set()
@@ -221,6 +227,30 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
             raise CampaignGateError(f"campaign fixture hash mismatch: {case_id}")
 
     return payload, _sha256_text(_canonical_json(payload))
+
+
+def check_campaign_entitlement(
+    manifest: dict[str, Any], attestation: str
+) -> str:
+    value = attestation.strip()
+    if not value:
+        raise CampaignGateError("campaign entitlement attestation must be non-empty")
+    if manifest["entitlement_id"].casefold() not in value.casefold():
+        raise CampaignGateError(
+            "campaign entitlement attestation is not bound to the manifest entitlement_id"
+        )
+    route_text = value.casefold()
+    if manifest["route"] == "coding-plan" and "coding" not in route_text:
+        raise CampaignGateError(
+            "campaign entitlement attestation does not name the coding-plan route"
+        )
+    if manifest["route"] == "prepaid" and not (
+        "prepaid" in route_text or "general" in route_text
+    ):
+        raise CampaignGateError(
+            "campaign entitlement attestation does not name the prepaid/general route"
+        )
+    return value
 
 
 def _event_hash(event_without_hash: dict[str, Any]) -> str:
@@ -318,6 +348,20 @@ def _case_events(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
         if case_id in result:
             raise CampaignGateError(
                 f"campaign ledger has duplicate terminal event for case {case_id}"
+            )
+        result[case_id] = event
+    return result
+
+
+def _started_cases(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    for event in events:
+        if event["event_type"] != "case_invocation_started":
+            continue
+        case_id = event["payload"].get("case_id")
+        if case_id in result:
+            raise CampaignGateError(
+                f"campaign ledger has duplicate invocation-start event for case {case_id}"
             )
         result[case_id] = event
     return result
@@ -492,6 +536,7 @@ def _summary_from_events(
         "manifest_sha256": manifest_sha256,
         "reviewed_head": manifest["reviewed_head"],
         "route": manifest["route"],
+        "entitlement_id": manifest["entitlement_id"],
         "model": manifest["model"],
         "status": status,
         "counts": counts,
@@ -511,6 +556,23 @@ def _summary_from_events(
             "canonical-mutation inference is supported."
         ),
     }
+
+
+def _verify_immutable_json(path: Path) -> tuple[dict[str, Any], str]:
+    sidecar = sidecar_path(path)
+    if not path.exists() or not sidecar.exists():
+        raise CampaignGateError(f"incomplete immutable campaign artifact: {path}")
+    body = path.read_bytes()
+    digest = _sha256_bytes(body)
+    if _read_sidecar(sidecar, path.name) != digest:
+        raise CampaignGateError(f"campaign artifact sidecar mismatch: {path}")
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise CampaignGateError(f"campaign artifact is not valid UTF-8 JSON: {path}") from exc
+    if not isinstance(payload, dict):
+        raise CampaignGateError(f"campaign JSON artifact root must be an object: {path}")
+    return payload, digest
 
 
 def _write_immutable_json(path: Path, payload: dict[str, Any]) -> str:
@@ -592,12 +654,23 @@ def run_campaign(
         ).strip()
 
     manifest, manifest_sha256 = load_manifest(manifest_path)
+    attestation = check_campaign_entitlement(manifest, entitlement_attestation)
     evidence_dir = evidence_dir.resolve()
     evidence_dir.mkdir(parents=True, exist_ok=True)
     ledger_path = evidence_dir / "campaign-ledger.jsonl"
+    frozen_manifest_path = evidence_dir / "campaign-manifest.json"
     summary_path = evidence_dir / "campaign-summary.json"
     lock = acquire_lock(evidence_dir / ".campaign.lock", manifest_sha256)
     try:
+        if frozen_manifest_path.exists() or sidecar_path(frozen_manifest_path).exists():
+            frozen_manifest, _ = _verify_immutable_json(frozen_manifest_path)
+            if _sha256_text(_canonical_json(frozen_manifest)) != manifest_sha256:
+                raise CampaignGateError(
+                    "frozen campaign manifest does not match the supplied manifest"
+                )
+        else:
+            _write_immutable_json(frozen_manifest_path, manifest)
+
         events = load_ledger(
             ledger_path, manifest["campaign_id"], manifest_sha256
         )
@@ -622,6 +695,8 @@ def run_campaign(
                 payload={
                     "reviewed_head": manifest["reviewed_head"],
                     "route": manifest["route"],
+                    "entitlement_id": manifest["entitlement_id"],
+                    "entitlement_attestation_sha256": _sha256_text(attestation),
                     "model": manifest["model"],
                     "max_invocations": manifest["max_invocations"],
                     "case_count": len(manifest["cases"]),
@@ -633,10 +708,8 @@ def run_campaign(
             )
 
         recorded = _case_events(events)
-        invocations_used = sum(
-            int(e["payload"]["invocation_count"])
-            for e in recorded.values()
-        )
+        started = _started_cases(events)
+        invocations_used = len(started)
 
         for case in manifest["cases"]:
             if case["case_id"] in recorded:
@@ -645,6 +718,12 @@ def run_campaign(
             report_exists = report_path.exists()
             sidecar_exists = sidecar_path(report_path).exists()
 
+            if case["case_id"] in started and not (report_exists and sidecar_exists):
+                raise CampaignGateError(
+                    f"ambiguous prior invocation for {case['case_id']}; "
+                    "start event exists without complete immutable case evidence"
+                )
+
             if report_exists or sidecar_exists:
                 if not (report_exists and sidecar_exists):
                     raise CampaignGateError(
@@ -652,7 +731,8 @@ def run_campaign(
                     )
                 verified = verify_case_report(report_path, case, manifest)
                 payload = _case_payload(case, report_path, verified)
-                invocations_used += int(payload["invocation_count"])
+                if case["case_id"] not in started:
+                    invocations_used += int(payload["invocation_count"])
                 event_type = (
                     "case_execution_failure"
                     if payload["execution_error"]
@@ -704,13 +784,31 @@ def run_campaign(
                     "campaign source state drifted from reviewed clean head"
                 )
 
+            append_event(
+                ledger_path,
+                campaign_id=manifest["campaign_id"],
+                manifest_sha256=manifest_sha256,
+                event_type="case_invocation_started",
+                payload={
+                    "case_id": case["case_id"],
+                    "fixture": case["fixture"],
+                    "fixture_sha256": case["fixture_sha256"],
+                    "conservative_call_budget_charge": 1,
+                },
+                clock=clock,
+            )
+            started[case["case_id"]] = load_ledger(
+                ledger_path, manifest["campaign_id"], manifest_sha256
+            )[-1]
+            invocations_used += 1
+
             case_args = argparse.Namespace(
                 fixture=_repo_path(case["fixture"]),
                 model=manifest["model"],
                 zai_endpoint=manifest["route"],
                 base_url=None,
                 reviewed_head=manifest["reviewed_head"],
-                entitlement_attestation=entitlement_attestation,
+                entitlement_attestation=attestation,
                 timeout_seconds=manifest["timeout_seconds"],
                 output=report_path,
             )
@@ -726,7 +824,6 @@ def run_campaign(
             )
             verified = verify_case_report(report_path, case, manifest)
             payload = _case_payload(case, report_path, verified)
-            invocations_used += int(payload["invocation_count"])
             if invocations_used > manifest["max_invocations"]:
                 raise CampaignGateError(
                     "campaign invocation ceiling exceeded"
