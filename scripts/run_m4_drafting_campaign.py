@@ -46,6 +46,13 @@ from scripts.run_m4_model_extraction_trial import (  # noqa: E402
     ZAI_ENDPOINT_URLS,
     _file_sha256,
 )
+from services.intelligence.bilingual_drafting import (  # noqa: E402
+    DraftModelTrace,
+    build_bilingual_draft_run,
+    load_terminology,
+    split_rendered_prompt,
+    terminology_digest,
+)
 
 CAMPAIGN_MANIFEST_VERSION = "m4-drafting-campaign-v0.1"
 CAMPAIGN_LEDGER_VERSION = "m4-drafting-campaign-ledger-v0.1"
@@ -454,11 +461,153 @@ def verify_case_report(
         != manifest["terminology_file_sha256"]
     ):
         raise CampaignGateError("case report terminology hash mismatch")
-    invocation_count = report.get("invocation", {}).get("count")
+    invocation = report.get("invocation", {})
+    invocation_count = invocation.get("count")
     if invocation_count not in {0, 1}:
         raise CampaignGateError(
             "case report invocation count is outside single-case boundary"
         )
+
+    # Recovery is a separate trust boundary: independently re-verify the exact
+    # frozen input/output bytes and, when a structural run exists, replay the
+    # deterministic drafting boundary from those bytes.
+    evidence = report.get("evidence", {})
+    rendered_prompt = evidence.get("rendered_model_input")
+    raw_output = evidence.get("raw_model_output")
+    if not isinstance(rendered_prompt, str):
+        raise CampaignGateError("case report rendered input is not text")
+    if raw_output is not None and not isinstance(raw_output, str):
+        raise CampaignGateError("case report raw output is neither text nor null")
+    rendered_sha = _sha256_text(rendered_prompt)
+    raw_sha = _sha256_text(raw_output) if raw_output is not None else None
+    if invocation.get("rendered_input_sha256") != rendered_sha:
+        raise CampaignGateError("case report rendered-input hash mismatch")
+    if invocation.get("raw_model_output_sha256") != raw_sha:
+        raise CampaignGateError("case report raw-output hash mismatch")
+
+    try:
+        _, context_json, _, delivery_json, _ = split_rendered_prompt(rendered_prompt)
+        context = json.loads(context_json)
+    except Exception as exc:  # noqa: BLE001
+        raise CampaignGateError(
+            "case report frozen rendered input cannot be reconstructed"
+        ) from exc
+    if not isinstance(context, dict):
+        raise CampaignGateError("case report frozen context root is not an object")
+
+    terminology_payload = json.loads(
+        _repo_path(manifest["terminology_file"]).read_text(encoding="utf-8")
+    )
+    terminology = load_terminology(terminology_payload)
+    registry_sha = terminology_digest(terminology)
+    delivery_sha = _sha256_text(delivery_json)
+    terminology_trace = report.get("terminology", {})
+    if terminology_trace.get("registry_acceptance_sha256") != registry_sha:
+        raise CampaignGateError("case report terminology registry digest mismatch")
+    if terminology_trace.get("delivery_payload_sha256") != delivery_sha:
+        raise CampaignGateError("case report terminology delivery digest mismatch")
+
+    qualification = report.get("qualification", {})
+    if (
+        qualification.get("editorial_quality_qualified") is not False
+        or qualification.get("production_model_pipeline_qualified") is not False
+        or qualification.get("publication_authority") is not False
+        or qualification.get("canonical_mutation_authority") is not False
+        or qualification.get("bounded_evidence_only") is not True
+    ):
+        raise CampaignGateError("case report qualification authority drift")
+
+    structural = report.get("structural_result")
+    execution_error = report.get("execution_error")
+    if structural is None:
+        if not isinstance(execution_error, str) or not execution_error:
+            raise CampaignGateError(
+                "case report without structural result lacks execution error"
+            )
+        if qualification.get("structural_mechanical_acceptance") is not False:
+            raise CampaignGateError(
+                "failed case report claims structural mechanical acceptance"
+            )
+    else:
+        if not isinstance(structural, dict):
+            raise CampaignGateError("case report structural result is not an object")
+        if execution_error is not None:
+            raise CampaignGateError(
+                "case report has both structural result and execution error"
+            )
+        if raw_output is None:
+            raise CampaignGateError(
+                "case report structural result exists without frozen raw output"
+            )
+        authority = structural.get("authority", {})
+        if (
+            authority.get("mode") != "candidate_only"
+            or authority.get("canonical_mutation_authority") is not False
+            or authority.get("publication_authority") is not False
+        ):
+            raise CampaignGateError("case report structural authority drift")
+        trace_data = structural.get("model_trace", {})
+        started_at = structural.get("started_at")
+        completed_at = structural.get("completed_at")
+        if not all(
+            isinstance(value, str) and value
+            for value in (
+                trace_data.get("provider"),
+                trace_data.get("model"),
+                trace_data.get("model_version"),
+                started_at,
+                completed_at,
+            )
+        ):
+            raise CampaignGateError("case report structural provenance is incomplete")
+        clock_values = iter([started_at, completed_at])
+
+        def replay_clock() -> str:
+            try:
+                return next(clock_values)
+            except StopIteration as exc:
+                raise CampaignGateError(
+                    "deterministic draft replay requested unexpected extra clock value"
+                ) from exc
+
+        def replay_invoke(prompt: str) -> str:
+            if prompt != rendered_prompt:
+                raise CampaignGateError(
+                    "deterministic draft replay rendered input drifted"
+                )
+            return raw_output
+
+        try:
+            replayed = build_bilingual_draft_run(
+                context=context,
+                terminology=terminology,
+                model_trace=DraftModelTrace(
+                    provider=trace_data["provider"],
+                    model=trace_data["model"],
+                    model_version=trace_data["model_version"],
+                ),
+                invoke=replay_invoke,
+                clock=replay_clock,
+            )
+        except CampaignGateError:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise CampaignGateError(
+                "case report deterministic structural replay failed"
+            ) from exc
+        if replayed != structural:
+            raise CampaignGateError(
+                "case report structural result does not match deterministic replay"
+            )
+        accepted = (
+            structural.get("validation", {}).get("status")
+            == "accepted_for_editorial_review"
+        )
+        if qualification.get("structural_mechanical_acceptance") is not accepted:
+            raise CampaignGateError(
+                "case report structural qualification disagrees with replayed result"
+            )
+
     return {
         "report": report,
         "report_sha256": report_sha,
