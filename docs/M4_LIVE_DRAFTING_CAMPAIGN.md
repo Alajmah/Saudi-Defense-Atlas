@@ -59,7 +59,7 @@ Unknown manifest keys are rejected. Absolute/out-of-repository fixture or termin
 
 The invocation ceiling must equal the number of frozen cases. There is no retry authority, so any larger ceiling would be unused authority and any smaller ceiling could not cover the frozen corpus.
 
-The supplied runtime entitlement attestation must contain the manifest's `entitlement_id` and name the manifest route exactly enough for deterministic binding: `coding-plan` for the Coding Plan route, or `prepaid` / `general` for the prepaid/general route. The campaign controller records the entitlement identity and a SHA-256 of the attestation in the first ledger event; **every resume must supply the same attestation bytes**, proven by that SHA-256, before additional provider activity. Each single-case report still records the attestation under the reviewed driver contract.
+The supplied runtime entitlement attestation must bind the **exact campaign manifest**. It must contain the manifest's `entitlement_id`, `campaign_id`, full canonical `manifest_sha256`, and the manifest route (`coding-plan`, or `prepaid` / `general`). Reusing an entitlement ID and route with a changed model, corpus ordering, case count/call ceiling, or any other manifest field is rejected because the canonical manifest hash changes. The campaign controller records the entitlement identity and a SHA-256 of the exact attestation in the first ledger event; **every resume must supply the same attestation bytes**, proven by that SHA-256, before additional provider activity. Each single-case report still records the attestation under the reviewed driver contract.
 
 Example shape:
 
@@ -143,7 +143,7 @@ If the process dies in the narrower interval **after** the single-case report is
 1. requires the matching prior `case_invocation_started` event; a complete report with no campaign start marker is foreign/ambiguous evidence and is rejected;
 2. finds the report + sidecar;
 3. verifies their hash;
-4. verifies report version, reviewed head, model, fixture hash, terminology hash, invocation count, **exact campaign attestation**, requested route, and both resolved-route fields against the manifest's official route URL;
+4. verifies report version, reviewed head, model, fixture hash, terminology hash, **`invocation.attempted == true` and `invocation.count == 1`**, exact campaign attestation, requested route, and both resolved-route fields against the manifest's official route URL;
 5. recomputes the frozen rendered-input/raw-output hashes, reconstructs the context and terminology-delivery blocks, and independently rebuilds the expected context/rendered input from the manifest-bound fixture + terminology registry + frozen context `created_at`; exact equality is required even when the original provider execution failed before producing a structural result;
 6. when a structural result exists, **replays the deterministic bilingual-drafting boundary** from the frozen raw response using the original structural timestamps/model trace; the replayed structural run must exactly equal the stored structural result, and candidate-only/no-publication/no-canonical authority must still hold;
 7. records the case as `recovered_without_invocation: true`;
@@ -155,14 +155,17 @@ An incomplete report/sidecar pair is ambiguous evidence and stops the campaign.
 
 ## Concurrency lock
 
-A campaign evidence directory carries an exclusive `.campaign.lock`.
+Each exact manifest has one deterministic **checkout-level** lock namespace independent of `--evidence-dir`:
 
+`.runtime/m4-drafting-campaign-locks/<manifest_sha256>.lock`
+
+- the same authorized manifest cannot run concurrently into two different evidence directories in the same checkout;
 - any existing lock blocks another controller, regardless of recorded PID/host/manifest;
 - the controller never automatically unlinks or reclaims an existing lock;
 - normal shutdown releases only the token-bound lock it owns;
 - a crash-residue lock requires explicit operator reconciliation/removal after confirming no campaign controller is live.
 
-This conservative policy removes stale-lock time-of-check/time-of-use races and prevents two campaign processes from independently consuming the same call budget.
+This conservative policy removes stale-lock time-of-check/time-of-use races and prevents two campaign processes in the supported **single-host/single-checkout** operating scope from independently consuming the same call budget. **Cross-host global exclusion is not claimed**; that would require a shared coordinator.
 
 ## Hash-chained ledger
 
@@ -225,7 +228,7 @@ Arabic/English editorial review remains a separate human activity over the froze
 `scripts/validate_m4_drafting_campaign.py` runs with fake provider factories only and proves:
 
 - manifest version/file-hash/exact call-ceiling gates;
-- campaign-specific entitlement ID + route binding and exact attestation-hash continuity across resume;
+- exact-manifest campaign authorization binding: entitlement ID + campaign ID + full canonical manifest SHA-256 + route, with exact attestation-hash continuity across resume;
 - frozen campaign-manifest artifact binding;
 - git-tracked corpus/terminology enforcement in addition to SHA-256 binding;
 - structural rejection continues to the next case;
@@ -234,13 +237,13 @@ Arabic/English editorial review remains a separate human activity over the froze
 - terminal rerun performs zero new calls while re-verifying every referenced per-case report against the terminal ledger;
 - route/env ambiguity, missing credential, provider-construction failure, and deterministic pre-invoker boundary failure occur before `case_invocation_started` and leave zero invocations plus no ambiguous start marker;
 - completed-but-unledgered case evidence is recovered without reinvocation only when a matching campaign invocation-start marker exists;
-- recovered case evidence must match the exact campaign attestation and manifest route;
+- recovered case evidence must match the exact campaign attestation and manifest route and prove exactly one attempted provider invocation;
 - recovered case evidence is deterministically replayed from its frozen input/raw-output bytes, and any re-hashed structural-result/evidence tamper is rejected;
 - a standalone report without a campaign invocation-start marker is rejected as foreign/ambiguous evidence;
 - an invocation-start marker without terminal evidence blocks automatic retry;
 - ledger tampering is rejected before more provider activity;
 - terminal summary byte/sidecar/semantic tampering is rejected before provider activity;
-- any pre-existing campaign lock—including a stale/dead-PID-shaped residue—is fail-closed and never auto-reclaimed;
+- one deterministic per-manifest checkout lock excludes the same manifest across different evidence directories; any pre-existing lock—including a stale/dead-PID-shaped residue—is fail-closed and never auto-reclaimed;
 - nonterminal resume re-verifies recorded case evidence before fresh provider work;
 - a recorded execution failure with a missing campaign-stopped event is terminalized on resume with zero later invocations;
 - campaign summary authority and editorial qualification remain false.
