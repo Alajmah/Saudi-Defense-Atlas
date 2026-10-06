@@ -144,8 +144,9 @@ If the process dies in the narrower interval **after** the single-case report is
 2. finds the report + sidecar;
 3. verifies their hash;
 4. verifies report version, reviewed head, model, fixture hash, terminology hash, invocation count, **exact campaign attestation**, requested route, and both resolved-route fields against the manifest's official route URL;
-5. records the case as `recovered_without_invocation: true`;
-6. continues to the next case if the recovered result is not an execution failure.
+5. recomputes the frozen rendered-input/raw-output hashes, reconstructs the context and terminology-delivery blocks, and **replays the deterministic bilingual-drafting boundary** from the frozen raw response using the original structural timestamps/model trace; the replayed structural run must exactly equal the stored structural result, and candidate-only/no-publication/no-canonical authority must still hold;
+6. records the case as `recovered_without_invocation: true`;
+7. continues to the next case if the recovered result is not an execution failure.
 
 It never reruns an ambiguous or already-frozen case merely because the ledger event is missing.
 
@@ -231,6 +232,7 @@ Arabic/English editorial review remains a separate human activity over the froze
 - terminal rerun performs zero new calls;
 - completed-but-unledgered case evidence is recovered without reinvocation only when a matching campaign invocation-start marker exists;
 - recovered case evidence must match the exact campaign attestation and manifest route;
+- recovered case evidence is deterministically replayed from its frozen input/raw-output bytes, and any re-hashed structural-result/evidence tamper is rejected;
 - a standalone report without a campaign invocation-start marker is rejected as foreign/ambiguous evidence;
 - an invocation-start marker without terminal evidence blocks automatic retry;
 - ledger tampering is rejected before more provider activity;
