@@ -117,7 +117,7 @@ def check_entitlement(attestation: str) -> str:
     value = attestation.strip()
     if not value:
         raise TrialGateError("--entitlement-attestation must be non-empty")
-    return value
+    return attestation
 
 
 def check_route_args(
@@ -217,7 +217,7 @@ def execute_draft_invocation(
     terminology: dict,
     model_trace: DraftModelTrace,
     invoke_fn: Callable[[str], str],
-    before_invoke: Callable[[], None] | None = None,
+    before_invoke: Callable[[str], None] | None = None,
 ) -> tuple[dict[str, Any] | None, str | None, str | None, float, int]:
     """Run one invocation; return (draft_run, error, raw_output, elapsed, attempts).
 
@@ -232,7 +232,7 @@ def execute_draft_invocation(
     def capturing(prompt: str) -> str:
         nonlocal attempts
         if before_invoke is not None:
-            before_invoke()
+            before_invoke(prompt)
         attempts += 1
         result = invoke_fn(prompt)
         raw_holder.append(result)
@@ -249,7 +249,10 @@ def execute_draft_invocation(
             invoke=capturing,
         )
     except Exception as exc:  # noqa: BLE001 — failure must produce a report
-        error = str(exc)[:512]
+        message = str(exc)
+        if not message:
+            message = f"{type(exc).__name__}: invocation failed"
+        error = message[:512]
     elapsed = time.monotonic() - started
     raw_output = raw_holder[0] if raw_holder else None
     return draft_run, error, raw_output, elapsed, attempts
@@ -500,7 +503,7 @@ def run_trial(
     require_api_key: Callable[[], str],
     invoke_factory: Callable[..., Callable[[str], str]] = zai_invoker,
     created_at_fn: Callable[[], str] = _utc_now,
-    before_invoke: Callable[[], None] | None = None,
+    before_invoke: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """The full launch sequence: gates in order, one invocation, report write.
 
@@ -510,7 +513,8 @@ def run_trial(
     provider constructions, and zero invoker calls (DTD-02RRR).
 
     before_invoke is an optional orchestration-only hook passed into the
-    capturing invoker and called immediately before the actual provider closure.
+    capturing invoker with the exact rendered prompt and called immediately
+    before the actual provider closure.
     All build_bilingual_draft_run deterministic work therefore remains before
     the marker. The hook carries no model, publication, or mutation authority;
     campaign control uses it only to freeze the conservative invocation-start
