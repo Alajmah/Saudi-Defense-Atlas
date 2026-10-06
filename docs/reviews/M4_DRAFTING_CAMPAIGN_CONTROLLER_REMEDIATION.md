@@ -406,3 +406,26 @@ Deterministic validation proves:
 ### Authority boundary
 
 These changes close provider-boundary source/evidence precision only. They do not authorize or perform a live model call and do not add retry, publication, canonical mutation, scheduler, recurrence, or cross-host coordination authority.
+
+
+## Stale-Codex path-collision remediation after review 5432229919
+
+Codex review `5432133635` on earlier head `5d2be7cde3df4996b32da6c73200d8551ca97945` identified two findings that were reconciled against later heads.
+
+### DCC-BUDGET-01 — sequential evidence-directory replay — CLOSED BY EXISTING LATER REMEDIATION
+
+The transient manifest-global lock alone would not have prevented replaying one authorized manifest into a new evidence directory after normal completion. Later branch code already closed this by atomically persisting a manifest-SHA-to-evidence-directory binding in the repository Git-common-dir campaign runtime namespace. The binding survives normal completion and is checked before credential/provider activity.
+
+### DCC-PATH-01 — case IDs could alias campaign artifacts — REMEDIATED
+
+Manifest loading now rejects controller-artifact-reserved case IDs:
+
+- `campaign-manifest`;
+- `campaign-summary`;
+- `campaign-ledger`.
+
+This prevents a derived case report path from colliding with the frozen campaign manifest or aggregate summary and reserves the ledger stem against future path-shape changes.
+
+The deterministic validator mutates a valid manifest to each reserved case ID and proves all three fail at manifest load.
+
+No live model call or drafting entitlement consumption occurred.
