@@ -55,7 +55,7 @@ The manifest is canonical JSON for hashing purposes and contains exactly:
 - repository-relative terminology file path + SHA-256;
 - ordered cases, each carrying `case_id`, repository-relative fixture path, and fixture SHA-256.
 
-Unknown manifest keys are rejected. Absolute/out-of-repository fixture or terminology paths are rejected. The terminology registry and every case fixture must also be **git-tracked** in the reviewed checkout; an untracked local corpus file is not accepted merely because it is under the repository root. Every bound file hash is recomputed before the campaign begins.
+Unknown manifest keys are rejected. Case IDs that alias controller artifact stems (`campaign-manifest`, `campaign-summary`, `campaign-ledger`) are reserved and rejected. Absolute/out-of-repository fixture or terminology paths are rejected. The terminology registry and every case fixture must also be **git-tracked** in the reviewed checkout; an untracked local corpus file is not accepted merely because it is under the repository root. Every bound file hash is recomputed before the campaign begins.
 
 The invocation ceiling must equal the number of frozen cases. There is no retry authority, so any larger ceiling would be unused authority and any smaller ceiling could not cover the frozen corpus.
 
@@ -231,7 +231,7 @@ Arabic/English editorial review remains a separate human activity over the froze
 
 `scripts/validate_m4_drafting_campaign.py` runs with fake provider factories only and proves:
 
-- manifest version/file-hash/exact call-ceiling gates;
+- manifest version/file-hash/exact call-ceiling gates, including rejection of case IDs reserved for controller artifacts;
 - exact-manifest campaign authorization binding: entitlement ID + campaign ID + full canonical manifest SHA-256 + route, with exact **un-normalized attestation-byte** hash continuity across resume;
 - frozen campaign-manifest artifact binding;
 - git-tracked corpus/terminology enforcement in addition to SHA-256 binding;
