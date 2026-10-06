@@ -30,6 +30,7 @@ from scripts.run_m4_drafting_campaign import (  # noqa: E402
     CampaignGateError,
     acquire_lock,
     append_event,
+    campaign_lock_path,
     load_ledger,
     load_manifest,
     release_lock,
@@ -146,6 +147,14 @@ def fixed_clock() -> str:
     return "2026-10-06T00:00:00Z"
 
 
+def attestation_for(manifest_path: Path) -> str:
+    manifest, manifest_sha = load_manifest(manifest_path)
+    return (
+        f"{manifest['entitlement_id']} {manifest['campaign_id']} "
+        f"{manifest_sha} {manifest['route']} bounded drafting campaign test"
+    )
+
+
 def main() -> int:
     failures: list[str] = []
     raw_good = json.dumps(good_output(), ensure_ascii=False)
@@ -257,7 +266,7 @@ def main() -> int:
         summary = run_campaign(
             manifest_path=manifest_path,
             evidence_dir=evidence_dir,
-            entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+            entitlement_attestation=attestation_for(manifest_path),
             require_api_key=require_key,
             invoke_factory=factory,
             git_state_provider=fixed_git_state,
@@ -347,7 +356,7 @@ def main() -> int:
         second = run_campaign(
             manifest_path=manifest_path,
             evidence_dir=evidence_dir,
-            entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+            entitlement_attestation=attestation_for(manifest_path),
             require_api_key=require_key,
             invoke_factory=factory,
             git_state_provider=fixed_git_state,
@@ -373,7 +382,7 @@ def main() -> int:
             lambda: run_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
-                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                entitlement_attestation=attestation_for(manifest_path),
                 require_api_key=require_key,
                 invoke_factory=factory,
                 git_state_provider=fixed_git_state,
@@ -391,7 +400,7 @@ def main() -> int:
             lambda: run_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
-                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                entitlement_attestation=attestation_for(manifest_path),
                 require_api_key=require_key,
                 invoke_factory=factory,
                 git_state_provider=fixed_git_state,
@@ -409,7 +418,7 @@ def main() -> int:
             lambda: run_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
-                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                entitlement_attestation=attestation_for(manifest_path),
                 require_api_key=require_key,
                 invoke_factory=factory,
                 git_state_provider=fixed_git_state,
@@ -437,7 +446,7 @@ def main() -> int:
             lambda: run_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
-                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                entitlement_attestation=attestation_for(manifest_path),
                 require_api_key=require_key,
                 invoke_factory=factory,
                 git_state_provider=fixed_git_state,
@@ -456,7 +465,7 @@ def main() -> int:
             lambda: run_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
-                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan CHANGED attestation",
+                entitlement_attestation=attestation_for(manifest_path) + " CHANGED",
                 require_api_key=require_key,
                 invoke_factory=factory,
                 git_state_provider=fixed_git_state,
@@ -481,7 +490,7 @@ def main() -> int:
             lambda: run_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
-                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                entitlement_attestation=attestation_for(manifest_path),
                 require_api_key=require_key,
                 invoke_factory=factory,
                 git_state_provider=fixed_git_state,
@@ -510,7 +519,7 @@ def main() -> int:
             lambda: run_campaign(
                 manifest_path=manifest_path,
                 evidence_dir=evidence_dir,
-                entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                entitlement_attestation=attestation_for(manifest_path),
                 require_api_key=require_key,
                 invoke_factory=factory,
                 git_state_provider=fixed_git_state,
@@ -534,7 +543,7 @@ def main() -> int:
         loaded, manifest_sha = load_manifest(manifest_path)
         evidence_dir = td / "evidence"
         evidence_dir.mkdir()
-        attestation = f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test"
+        attestation = attestation_for(manifest_path)
         append_event(
             evidence_dir / "campaign-ledger.jsonl",
             campaign_id=loaded["campaign_id"],
@@ -615,7 +624,7 @@ def main() -> int:
                 run_campaign(
                     manifest_path=manifest_path,
                     evidence_dir=evidence_dir,
-                    entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+                    entitlement_attestation=attestation_for(manifest_path),
                     require_api_key=key_provider,
                     invoke_factory=provider_factory(provider_calls),
                     git_state_provider=fixed_git_state,
@@ -700,7 +709,7 @@ def main() -> int:
         stopped = run_campaign(
             manifest_path=manifest_path,
             evidence_dir=evidence_dir,
-            entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+            entitlement_attestation=attestation_for(manifest_path),
             require_api_key=lambda: "test-key",
             invoke_factory=fail_factory,
             git_state_provider=fixed_git_state,
@@ -759,7 +768,7 @@ def main() -> int:
         resumed_failure = run_campaign(
             manifest_path=manifest_path,
             evidence_dir=evidence_dir,
-            entitlement_attestation=f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test",
+            entitlement_attestation=attestation_for(manifest_path),
             require_api_key=lambda: "test-key",
             invoke_factory=resumed_factory,
             git_state_provider=fixed_git_state,
@@ -796,7 +805,7 @@ def main() -> int:
         loaded, manifest_sha = load_manifest(manifest_path)
         evidence_dir = td / "evidence"
         evidence_dir.mkdir()
-        attestation = f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test"
+        attestation = attestation_for(manifest_path)
         case1 = loaded["cases"][0]
 
         append_event(
@@ -921,7 +930,7 @@ def main() -> int:
         evidence_dir = td / "evidence"
         evidence_dir.mkdir()
         case1 = manifest["cases"][0]
-        attestation = f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test"
+        attestation = attestation_for(manifest_path)
         pre_calls: list[str] = []
 
         def pre_factory(**kwargs):
@@ -1026,7 +1035,7 @@ def main() -> int:
                 report_path,
                 case1,
                 manifest,
-                f"{ENTITLEMENT_ID} coding-plan DIFFERENT approval",
+                attestation + " DIFFERENT",
             ),
             failures,
         )
@@ -1088,7 +1097,7 @@ def main() -> int:
         manifest = write_manifest(manifest_path)
         evidence_dir = td / "evidence"
         evidence_dir.mkdir()
-        attestation = f"{ENTITLEMENT_ID} coding-plan bounded drafting campaign test"
+        attestation = attestation_for(manifest_path)
         standalone_calls: list[str] = []
 
         def standalone_factory(**kwargs):
