@@ -546,3 +546,24 @@ The existing casefold collision and controller-artifact alias protections remain
 Rehashed changes to status, score, notes, or dimension list are rejected before ledger adoption.
 
 These changes affect only preflight/filesystem/recovery evidence validation. They do not authorize or perform a live model call and do not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
+
+
+## Proactive deterministic-report provenance consolidation
+
+After closing the latest Codex recovery findings, the campaign recovery verifier was hardened in one pass against the remaining deterministic metadata emitted by the reviewed single-case driver.
+
+### DCC-META-01 — contradictory rehashed fixed report metadata — HARDENED
+
+The single-case driver now exposes constants for its immutable provider/report provenance without changing emitted report bytes or live behavior. Campaign recovery requires those deterministic values to remain exact, including:
+
+- top-level provider identity and null provider-checkpoint placeholder;
+- provider-edge driver, route-source, credential-source, transport, tools, and pinned reasoning configuration;
+- standing extraction-entitlement coverage flag remaining `false`;
+- extraction-adapter-at-build provenance in addition to the already-bound drafting adapter/template fields;
+- fixture version and terminology registry version;
+- served-model-checkpoint placeholder remaining `unknown`;
+- the reviewed bounded-evidence claim ceiling.
+
+The deterministic validator independently rewrites and re-hashes representative values across every category and proves recovery rejects each variant without provider activity.
+
+This consolidation is provenance-only. The single-case report's externally visible semantics and live launch behavior are unchanged, and no live model call or entitlement is consumed.
