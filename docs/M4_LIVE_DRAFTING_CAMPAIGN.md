@@ -55,7 +55,7 @@ The manifest is canonical JSON for hashing purposes and contains exactly:
 - repository-relative terminology file path + SHA-256;
 - ordered cases, each carrying `case_id`, repository-relative fixture path, and fixture SHA-256.
 
-Unknown manifest keys are rejected. Case IDs that alias controller artifact stems (`campaign-manifest`, `campaign-summary`, `campaign-ledger`) are reserved and rejected **case-insensitively**; Windows device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`) are also rejected case-insensitively; and all case IDs must be unique under Unicode `casefold()` so derived report paths cannot collide or become invalid on supported filesystems. Absolute/out-of-repository fixture or terminology paths are rejected. The terminology registry and every case fixture must also be **git-tracked** in the reviewed checkout; an untracked local corpus file is not accepted merely because it is under the repository root. Every bound file hash is recomputed before the campaign begins.
+Unknown manifest keys are rejected. Case IDs that alias controller artifact stems (`campaign-manifest`, `campaign-summary`, `campaign-ledger`) are reserved and rejected **case-insensitively**; Windows device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`) are also rejected case-insensitively; all case IDs must be unique under Unicode `casefold()`; and the derived `<case_id>.json.sha256` filename component must remain within the portable 255-byte component limit. Absolute/out-of-repository fixture or terminology paths are rejected. The terminology registry and every case fixture must also be **git-tracked** in the reviewed checkout; an untracked local corpus file is not accepted merely because it is under the repository root. Every bound file hash is recomputed before the campaign begins.
 
 The invocation ceiling must equal the number of frozen cases. There is no retry authority, so any larger ceiling would be unused authority and any smaller ceiling could not cover the frozen corpus.
 
@@ -198,6 +198,8 @@ Terminal campaign states are:
 - `stopped_execution_failure`;
 - `stopped_call_ceiling`.
 
+A terminal event is trusted only after semantic history validation. There must be exactly one terminal campaign event and it must be the final ledger event; invocation-start and case-terminal events must form ordered manifest prefixes; every recorded case result must follow its matching invocation-start marker; `completed` must cover the entire frozen corpus with no execution-failure case; and `stopped_execution_failure` must bind exactly the failed final recorded case. A recomputed hash chain cannot manufacture a valid terminal state from unsupported history.
+
 ## Aggregate summary
 
 Terminal campaigns write immutable:
@@ -231,7 +233,7 @@ Arabic/English editorial review remains a separate human activity over the froze
 
 `scripts/validate_m4_drafting_campaign.py` runs with fake provider factories only and proves:
 
-- manifest version/file-hash/exact call-ceiling gates, including rejection of case IDs reserved for controller artifacts;
+- manifest version/file-hash/exact call-ceiling gates, including rejection of case IDs reserved for controller artifacts, Windows device aliases, case-insensitive collisions, and case IDs whose derived evidence sidecar basename would exceed the portable 255-byte component limit;
 - exact-manifest campaign authorization binding: entitlement ID + campaign ID + full canonical manifest SHA-256 + route, with exact **un-normalized attestation-byte** hash continuity across resume;
 - frozen campaign-manifest artifact binding;
 - git-tracked corpus/terminology enforcement in addition to SHA-256 binding;
@@ -248,6 +250,7 @@ Arabic/English editorial review remains a separate human activity over the froze
 - an invocation-start marker without terminal evidence blocks automatic retry;
 - ledger tampering is rejected before more provider activity;
 - terminal summary byte/sidecar/semantic tampering is rejected before provider activity;
+- terminal ledger semantics are validated independently of the hash chain, including rejection of `campaign_completed` without full case coverage and `stopped_execution_failure` without a matching failed case;
 - one deterministic per-manifest checkout lock excludes the same manifest across different evidence directories; any pre-existing lock—including a stale/dead-PID-shaped residue—is fail-closed and never auto-reclaimed;
 - nonterminal resume re-verifies recorded case evidence before fresh provider work;
 - a recorded execution failure with a missing campaign-stopped event is terminalized on resume with zero later invocations;
