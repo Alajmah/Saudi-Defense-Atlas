@@ -213,6 +213,19 @@ def main() -> int:
                 failures,
             )
 
+        too_long = json.loads(manifest_path.read_text(encoding="utf-8"))
+        too_long["cases"][0]["case_id"] = "A" * 244
+        too_long_path = td / "too-long-case-id.json"
+        too_long_path.write_text(
+            json.dumps(too_long, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        expect_gate(
+            "case_id whose sidecar basename exceeds 255 bytes",
+            lambda: load_manifest(too_long_path),
+            failures,
+        )
+
         for windows_reserved_id in ("CON", "nul", "Com1", "lPt9"):
             windows_reserved = json.loads(
                 manifest_path.read_text(encoding="utf-8")
@@ -402,6 +415,84 @@ def main() -> int:
             )
         finally:
             release_lock(global_lock)
+
+    # Codex terminal-history reconciliation: a valid hash chain alone is
+    # insufficient. Terminal state must be semantically supported by ordered
+    # manifest case history before any summary can be trusted.
+    for label, terminal_type, terminal_payload in (
+        (
+            "completed-without-cases",
+            "campaign_completed",
+            {"status": "completed"},
+        ),
+        (
+            "stopped-execution-failure-without-failed-case",
+            "campaign_stopped",
+            {"status": "stopped_execution_failure", "case_id": "CASE-01"},
+        ),
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            td = Path(tmpdir)
+            manifest_path = td / "manifest.json"
+            loaded_manifest = write_manifest(manifest_path)
+            loaded, manifest_sha = load_manifest(manifest_path)
+            evidence_dir = td / "evidence"
+            evidence_dir.mkdir(parents=True, exist_ok=True)
+            ledger_path = evidence_dir / "campaign-ledger.jsonl"
+            attestation = attestation_for(manifest_path)
+            append_event(
+                ledger_path,
+                campaign_id=loaded["campaign_id"],
+                manifest_sha256=manifest_sha,
+                event_type="campaign_started",
+                payload={
+                    "reviewed_head": loaded["reviewed_head"],
+                    "route": loaded["route"],
+                    "entitlement_id": loaded["entitlement_id"],
+                    "entitlement_attestation_sha256": hashlib.sha256(
+                        attestation.encode("utf-8")
+                    ).hexdigest(),
+                    "model": loaded["model"],
+                    "max_invocations": loaded["max_invocations"],
+                    "case_count": len(loaded["cases"]),
+                },
+                clock=fixed_clock,
+            )
+            append_event(
+                ledger_path,
+                campaign_id=loaded["campaign_id"],
+                manifest_sha256=manifest_sha,
+                event_type=terminal_type,
+                payload=terminal_payload,
+                clock=fixed_clock,
+            )
+            terminal_calls: list[str] = []
+
+            def terminal_factory(**kwargs):
+                def invoke(prompt: str) -> str:
+                    terminal_calls.append(prompt)
+                    return raw_good
+                return invoke
+
+            expect_gate(
+                f"invalid terminal history {label}",
+                lambda: run_test_campaign(
+                    manifest_path=manifest_path,
+                    evidence_dir=evidence_dir,
+                    entitlement_attestation=attestation,
+                    require_api_key=lambda: "test-key",
+                    invoke_factory=terminal_factory,
+                    git_state_provider=fixed_git_state,
+                    env_url_provider=empty_env,
+                    clock=fixed_clock,
+                ),
+                failures,
+            )
+            expect(
+                not terminal_calls,
+                f"invalid terminal history {label} reached provider",
+                failures,
+            )
 
     # Complete campaign: first output is structurally rejected, second accepted;
     # rejection is evidence and does not stop the campaign.
