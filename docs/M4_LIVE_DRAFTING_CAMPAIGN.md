@@ -143,7 +143,7 @@ If the process dies in the narrower interval **after** the single-case report is
 1. requires the matching prior `case_invocation_started` event; a complete report with no campaign start marker is foreign/ambiguous evidence and is rejected;
 2. finds the report + sidecar;
 3. verifies their hash;
-4. verifies report version, reviewed head, model, fixture hash, terminology hash, **`invocation.attempted == true` and `invocation.count == 1`**, exact campaign attestation, requested route, and both resolved-route fields against the manifest's official route URL;
+4. verifies report version, top-level reviewed head, **`trial_context.git_head == reviewed_head` and `trial_context.tracked_worktree_clean == true`**, model, fixture hash, terminology hash, **`invocation.attempted == true` and `invocation.count == 1`**, exact campaign attestation, requested route, and both resolved-route fields against the manifest's official route URL;
 5. recomputes the frozen rendered-input/raw-output hashes, reconstructs the context and terminology-delivery blocks, and independently rebuilds the expected context/rendered input from the manifest-bound fixture + terminology registry + frozen context `created_at`; exact equality is required even when the original provider execution failed before producing a structural result;
 6. when a structural result exists, **replays the deterministic bilingual-drafting boundary** from the frozen raw response using the original structural timestamps/model trace; the replayed structural run must exactly equal the stored structural result, and candidate-only/no-publication/no-canonical authority must still hold;
 7. records the case as `recovered_without_invocation: true`;
@@ -241,7 +241,7 @@ Arabic/English editorial review remains a separate human activity over the froze
 - terminal rerun performs zero new calls while re-verifying every referenced per-case report against the terminal ledger;
 - route/env ambiguity, missing credential, provider-construction failure, deterministic pre-invoker failure, and provider-boundary source/prompt drift occur before `case_invocation_started` and leave zero invocations plus no ambiguous start marker;
 - completed-but-unledgered case evidence is recovered without reinvocation only when a matching campaign invocation-start marker exists;
-- recovered case evidence must match the exact campaign attestation and manifest route and prove exactly one attempted provider invocation;
+- recovered case evidence must match the exact campaign attestation and manifest route, prove execution from the reviewed clean checkout, and prove exactly one attempted provider invocation;
 - recovered case evidence is deterministically replayed from its frozen input/raw-output bytes, and any re-hashed structural-result/evidence tamper is rejected;
 - a standalone report without a campaign invocation-start marker is rejected as foreign/ambiguous evidence;
 - an invocation-start marker without terminal evidence blocks automatic retry;
