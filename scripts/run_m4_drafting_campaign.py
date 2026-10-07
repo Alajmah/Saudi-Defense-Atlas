@@ -31,6 +31,7 @@ if str(ROOT) not in sys.path:
 from scripts.run_m4_drafting_trial import (  # noqa: E402
     DEFAULT_TERMINOLOGY,
     DRAFTING_ADAPTER_VERSION,
+    EDITORIAL_DIMENSIONS,
     DRAFT_PROMPT_TEMPLATE_ID,
     DRAFT_PROMPT_TEMPLATE_VERSION,
     draft_prompt_template_sha256,
@@ -237,6 +238,14 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
         "campaign-summary",
         "campaign-ledger",
     }
+    windows_device_casefold = {
+        "con",
+        "prn",
+        "aux",
+        "nul",
+        *(f"com{i}" for i in range(1, 10)),
+        *(f"lpt{i}" for i in range(1, 10)),
+    }
     for index, case in enumerate(cases):
         if (
             not isinstance(case, dict)
@@ -260,6 +269,10 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
         if folded_case_id in reserved_casefold:
             raise CampaignGateError(
                 f"campaign case_id is reserved for controller artifacts: {case_id}"
+            )
+        if folded_case_id in windows_device_casefold:
+            raise CampaignGateError(
+                f"campaign case_id is reserved by Windows filesystems: {case_id}"
             )
         if case_id in seen:
             raise CampaignGateError(f"duplicate campaign case_id: {case_id}")
@@ -572,6 +585,17 @@ def verify_case_report(
         raise CampaignGateError("case report terminology registry digest mismatch")
     if terminology_trace.get("delivery_payload_sha256") != delivery_sha:
         raise CampaignGateError("case report terminology delivery digest mismatch")
+
+    expected_editorial_assessment = {
+        "status": "pending_human_review",
+        "mechanical_score": None,
+        "notes": None,
+        "assessment_dimensions": EDITORIAL_DIMENSIONS,
+    }
+    if report.get("editorial_assessment") != expected_editorial_assessment:
+        raise CampaignGateError(
+            "case report editorial assessment is not the reviewed pending placeholder"
+        )
 
     qualification = report.get("qualification", {})
     if (
@@ -1020,6 +1044,44 @@ def _verify_recorded_case_evidence(
             )
 
 
+def _preflight_unrecorded_case_artifacts(
+    manifest: dict[str, Any],
+    events: list[dict[str, Any]],
+    evidence_dir: Path,
+    attestation: str,
+) -> None:
+    """Reject ambiguous/foreign later-case evidence before any fresh invocation."""
+
+    recorded = _case_events(events)
+    started = _started_cases(events)
+    for case in manifest["cases"]:
+        case_id = case["case_id"]
+        if case_id in recorded:
+            continue
+        report_path = evidence_dir / f"{case_id}.json"
+        report_exists = report_path.exists()
+        sidecar_exists = sidecar_path(report_path).exists()
+
+        if case_id in started:
+            if not (report_exists and sidecar_exists):
+                raise CampaignGateError(
+                    f"ambiguous prior invocation for {case_id}; "
+                    "start event exists without complete immutable case evidence"
+                )
+            verify_case_report(report_path, case, manifest, attestation)
+            continue
+
+        if report_exists or sidecar_exists:
+            if not (report_exists and sidecar_exists):
+                raise CampaignGateError(
+                    f"ambiguous crash evidence for {case_id}"
+                )
+            raise CampaignGateError(
+                f"foreign/ambiguous case evidence for {case_id}: "
+                "complete report exists without campaign invocation-start marker"
+            )
+
+
 def verify_provider_boundary_source(
     *,
     prompt: str,
@@ -1246,6 +1308,9 @@ def run_campaign(
 
         recorded = _case_events(events)
         started = _started_cases(events)
+        _preflight_unrecorded_case_artifacts(
+            manifest, events, evidence_dir, attestation
+        )
         invocations_used = len(started)
 
         for case in manifest["cases"]:
