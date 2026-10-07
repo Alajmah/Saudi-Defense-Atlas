@@ -567,3 +567,22 @@ The single-case driver now exposes constants for its immutable provider/report p
 The deterministic validator independently rewrites and re-hashes representative values across every category and proves recovery rejects each variant without provider activity.
 
 This consolidation is provenance-only. The single-case report's externally visible semantics and live launch behavior are unchanged, and no live model call or entitlement is consumed.
+
+
+## Codex nonterminal-summary preflight remediation after review 5441668723
+
+The fresh Codex review on exact head `2bd729aabda347a9175a86b9c5800f49d7a3c2d0` identified one remaining aggregate-artifact preflight gap.
+
+### DCC-PREFLIGHT-02 — stale/foreign campaign summary could consume case calls — REMEDIATED
+
+For any nonterminal campaign, the controller now checks `campaign-summary.json` and its SHA-256 sidecar **before entering the invocation loop**.
+
+- summary without sidecar: fail closed;
+- sidecar without summary: fail closed;
+- complete summary + sidecar before terminalization: treated as foreign/stale and fail closed.
+
+The terminal path remains unchanged: once a terminal ledger event exists, the summary is verified against the re-closed case evidence and rebuilt ledger semantics.
+
+Deterministic regressions cover summary-only, sidecar-only, and complete-foreign-summary states and prove each produces **zero credential reads and zero provider calls**.
+
+This is an evidence-preflight change only. It does not authorize or perform a live model call and does not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
