@@ -586,3 +586,39 @@ The terminal path remains unchanged: once a terminal ledger event exists, the su
 Deterministic regressions cover summary-only, sidecar-only, and complete-foreign-summary states and prove each produces **zero credential reads and zero provider calls**.
 
 This is an evidence-preflight change only. It does not authorize or perform a live model call and does not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
+
+
+## Codex terminal-history / portable-path remediation after review 5441731072
+
+The fresh Codex review on `d762c37ded80ffaf4c984a5267ff036797b5c4db` identified two remaining fail-closed issues.
+
+### DCC-TERM-01 — terminal event trusted without semantic history validation — REMEDIATED
+
+The controller now validates terminal ledger semantics before trusting or freezing a terminal summary.
+
+It requires:
+
+- exactly one terminal campaign event;
+- the terminal event to be the final ledger event;
+- only known ledger event types;
+- invocation-start events and case-terminal events to form ordered prefixes of the frozen manifest;
+- every recorded case result to follow its own invocation-start marker;
+- no unmatched invocation-start marker in a terminal campaign;
+- `campaign_completed/status=completed` to cover every manifest case and contain no execution-failure result;
+- `stopped_execution_failure` to bind exactly one failed case, matching the terminal event's case ID, with that failed case as the final recorded case;
+- `stopped_call_ceiling` to match the consumed ceiling and next unrecorded manifest case.
+
+Deterministic regressions construct validly hash-chained but semantically false terminal ledgers for:
+
+1. `campaign_completed` with zero case results; and
+2. `stopped_execution_failure` without any failed case;
+
+and prove both are rejected before provider activity.
+
+### DCC-PATH-03 — unbounded case ID could exceed filesystem component limits — REMEDIATED
+
+Manifest validation now rejects any case ID for which the longest derived evidence component, `<case_id>.json.sha256`, exceeds 255 UTF-8 bytes.
+
+Because the allowed case-ID alphabet is ASCII-only, this directly bounds the report/sidecar component length across the supported portable filesystem contract. A 244-character case ID is regression-tested and rejected before any campaign launch activity.
+
+These changes do not authorize or perform a live model call and do not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
