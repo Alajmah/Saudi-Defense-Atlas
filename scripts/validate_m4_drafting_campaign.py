@@ -1366,6 +1366,40 @@ def main() -> int:
                 failures,
             )
 
+        # Codex model-trace reconciliation: recovery must bind the
+        # structural provenance to the exact campaign model and reviewed
+        # single-case driver provider/version identity before replay.
+        for field, value, label in (
+            ("provider", "other-provider", "wrong-provider"),
+            ("model", "other-model", "wrong-model"),
+            ("model_version", "other-version", "wrong-model-version"),
+        ):
+            trace_tamper = json.loads(report_path.read_text(encoding="utf-8"))
+            trace_tamper["structural_result"]["model_trace"][field] = value
+            trace_path = evidence_dir / f"TRACE-{label}.json"
+            trace_bytes = (
+                json.dumps(
+                    trace_tamper,
+                    ensure_ascii=False,
+                    indent=2,
+                    allow_nan=False,
+                )
+                + "\n"
+            ).encode("utf-8")
+            trace_path.write_bytes(trace_bytes)
+            trace_sha = hashlib.sha256(trace_bytes).hexdigest()
+            trace_path.with_name(trace_path.name + ".sha256").write_text(
+                f"{trace_sha}  {trace_path.name}\n",
+                encoding="utf-8",
+            )
+            expect_gate(
+                f"rehashed structural model-trace tamper {label}",
+                lambda p=trace_path: verify_case_report(
+                    p, case1, manifest, attestation
+                ),
+                failures,
+            )
+
         # DCC-07: even a tampered report with a freshly recomputed sidecar must
         # fail deterministic recovery replay.
         tampered_report = json.loads(report_path.read_text(encoding="utf-8"))
