@@ -31,7 +31,9 @@ if str(ROOT) not in sys.path:
 from scripts.run_m4_drafting_trial import (  # noqa: E402
     DEFAULT_TERMINOLOGY,
     DRAFTING_ADAPTER_VERSION,
+    DRAFT_PROMPT_TEMPLATE_ID,
     DRAFT_PROMPT_TEMPLATE_VERSION,
+    draft_prompt_template_sha256,
     REPORT_VERSION as TRIAL_REPORT_VERSION,
     _git_head,
     _git_ref,
@@ -229,6 +231,12 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
         )
 
     seen: set[str] = set()
+    seen_casefold: set[str] = set()
+    reserved_casefold = {
+        "campaign-manifest",
+        "campaign-summary",
+        "campaign-ledger",
+    }
     for index, case in enumerate(cases):
         if (
             not isinstance(case, dict)
@@ -248,17 +256,19 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
             )
         ):
             raise CampaignGateError(f"case {index} has invalid case_id")
-        if case_id in {
-            "campaign-manifest",
-            "campaign-summary",
-            "campaign-ledger",
-        }:
+        folded_case_id = case_id.casefold()
+        if folded_case_id in reserved_casefold:
             raise CampaignGateError(
                 f"campaign case_id is reserved for controller artifacts: {case_id}"
             )
         if case_id in seen:
             raise CampaignGateError(f"duplicate campaign case_id: {case_id}")
+        if folded_case_id in seen_casefold:
+            raise CampaignGateError(
+                f"campaign case_id collides on a case-insensitive filesystem: {case_id}"
+            )
         seen.add(case_id)
+        seen_casefold.add(folded_case_id)
         fixture_path = _repo_path(case["fixture"])
         if not fixture_path.is_file():
             raise CampaignGateError(
@@ -466,6 +476,15 @@ def verify_case_report(
         )
     if report.get("requested_model") != manifest["model"]:
         raise CampaignGateError("case report model mismatch")
+    boundary_versions = report.get("drafting_boundary_versions", {})
+    if boundary_versions.get("drafting_adapter") != manifest["drafting_adapter_version"]:
+        raise CampaignGateError("case report drafting adapter version mismatch")
+    if boundary_versions.get("prompt_template_version") != manifest["prompt_template_version"]:
+        raise CampaignGateError("case report prompt template version mismatch")
+    if boundary_versions.get("prompt_template_id") != DRAFT_PROMPT_TEMPLATE_ID:
+        raise CampaignGateError("case report prompt template identity mismatch")
+    if boundary_versions.get("prompt_template_sha256") != draft_prompt_template_sha256():
+        raise CampaignGateError("case report prompt template hash mismatch")
     expected_route_url = ZAI_ENDPOINT_URLS[manifest["route"]]
     if report.get("entitlement", {}).get("attestation") != expected_attestation:
         raise CampaignGateError("case report entitlement attestation mismatch")
