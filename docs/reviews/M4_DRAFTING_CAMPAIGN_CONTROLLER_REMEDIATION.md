@@ -479,3 +479,31 @@ The validator creates valid campaign evidence, independently rewrites and re-has
 and proves every variant is rejected before recovery acceptance and without provider activity.
 
 This closes evidence provenance only. It does not authorize or perform a live model call and does not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
+
+
+## Codex path/boundary-version remediation after review 5438492393
+
+The fresh Codex review on exact head `a3afb6cab952295986874496d5dda583eabf48e0` identified two remaining recovery/portability defects.
+
+### DCC-PATH-02 — case-insensitive aliases could collide with controller artifacts — REMEDIATED
+
+Manifest validation now:
+
+- compares every case ID with the reserved controller stems using `casefold()`;
+- rejects mixed-case aliases such as `Campaign-Summary`;
+- requires all case IDs to be unique under `casefold()`, preventing two distinct IDs from mapping to the same report path on case-insensitive filesystems.
+
+Deterministic regressions cover mixed-case forms of all three reserved stems and an ordinary pair of case IDs that differ only by case.
+
+### DCC-BOUNDARY-01 — recovered reports were not bound to frozen boundary versions — REMEDIATED
+
+`verify_case_report()` now requires `drafting_boundary_versions` to preserve:
+
+- `drafting_adapter == manifest.drafting_adapter_version`;
+- `prompt_template_version == manifest.prompt_template_version`;
+- the reviewed prompt template ID;
+- the reviewed prompt template SHA-256.
+
+These checks occur before recovery acceptance/replay. The validator independently rewrites and re-hashes each boundary field and proves all variants are rejected without provider activity.
+
+This remediation changes only path/provenance validation. It does not authorize or perform a live model call and does not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
