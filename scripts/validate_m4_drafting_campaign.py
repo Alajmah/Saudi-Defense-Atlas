@@ -949,6 +949,71 @@ def main() -> int:
         provider_factory=failing_factory_builder,
     )
 
+    # Fresh/nonterminal campaign preflight must also reject aggregate-summary
+    # residue before spending entitlement on any case.
+    for mode in ("summary-only", "sidecar-only", "complete-foreign-summary"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            td = Path(tmpdir)
+            manifest_path = td / "manifest.json"
+            write_manifest(manifest_path)
+            evidence_dir = td / "evidence"
+            evidence_dir.mkdir()
+            summary_path = evidence_dir / "campaign-summary.json"
+            sidecar = summary_path.with_name(summary_path.name + ".sha256")
+
+            if mode in {"summary-only", "complete-foreign-summary"}:
+                summary_path.write_text("{}\n", encoding="utf-8")
+            if mode == "sidecar-only":
+                sidecar.write_text(
+                    f"{'0' * 64}  {summary_path.name}\n",
+                    encoding="utf-8",
+                )
+            if mode == "complete-foreign-summary":
+                summary_bytes = summary_path.read_bytes()
+                summary_sha = hashlib.sha256(summary_bytes).hexdigest()
+                sidecar.write_text(
+                    f"{summary_sha}  {summary_path.name}\n",
+                    encoding="utf-8",
+                )
+
+            summary_calls: list[str] = []
+            summary_credentials: list[int] = []
+
+            def summary_key() -> str:
+                summary_credentials.append(1)
+                return "test-key"
+
+            def summary_factory(**kwargs):
+                def invoke(prompt: str) -> str:
+                    summary_calls.append(prompt)
+                    return raw_good
+                return invoke
+
+            expect_gate(
+                f"nonterminal summary artifact preflight {mode}",
+                lambda: run_test_campaign(
+                    manifest_path=manifest_path,
+                    evidence_dir=evidence_dir,
+                    entitlement_attestation=attestation_for(manifest_path),
+                    require_api_key=summary_key,
+                    invoke_factory=summary_factory,
+                    git_state_provider=fixed_git_state,
+                    env_url_provider=empty_env,
+                    clock=fixed_clock,
+                ),
+                failures,
+            )
+            expect(
+                not summary_credentials,
+                f"nonterminal summary artifact preflight {mode} read credentials",
+                failures,
+            )
+            expect(
+                not summary_calls,
+                f"nonterminal summary artifact preflight {mode} invoked provider",
+                failures,
+            )
+
     # Fresh/nonterminal campaign preflight must inspect every manifest case
     # before spending entitlement on an earlier missing case.
     for mode in ("incomplete", "foreign-complete"):
