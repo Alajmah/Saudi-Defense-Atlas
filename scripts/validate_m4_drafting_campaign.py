@@ -213,6 +213,22 @@ def main() -> int:
                 failures,
             )
 
+        for windows_reserved_id in ("CON", "nul", "Com1", "lPt9"):
+            windows_reserved = json.loads(
+                manifest_path.read_text(encoding="utf-8")
+            )
+            windows_reserved["cases"][0]["case_id"] = windows_reserved_id
+            windows_reserved_path = td / f"windows-reserved-{windows_reserved_id}.json"
+            windows_reserved_path.write_text(
+                json.dumps(windows_reserved, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            expect_gate(
+                f"Windows-reserved campaign case_id {windows_reserved_id}",
+                lambda p=windows_reserved_path: load_manifest(p),
+                failures,
+            )
+
         casefold_collision = json.loads(manifest_path.read_text(encoding="utf-8"))
         casefold_collision["cases"][0]["case_id"] = "CASE-COLLISION"
         casefold_collision["cases"][1]["case_id"] = "case-collision"
@@ -933,6 +949,65 @@ def main() -> int:
         provider_factory=failing_factory_builder,
     )
 
+    # Fresh/nonterminal campaign preflight must inspect every manifest case
+    # before spending entitlement on an earlier missing case.
+    for mode in ("incomplete", "foreign-complete"):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            td = Path(tmpdir)
+            manifest_path = td / "manifest.json"
+            write_manifest(manifest_path)
+            evidence_dir = td / "evidence"
+            evidence_dir.mkdir()
+            later_report = evidence_dir / "CASE-02.json"
+            later_report.write_text("{}\n", encoding="utf-8")
+            if mode == "foreign-complete":
+                later_bytes = later_report.read_bytes()
+                later_sha = hashlib.sha256(later_bytes).hexdigest()
+                later_report.with_name(
+                    later_report.name + ".sha256"
+                ).write_text(
+                    f"{later_sha}  {later_report.name}\n",
+                    encoding="utf-8",
+                )
+
+            preflight_calls: list[str] = []
+            credential_reads: list[int] = []
+
+            def preflight_key() -> str:
+                credential_reads.append(1)
+                return "test-key"
+
+            def preflight_factory(**kwargs):
+                def invoke(prompt: str) -> str:
+                    preflight_calls.append(prompt)
+                    return raw_good
+                return invoke
+
+            expect_gate(
+                f"later-case artifact preflight {mode}",
+                lambda: run_test_campaign(
+                    manifest_path=manifest_path,
+                    evidence_dir=evidence_dir,
+                    entitlement_attestation=attestation_for(manifest_path),
+                    require_api_key=preflight_key,
+                    invoke_factory=preflight_factory,
+                    git_state_provider=fixed_git_state,
+                    env_url_provider=empty_env,
+                    clock=fixed_clock,
+                ),
+                failures,
+            )
+            expect(
+                not credential_reads,
+                f"later-case artifact preflight {mode} read credentials",
+                failures,
+            )
+            expect(
+                not preflight_calls,
+                f"later-case artifact preflight {mode} invoked provider",
+                failures,
+            )
+
     source_state_checks: list[int] = []
 
     def drift_between_outer_check_and_provider():
@@ -1379,6 +1454,40 @@ def main() -> int:
             expect_gate(
                 f"rehashed checkout provenance tamper {label}",
                 lambda p=checkout_path: verify_case_report(
+                    p, case1, manifest, attestation
+                ),
+                failures,
+            )
+
+        # Recovery must preserve the trial builder's unreviewed editorial
+        # placeholder; campaign evidence cannot synthesize a human approval.
+        for field, value, label in (
+            ("status", "approved", "approved-status"),
+            ("mechanical_score", 1, "non-null-score"),
+            ("notes", "synthetic approval note", "non-null-notes"),
+            ("assessment_dimensions", ["Arabic fluency"], "dimension-drift"),
+        ):
+            editorial_tamper = json.loads(report_path.read_text(encoding="utf-8"))
+            editorial_tamper["editorial_assessment"][field] = value
+            editorial_path = evidence_dir / f"EDITORIAL-{label}.json"
+            editorial_bytes = (
+                json.dumps(
+                    editorial_tamper,
+                    ensure_ascii=False,
+                    indent=2,
+                    allow_nan=False,
+                )
+                + "\n"
+            ).encode("utf-8")
+            editorial_path.write_bytes(editorial_bytes)
+            editorial_sha = hashlib.sha256(editorial_bytes).hexdigest()
+            editorial_path.with_name(editorial_path.name + ".sha256").write_text(
+                f"{editorial_sha}  {editorial_path.name}\n",
+                encoding="utf-8",
+            )
+            expect_gate(
+                f"rehashed editorial-assessment tamper {label}",
+                lambda p=editorial_path: verify_case_report(
                     p, case1, manifest, attestation
                 ),
                 failures,
