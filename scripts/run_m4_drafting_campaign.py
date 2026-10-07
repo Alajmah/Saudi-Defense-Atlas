@@ -1083,6 +1083,21 @@ def _verify_recorded_case_evidence(
             )
 
 
+def _preflight_nonterminal_summary_artifact(summary_path: Path) -> None:
+    """Refuse stale/foreign aggregate-summary artifacts before any fresh calls."""
+
+    summary_exists = summary_path.exists()
+    sidecar_exists = sidecar_path(summary_path).exists()
+    if summary_exists or sidecar_exists:
+        if not (summary_exists and sidecar_exists):
+            raise CampaignGateError(
+                "ambiguous nonterminal campaign summary artifact pair"
+            )
+        raise CampaignGateError(
+            "foreign/nonterminal campaign summary already exists before completion"
+        )
+
+
 def _preflight_unrecorded_case_artifacts(
     manifest: dict[str, Any],
     events: list[dict[str, Any]],
@@ -1347,6 +1362,7 @@ def run_campaign(
 
         recorded = _case_events(events)
         started = _started_cases(events)
+        _preflight_nonterminal_summary_artifact(summary_path)
         _preflight_unrecorded_case_artifacts(
             manifest, events, evidence_dir, attestation
         )
