@@ -274,6 +274,10 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
             )
         ):
             raise CampaignGateError(f"case {index} has invalid case_id")
+        if len((case_id + ".json.sha256").encode("utf-8")) > 255:
+            raise CampaignGateError(
+                f"campaign case_id is too long for portable evidence filenames: {case_id}"
+            )
         folded_case_id = case_id.casefold()
         if folded_case_id in reserved_casefold:
             raise CampaignGateError(
@@ -449,6 +453,146 @@ def _started_cases(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
             )
         result[case_id] = event
     return result
+
+
+def _validate_terminal_history(
+    manifest: dict[str, Any],
+    events: list[dict[str, Any]],
+    terminal: dict[str, Any],
+) -> None:
+    """Validate terminal ledger semantics before trusting terminal status."""
+
+    allowed_event_types = {
+        "campaign_started",
+        "case_invocation_started",
+        "case_completed",
+        "case_execution_failure",
+        "campaign_completed",
+        "campaign_stopped",
+    }
+    for event in events:
+        if event.get("event_type") not in allowed_event_types:
+            raise CampaignGateError(
+                f"campaign ledger has unknown event type: {event.get('event_type')}"
+            )
+
+    terminals = [
+        event
+        for event in events
+        if event["event_type"] in {"campaign_completed", "campaign_stopped"}
+    ]
+    if len(terminals) != 1 or terminals[0] is not terminal:
+        raise CampaignGateError(
+            "campaign ledger must contain exactly one terminal campaign event"
+        )
+    if terminal["sequence"] != len(events):
+        raise CampaignGateError(
+            "campaign terminal event must be the final ledger event"
+        )
+
+    starts = _started_cases(events)
+    recorded = _case_events(events)
+    manifest_ids = [case["case_id"] for case in manifest["cases"]]
+    manifest_set = set(manifest_ids)
+
+    for case_id in set(starts) | set(recorded):
+        if case_id not in manifest_set:
+            raise CampaignGateError(
+                f"campaign ledger references unknown case {case_id}"
+            )
+
+    started_ids = [
+        event["payload"].get("case_id")
+        for event in events
+        if event["event_type"] == "case_invocation_started"
+    ]
+    recorded_ids = [
+        event["payload"].get("case_id")
+        for event in events
+        if event["event_type"] in {"case_completed", "case_execution_failure"}
+    ]
+
+    if started_ids != manifest_ids[: len(started_ids)]:
+        raise CampaignGateError(
+            "campaign invocation-start history is not an ordered manifest prefix"
+        )
+    if recorded_ids != manifest_ids[: len(recorded_ids)]:
+        raise CampaignGateError(
+            "campaign case-terminal history is not an ordered manifest prefix"
+        )
+    if len(started_ids) != len(recorded_ids):
+        raise CampaignGateError(
+            "terminal campaign history contains an unmatched invocation-start event"
+        )
+
+    for case_id in recorded_ids:
+        if starts[case_id]["sequence"] >= recorded[case_id]["sequence"]:
+            raise CampaignGateError(
+                f"campaign case terminal event precedes its invocation start: {case_id}"
+            )
+
+    status = terminal.get("payload", {}).get("status")
+    if terminal["event_type"] == "campaign_completed":
+        if status != "completed":
+            raise CampaignGateError("campaign_completed carries invalid status")
+        if recorded_ids != manifest_ids:
+            raise CampaignGateError(
+                "completed campaign does not cover every manifest case"
+            )
+        if any(
+            event["event_type"] == "case_execution_failure"
+            for event in recorded.values()
+        ):
+            raise CampaignGateError(
+                "completed campaign contains an execution-failure case"
+            )
+        return
+
+    if terminal["event_type"] != "campaign_stopped":
+        raise CampaignGateError("invalid terminal campaign event type")
+
+    if status == "stopped_execution_failure":
+        failed = [
+            event
+            for event in recorded.values()
+            if event["event_type"] == "case_execution_failure"
+        ]
+        if len(failed) != 1:
+            raise CampaignGateError(
+                "execution-failure stop must bind exactly one failed case"
+            )
+        failed_case_id = failed[0]["payload"].get("case_id")
+        if terminal["payload"].get("case_id") != failed_case_id:
+            raise CampaignGateError(
+                "execution-failure stop case does not match failed case"
+            )
+        if recorded_ids[-1:] != [failed_case_id]:
+            raise CampaignGateError(
+                "execution-failure case must be the final recorded case"
+            )
+        return
+
+    if status == "stopped_call_ceiling":
+        stop_case_id = terminal["payload"].get("case_id")
+        if stop_case_id not in manifest_set:
+            raise CampaignGateError(
+                "call-ceiling stop references unknown manifest case"
+            )
+        if len(started_ids) != manifest["max_invocations"]:
+            raise CampaignGateError(
+                "call-ceiling stop does not match consumed invocation budget"
+            )
+        if len(recorded_ids) >= len(manifest_ids):
+            raise CampaignGateError(
+                "call-ceiling stop is inconsistent with a fully recorded corpus"
+            )
+        if manifest_ids[len(recorded_ids)] != stop_case_id:
+            raise CampaignGateError(
+                "call-ceiling stop does not identify the next manifest case"
+            )
+        return
+
+    raise CampaignGateError(f"unsupported terminal campaign status: {status}")
 
 
 def _read_sidecar(sidecar: Path, report_name: str) -> str:
@@ -1323,6 +1467,7 @@ def run_campaign(
                 terminal = _terminal_event(events)
 
         if terminal is not None:
+            _validate_terminal_history(manifest, events, terminal)
             expected_summary = _summary_from_events(
                 manifest,
                 manifest_sha256,
@@ -1566,6 +1711,7 @@ def run_campaign(
             terminal["payload"]["status"] if terminal else "running"
         )
         if terminal is not None:
+            _validate_terminal_history(manifest, events, terminal)
             _verify_recorded_case_evidence(
                 manifest, events, evidence_dir, attestation
             )
