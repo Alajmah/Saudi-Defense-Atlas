@@ -242,7 +242,7 @@ Arabic/English editorial review remains a separate human activity over the froze
 - route/env ambiguity, missing credential, provider-construction failure, deterministic pre-invoker failure, and provider-boundary source/prompt drift occur before `case_invocation_started` and leave zero invocations plus no ambiguous start marker;
 - completed-but-unledgered case evidence is recovered without reinvocation only when a matching campaign invocation-start marker exists;
 - recovered case evidence must match the exact campaign attestation and manifest route, preserve all deterministic single-case driver provenance (provider/edge/boundary/fixture/terminology/checkpoint/claim-ceiling metadata) and the pending editorial placeholder, prove execution from the reviewed clean checkout, and prove exactly one attempted provider invocation;
-- every unrecorded case artifact state is preflighted before any fresh invocation, so later ambiguous/foreign evidence cannot consume entitlement on earlier cases;
+- aggregate-summary residue and every unrecorded case artifact state are preflighted before any fresh invocation, so stale/foreign terminal artifacts or later ambiguous evidence cannot consume entitlement on earlier cases;
 - recovered case evidence is deterministically replayed from its frozen input/raw-output bytes only after provider/model/model-version provenance is bound to the campaign/driver identity; any re-hashed trace, structural-result, or evidence tamper is rejected;
 - a standalone report without a campaign invocation-start marker is rejected as foreign/ambiguous evidence;
 - an invocation-start marker without terminal evidence blocks automatic retry;
