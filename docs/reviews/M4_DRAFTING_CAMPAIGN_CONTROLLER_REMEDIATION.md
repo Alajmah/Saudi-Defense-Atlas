@@ -507,3 +507,42 @@ Deterministic regressions cover mixed-case forms of all three reserved stems and
 These checks occur before recovery acceptance/replay. The validator independently rewrites and re-hashes each boundary field and proves all variants are rejected without provider activity.
 
 This remediation changes only path/provenance validation. It does not authorize or perform a live model call and does not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
+
+
+## Codex global-preflight / filesystem / editorial remediation after review 5441557042
+
+The fresh Codex review on exact head `8212055a2b9a5030749cb002b4dd3cde16b27c7d` identified three remaining long-running evidence defects.
+
+### DCC-PREFLIGHT-01 — later-case foreign/ambiguous evidence could consume earlier calls — REMEDIATED
+
+Before entering the fresh invocation loop, the controller now scans **every unrecorded manifest case** against the current hash-chained ledger:
+
+- a start marker without a complete report + sidecar fails closed;
+- an incomplete report/sidecar pair fails closed;
+- a complete report without the campaign's invocation-start marker is treated as foreign/ambiguous and fails closed;
+- a complete started report is fully verified before any new case can invoke.
+
+Deterministic regressions place both incomplete and complete-foreign evidence at `CASE-02` while `CASE-01` is still missing and prove **zero credential reads and zero provider calls**.
+
+### DCC-PATH-03 — Windows reserved device names could consume a call before artifact write failure — REMEDIATED
+
+Manifest validation now rejects, case-insensitively:
+
+- `CON`, `PRN`, `AUX`, `NUL`;
+- `COM1` through `COM9`;
+- `LPT1` through `LPT9`.
+
+The existing casefold collision and controller-artifact alias protections remain in force. Deterministic regressions cover representative upper/lower/mixed-case Windows device names.
+
+### DCC-EDITORIAL-01 — recovery could synthesize human editorial approval — REMEDIATED
+
+`verify_case_report()` now requires the exact single-case builder placeholder:
+
+- `status == "pending_human_review"`;
+- `mechanical_score is null`;
+- `notes is null`;
+- `assessment_dimensions` exactly equals the reviewed six-dimension list.
+
+Rehashed changes to status, score, notes, or dimension list are rejected before ledger adoption.
+
+These changes affect only preflight/filesystem/recovery evidence validation. They do not authorize or perform a live model call and do not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
