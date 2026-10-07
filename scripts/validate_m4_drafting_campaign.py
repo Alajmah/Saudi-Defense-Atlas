@@ -1493,6 +1493,70 @@ def main() -> int:
                 failures,
             )
 
+        # Deterministic single-case report metadata must remain bound to the
+        # reviewed driver/campaign; rehashed contradictory provenance is rejected.
+        fixed_metadata_tampers = (
+            (("provider",), "other-provider", "top-provider"),
+            (("provider_checkpoint_version",), "unexpected", "checkpoint"),
+            (("provider_edge", "driver"), "other-driver", "edge-driver"),
+            (("provider_edge", "resolved_base_url_source"), "flag", "route-source"),
+            (("provider_edge", "credential_source"), "other-secret", "credential-source"),
+            (("provider_edge", "transport"), "other-transport", "transport"),
+            (("provider_edge", "tools"), "enabled", "tools"),
+            (
+                ("provider_edge", "reasoning_configuration"),
+                {"thinking_type": "disabled"},
+                "reasoning",
+            ),
+            (
+                ("entitlement", "standing_extraction_entitlement_covers_drafting"),
+                True,
+                "standing-entitlement",
+            ),
+            (
+                ("drafting_boundary_versions", "extraction_adapter_at_build"),
+                "other-extraction-adapter",
+                "extraction-adapter",
+            ),
+            (("terminology", "registry_version"), "other-registry", "registry-version"),
+            (("fixture_version",), "other-fixture", "fixture-version"),
+            (
+                ("qualification", "served_model_checkpoint"),
+                "served-checkpoint",
+                "served-checkpoint",
+            ),
+            (("claim_ceiling",), "production-ready claim", "claim-ceiling"),
+        )
+        for path, value, label in fixed_metadata_tampers:
+            metadata_tamper = json.loads(report_path.read_text(encoding="utf-8"))
+            target = metadata_tamper
+            for key in path[:-1]:
+                target = target[key]
+            target[path[-1]] = value
+            metadata_path = evidence_dir / f"METADATA-{label}.json"
+            metadata_bytes = (
+                json.dumps(
+                    metadata_tamper,
+                    ensure_ascii=False,
+                    indent=2,
+                    allow_nan=False,
+                )
+                + "\n"
+            ).encode("utf-8")
+            metadata_path.write_bytes(metadata_bytes)
+            metadata_sha = hashlib.sha256(metadata_bytes).hexdigest()
+            metadata_path.with_name(metadata_path.name + ".sha256").write_text(
+                f"{metadata_sha}  {metadata_path.name}\n",
+                encoding="utf-8",
+            )
+            expect_gate(
+                f"rehashed fixed report metadata tamper {label}",
+                lambda p=metadata_path: verify_case_report(
+                    p, case1, manifest, attestation
+                ),
+                failures,
+            )
+
         # Codex boundary-version reconciliation: recovered evidence must
         # retain the frozen adapter/template provenance from the campaign manifest.
         for field, value, label in (
