@@ -429,3 +429,28 @@ This prevents a derived case report path from colliding with the frozen campaign
 The deterministic validator mutates a valid manifest to each reserved case ID and proves all three fail at manifest load.
 
 No live model call or drafting entitlement consumption occurred.
+
+
+## Codex checkout-provenance remediation after review 5432388300
+
+Codex's latest substantive review on `fe45e104d9da691ab9f01d484bd352fa7f8cee9d` identified one remaining recovery-provenance hole that still applied to the later branch head.
+
+### DCC-PROV-01 — recovered report did not prove its actual checkout provenance — REMEDIATED
+
+`verify_case_report()` already required the report's top-level `reviewed_head` to equal the campaign manifest, but it did not independently bind the report's own execution trace under `trial_context`.
+
+Recovery now additionally requires:
+
+- `trial_context.git_head == manifest.reviewed_head`;
+- `trial_context.tracked_worktree_clean is true`.
+
+A report that claims a different execution commit or a dirty tracked worktree is rejected even if an attacker or operator recomputes a matching unkeyed SHA-256 sidecar.
+
+The deterministic validator now creates valid campaign-bound evidence, independently rewrites and re-hashes:
+
+1. `trial_context.git_head` to another 40-hex commit; and
+2. `trial_context.tracked_worktree_clean` to `false`;
+
+and proves both are rejected by the recovery verifier without provider activity.
+
+This closes only evidence provenance. It does not authorize or perform a live model call and does not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
