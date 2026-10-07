@@ -455,6 +455,15 @@ def verify_case_report(
         raise CampaignGateError("case report version mismatch")
     if report.get("reviewed_head") != manifest["reviewed_head"]:
         raise CampaignGateError("case report reviewed-head mismatch")
+    trial_context = report.get("trial_context", {})
+    if trial_context.get("git_head") != manifest["reviewed_head"]:
+        raise CampaignGateError(
+            "case report execution git_head does not match the reviewed head"
+        )
+    if trial_context.get("tracked_worktree_clean") is not True:
+        raise CampaignGateError(
+            "case report execution provenance does not prove a clean tracked worktree"
+        )
     if report.get("requested_model") != manifest["model"]:
         raise CampaignGateError("case report model mismatch")
     expected_route_url = ZAI_ENDPOINT_URLS[manifest["route"]]
