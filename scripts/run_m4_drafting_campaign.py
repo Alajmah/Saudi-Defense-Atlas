@@ -32,6 +32,15 @@ from scripts.run_m4_drafting_trial import (  # noqa: E402
     DEFAULT_TERMINOLOGY,
     DRAFTING_ADAPTER_VERSION,
     EDITORIAL_DIMENSIONS,
+    EXTRACTION_ADAPTER_VERSION,
+    PROVIDER_EDGE_CREDENTIAL_SOURCE,
+    PROVIDER_EDGE_DRIVER,
+    PROVIDER_EDGE_TOOLS,
+    PROVIDER_EDGE_TRANSPORT,
+    PROVIDER_ID,
+    PROVIDER_MODEL_VERSION,
+    PROVIDER_REASONING_CONFIGURATION,
+    TRIAL_CLAIM_CEILING,
     DRAFT_PROMPT_TEMPLATE_ID,
     DRAFT_PROMPT_TEMPLATE_VERSION,
     draft_prompt_template_sha256,
@@ -487,20 +496,42 @@ def verify_case_report(
         raise CampaignGateError(
             "case report execution provenance does not prove a clean tracked worktree"
         )
+    if report.get("provider") != PROVIDER_ID:
+        raise CampaignGateError("case report provider identity mismatch")
+    if report.get("provider_checkpoint_version") is not None:
+        raise CampaignGateError("case report provider checkpoint placeholder drift")
     if report.get("requested_model") != manifest["model"]:
         raise CampaignGateError("case report model mismatch")
     boundary_versions = report.get("drafting_boundary_versions", {})
     if boundary_versions.get("drafting_adapter") != manifest["drafting_adapter_version"]:
         raise CampaignGateError("case report drafting adapter version mismatch")
+    if boundary_versions.get("extraction_adapter_at_build") != EXTRACTION_ADAPTER_VERSION:
+        raise CampaignGateError("case report extraction adapter provenance mismatch")
     if boundary_versions.get("prompt_template_version") != manifest["prompt_template_version"]:
         raise CampaignGateError("case report prompt template version mismatch")
     if boundary_versions.get("prompt_template_id") != DRAFT_PROMPT_TEMPLATE_ID:
         raise CampaignGateError("case report prompt template identity mismatch")
     if boundary_versions.get("prompt_template_sha256") != draft_prompt_template_sha256():
         raise CampaignGateError("case report prompt template hash mismatch")
+    provider_edge = report.get("provider_edge", {})
+    if provider_edge.get("driver") != PROVIDER_EDGE_DRIVER:
+        raise CampaignGateError("case report provider-edge driver mismatch")
+    if provider_edge.get("credential_source") != PROVIDER_EDGE_CREDENTIAL_SOURCE:
+        raise CampaignGateError("case report provider credential provenance mismatch")
+    if provider_edge.get("transport") != PROVIDER_EDGE_TRANSPORT:
+        raise CampaignGateError("case report provider transport mismatch")
+    if provider_edge.get("tools") != PROVIDER_EDGE_TOOLS:
+        raise CampaignGateError("case report provider tools provenance mismatch")
+    if provider_edge.get("reasoning_configuration") != PROVIDER_REASONING_CONFIGURATION:
+        raise CampaignGateError("case report reasoning configuration drift")
+    if provider_edge.get("resolved_base_url_source") != f"endpoint:{manifest['route']}":
+        raise CampaignGateError("case report resolved route source mismatch")
     expected_route_url = ZAI_ENDPOINT_URLS[manifest["route"]]
-    if report.get("entitlement", {}).get("attestation") != expected_attestation:
+    entitlement = report.get("entitlement", {})
+    if entitlement.get("attestation") != expected_attestation:
         raise CampaignGateError("case report entitlement attestation mismatch")
+    if entitlement.get("standing_extraction_entitlement_covers_drafting") is not False:
+        raise CampaignGateError("case report drafting entitlement scope drift")
     if (
         report.get("provider_edge", {}).get("requested_endpoint_mode")
         != manifest["route"]
@@ -509,7 +540,7 @@ def verify_case_report(
     if (
         report.get("provider_edge", {}).get("resolved_base_url")
         != expected_route_url
-        or report.get("entitlement", {}).get("resolved_base_url")
+        or entitlement.get("resolved_base_url")
         != expected_route_url
     ):
         raise CampaignGateError("case report resolved route mismatch")
@@ -567,6 +598,8 @@ def verify_case_report(
     if not isinstance(created_at, str) or not created_at:
         raise CampaignGateError("case report frozen context lacks created_at")
     fixture = load_fixture(_repo_path(case["fixture"]))
+    if report.get("fixture_version") != fixture.get("version"):
+        raise CampaignGateError("case report fixture version mismatch")
     try:
         expected_context = build_drafting_context_from_fixture(
             fixture, terminology, created_at
@@ -581,6 +614,8 @@ def verify_case_report(
             "case report frozen input does not match manifest-bound fixture reconstruction"
         )
     terminology_trace = report.get("terminology", {})
+    if terminology_trace.get("registry_version") != terminology.get("version"):
+        raise CampaignGateError("case report terminology registry version mismatch")
     if terminology_trace.get("registry_acceptance_sha256") != registry_sha:
         raise CampaignGateError("case report terminology registry digest mismatch")
     if terminology_trace.get("delivery_payload_sha256") != delivery_sha:
@@ -598,6 +633,10 @@ def verify_case_report(
         )
 
     qualification = report.get("qualification", {})
+    if qualification.get("served_model_checkpoint") != "unknown":
+        raise CampaignGateError("case report served model checkpoint placeholder drift")
+    if report.get("claim_ceiling") != TRIAL_CLAIM_CEILING:
+        raise CampaignGateError("case report claim ceiling drift")
     if (
         qualification.get("editorial_quality_qualified") is not False
         or qualification.get("production_model_pipeline_qualified") is not False
@@ -650,7 +689,7 @@ def verify_case_report(
             )
         ):
             raise CampaignGateError("case report structural provenance is incomplete")
-        if trace_data.get("provider") != "zai-openai-compatible-api":
+        if trace_data.get("provider") != PROVIDER_ID:
             raise CampaignGateError(
                 "case report structural provider does not match the reviewed driver"
             )
@@ -658,7 +697,7 @@ def verify_case_report(
             raise CampaignGateError(
                 "case report structural model does not match the campaign manifest"
             )
-        if trace_data.get("model_version") != "provider-managed-unknown":
+        if trace_data.get("model_version") != PROVIDER_MODEL_VERSION:
             raise CampaignGateError(
                 "case report structural model version does not match the reviewed driver"
             )
