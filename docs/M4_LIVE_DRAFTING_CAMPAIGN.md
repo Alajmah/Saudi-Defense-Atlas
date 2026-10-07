@@ -55,7 +55,7 @@ The manifest is canonical JSON for hashing purposes and contains exactly:
 - repository-relative terminology file path + SHA-256;
 - ordered cases, each carrying `case_id`, repository-relative fixture path, and fixture SHA-256.
 
-Unknown manifest keys are rejected. Case IDs that alias controller artifact stems (`campaign-manifest`, `campaign-summary`, `campaign-ledger`) are reserved and rejected. Absolute/out-of-repository fixture or terminology paths are rejected. The terminology registry and every case fixture must also be **git-tracked** in the reviewed checkout; an untracked local corpus file is not accepted merely because it is under the repository root. Every bound file hash is recomputed before the campaign begins.
+Unknown manifest keys are rejected. Case IDs that alias controller artifact stems (`campaign-manifest`, `campaign-summary`, `campaign-ledger`) are reserved and rejected **case-insensitively**, and all case IDs must also be unique under Unicode `casefold()` so derived report paths cannot collide on case-insensitive filesystems. Absolute/out-of-repository fixture or terminology paths are rejected. The terminology registry and every case fixture must also be **git-tracked** in the reviewed checkout; an untracked local corpus file is not accepted merely because it is under the repository root. Every bound file hash is recomputed before the campaign begins.
 
 The invocation ceiling must equal the number of frozen cases. There is no retry authority, so any larger ceiling would be unused authority and any smaller ceiling could not cover the frozen corpus.
 
@@ -143,7 +143,7 @@ If the process dies in the narrower interval **after** the single-case report is
 1. requires the matching prior `case_invocation_started` event; a complete report with no campaign start marker is foreign/ambiguous evidence and is rejected;
 2. finds the report + sidecar;
 3. verifies their hash;
-4. verifies report version, top-level reviewed head, **`trial_context.git_head == reviewed_head` and `trial_context.tracked_worktree_clean == true`**, model, fixture hash, terminology hash, **`invocation.attempted == true` and `invocation.count == 1`**, exact campaign attestation, requested route, and both resolved-route fields against the manifest's official route URL;
+4. verifies report version, top-level reviewed head, **`trial_context.git_head == reviewed_head` and `trial_context.tracked_worktree_clean == true`**, model, **drafting adapter version and prompt-template version against the frozen manifest plus the reviewed prompt template ID/hash**, fixture hash, terminology hash, **`invocation.attempted == true` and `invocation.count == 1`**, exact campaign attestation, requested route, and both resolved-route fields against the manifest's official route URL;
 5. recomputes the frozen rendered-input/raw-output hashes, reconstructs the context and terminology-delivery blocks, and independently rebuilds the expected context/rendered input from the manifest-bound fixture + terminology registry + frozen context `created_at`; exact equality is required even when the original provider execution failed before producing a structural result;
 6. when a structural result exists, first requires its `model_trace` to match the reviewed single-case driver identity (`provider = zai-openai-compatible-api`, `model = manifest.model`, `model_version = provider-managed-unknown`), then **replays the deterministic bilingual-drafting boundary** from the frozen raw response using those bound trace values and the original structural timestamps; the replayed structural run must exactly equal the stored structural result, and candidate-only/no-publication/no-canonical authority must still hold;
 7. records the case as `recovered_without_invocation: true`;
@@ -241,7 +241,7 @@ Arabic/English editorial review remains a separate human activity over the froze
 - terminal rerun performs zero new calls while re-verifying every referenced per-case report against the terminal ledger;
 - route/env ambiguity, missing credential, provider-construction failure, deterministic pre-invoker failure, and provider-boundary source/prompt drift occur before `case_invocation_started` and leave zero invocations plus no ambiguous start marker;
 - completed-but-unledgered case evidence is recovered without reinvocation only when a matching campaign invocation-start marker exists;
-- recovered case evidence must match the exact campaign attestation and manifest route, prove execution from the reviewed clean checkout, and prove exactly one attempted provider invocation;
+- recovered case evidence must match the exact campaign attestation and manifest route, preserve the frozen drafting adapter/prompt-template provenance, prove execution from the reviewed clean checkout, and prove exactly one attempted provider invocation;
 - recovered case evidence is deterministically replayed from its frozen input/raw-output bytes only after provider/model/model-version provenance is bound to the campaign/driver identity; any re-hashed trace, structural-result, or evidence tamper is rejected;
 - a standalone report without a campaign invocation-start marker is rejected as foreign/ambiguous evidence;
 - an invocation-start marker without terminal evidence blocks automatic retry;
