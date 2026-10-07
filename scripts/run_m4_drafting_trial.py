@@ -75,6 +75,24 @@ DEFAULT_FIXTURE = ROOT / "tests" / "fixtures" / "m4-drafting-trial-v0.1.json"
 DEFAULT_TERMINOLOGY = ROOT / "data" / "terminology" / "bilingual-terminology-v0.1.json"
 
 REPORT_VERSION = "m4-drafting-live-trial-v0.4"
+PROVIDER_ID = "zai-openai-compatible-api"
+PROVIDER_MODEL_VERSION = "provider-managed-unknown"
+PROVIDER_EDGE_DRIVER = "zai-openai-compatible-http"
+PROVIDER_EDGE_CREDENTIAL_SOURCE = "ZAI_API_KEY environment variable"
+PROVIDER_EDGE_TRANSPORT = "python-stdlib-urllib"
+PROVIDER_EDGE_TOOLS = "none"
+PROVIDER_REASONING_CONFIGURATION = {
+    "thinking_type": "enabled",
+    "reasoning_effort": "max",
+    "explicitly_pinned": True,
+}
+TRIAL_CLAIM_CEILING = (
+    "Bounded evidence from one live invocation through the reviewed "
+    "drafting boundary on a synthetic fixture. No production-quality, "
+    "reliability, scalability, cost, or publication inference is "
+    "supported. Editorial quality is unqualified until independent "
+    "human review completes."
+)
 EDITORIAL_DIMENSIONS = [
     "Arabic fluency",
     "English fluency",
@@ -345,22 +363,18 @@ def build_trial_report(
     return {
         "report_version": REPORT_VERSION,
         "fixture_version": fixture["version"],
-        "provider": "zai-openai-compatible-api",
+        "provider": PROVIDER_ID,
         "requested_model": requested_model,
         "provider_checkpoint_version": None,
         "provider_edge": {
-            "driver": "zai-openai-compatible-http",
+            "driver": PROVIDER_EDGE_DRIVER,
             "resolved_base_url": base_url,
             "resolved_base_url_source": base_url_source,
             "requested_endpoint_mode": endpoint_arg,
-            "credential_source": "ZAI_API_KEY environment variable",
-            "transport": "python-stdlib-urllib",
-            "tools": "none",
-            "reasoning_configuration": {
-                "thinking_type": "enabled",
-                "reasoning_effort": "max",
-                "explicitly_pinned": True,
-            },
+            "credential_source": PROVIDER_EDGE_CREDENTIAL_SOURCE,
+            "transport": PROVIDER_EDGE_TRANSPORT,
+            "tools": PROVIDER_EDGE_TOOLS,
+            "reasoning_configuration": dict(PROVIDER_REASONING_CONFIGURATION),
         },
         "entitlement": {
             "attestation": entitlement_attestation,
@@ -416,13 +430,7 @@ def build_trial_report(
             "bounded_evidence_only": True,
             "served_model_checkpoint": "unknown",
         },
-        "claim_ceiling": (
-            "Bounded evidence from one live invocation through the reviewed "
-            "drafting boundary on a synthetic fixture. No production-quality, "
-            "reliability, scalability, cost, or publication inference is "
-            "supported. Editorial quality is unqualified until independent "
-            "human review completes."
-        ),
+        "claim_ceiling": TRIAL_CLAIM_CEILING,
     }
 
 
@@ -539,9 +547,9 @@ def run_trial(
     rendered_prompt, _ = prepare_draft_input(context, terminology)
 
     trace = DraftModelTrace(
-        provider="zai-openai-compatible-api",
+        provider=PROVIDER_ID,
         model=args.model,
-        model_version="provider-managed-unknown",
+        model_version=PROVIDER_MODEL_VERSION,
     )
     api_key = require_api_key()
     invoke = invoke_factory(
