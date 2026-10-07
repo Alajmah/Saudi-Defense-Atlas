@@ -190,11 +190,15 @@ def main() -> int:
             failures,
         )
 
-        # DCC-PATH-01: case IDs may not alias controller artifact stems.
+        # DCC-PATH-01: case IDs may not alias controller artifact stems,
+        # including case-insensitive aliases on Windows/default macOS filesystems.
         for reserved_case_id in (
             "campaign-manifest",
             "campaign-summary",
             "campaign-ledger",
+            "Campaign-Manifest",
+            "Campaign-Summary",
+            "Campaign-Ledger",
         ):
             reserved = json.loads(manifest_path.read_text(encoding="utf-8"))
             reserved["cases"][0]["case_id"] = reserved_case_id
@@ -208,6 +212,20 @@ def main() -> int:
                 lambda p=reserved_path: load_manifest(p),
                 failures,
             )
+
+        casefold_collision = json.loads(manifest_path.read_text(encoding="utf-8"))
+        casefold_collision["cases"][0]["case_id"] = "CASE-COLLISION"
+        casefold_collision["cases"][1]["case_id"] = "case-collision"
+        casefold_collision_path = td / "casefold-collision.json"
+        casefold_collision_path.write_text(
+            json.dumps(casefold_collision, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        expect_gate(
+            "case-insensitive case_id collision",
+            lambda: load_manifest(casefold_collision_path),
+            failures,
+        )
 
         tampered = json.loads(manifest_path.read_text(encoding="utf-8"))
         tampered["cases"][0]["fixture_sha256"] = "0" * 64
@@ -1361,6 +1379,40 @@ def main() -> int:
             expect_gate(
                 f"rehashed checkout provenance tamper {label}",
                 lambda p=checkout_path: verify_case_report(
+                    p, case1, manifest, attestation
+                ),
+                failures,
+            )
+
+        # Codex boundary-version reconciliation: recovered evidence must
+        # retain the frozen adapter/template provenance from the campaign manifest.
+        for field, value, label in (
+            ("drafting_adapter", "other-adapter", "wrong-adapter"),
+            ("prompt_template_version", "v999", "wrong-template-version"),
+            ("prompt_template_id", "other-template", "wrong-template-id"),
+            ("prompt_template_sha256", "0" * 64, "wrong-template-sha"),
+        ):
+            boundary_tamper = json.loads(report_path.read_text(encoding="utf-8"))
+            boundary_tamper["drafting_boundary_versions"][field] = value
+            boundary_path = evidence_dir / f"BOUNDARY-{label}.json"
+            boundary_bytes = (
+                json.dumps(
+                    boundary_tamper,
+                    ensure_ascii=False,
+                    indent=2,
+                    allow_nan=False,
+                )
+                + "\n"
+            ).encode("utf-8")
+            boundary_path.write_bytes(boundary_bytes)
+            boundary_sha = hashlib.sha256(boundary_bytes).hexdigest()
+            boundary_path.with_name(boundary_path.name + ".sha256").write_text(
+                f"{boundary_sha}  {boundary_path.name}\n",
+                encoding="utf-8",
+            )
+            expect_gate(
+                f"rehashed drafting boundary provenance tamper {label}",
+                lambda p=boundary_path: verify_case_report(
                     p, case1, manifest, attestation
                 ),
                 failures,
