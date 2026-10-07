@@ -1332,6 +1332,40 @@ def main() -> int:
                 failures,
             )
 
+        # Codex checkout-provenance reconciliation: recovery must bind the
+        # report's actual execution checkout to the reviewed clean source state.
+        for field, value, label in (
+            ("git_head", "b" * 40, "wrong-git-head"),
+            ("tracked_worktree_clean", False, "dirty-worktree"),
+        ):
+            checkout_tamper = json.loads(report_path.read_text(encoding="utf-8"))
+            checkout_tamper["trial_context"][field] = value
+            checkout_path = evidence_dir / f"CHECKOUT-{label}.json"
+            checkout_bytes = (
+                json.dumps(
+                    checkout_tamper,
+                    ensure_ascii=False,
+                    indent=2,
+                    allow_nan=False,
+                )
+                + "\n"
+            ).encode("utf-8")
+            checkout_path.write_bytes(checkout_bytes)
+            checkout_sha = hashlib.sha256(checkout_bytes).hexdigest()
+            checkout_path.with_name(
+                checkout_path.name + ".sha256"
+            ).write_text(
+                f"{checkout_sha}  {checkout_path.name}\n",
+                encoding="utf-8",
+            )
+            expect_gate(
+                f"rehashed checkout provenance tamper {label}",
+                lambda p=checkout_path: verify_case_report(
+                    p, case1, manifest, attestation
+                ),
+                failures,
+            )
+
         # DCC-07: even a tampered report with a freshly recomputed sidecar must
         # fail deterministic recovery replay.
         tampered_report = json.loads(report_path.read_text(encoding="utf-8"))
