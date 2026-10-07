@@ -454,3 +454,28 @@ The deterministic validator now creates valid campaign-bound evidence, independe
 and proves both are rejected by the recovery verifier without provider activity.
 
 This closes only evidence provenance. It does not authorize or perform a live model call and does not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
+
+
+## Codex model-trace remediation after review 5437338411
+
+The fresh Codex review on exact head `6a016854bf9bf0bb05f20b96e708429b84d3f756` identified one remaining recovery-provenance defect.
+
+### DCC-TRACE-01 — replay trusted a report-controlled model trace — REMEDIATED
+
+Before deterministic structural replay, `verify_case_report()` now requires the stored structural `model_trace` to match the reviewed campaign/driver identity exactly:
+
+- `provider == "zai-openai-compatible-api"`;
+- `model == manifest["model"]`;
+- `model_version == "provider-managed-unknown"`.
+
+Only after those checks pass is the trace used to reconstruct `DraftModelTrace` for deterministic replay.
+
+The validator creates valid campaign evidence, independently rewrites and re-hashes each of:
+
+1. provider;
+2. model;
+3. model version;
+
+and proves every variant is rejected before recovery acceptance and without provider activity.
+
+This closes evidence provenance only. It does not authorize or perform a live model call and does not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
