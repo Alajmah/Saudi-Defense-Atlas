@@ -607,6 +607,18 @@ def verify_case_report(
             )
         ):
             raise CampaignGateError("case report structural provenance is incomplete")
+        if trace_data.get("provider") != "zai-openai-compatible-api":
+            raise CampaignGateError(
+                "case report structural provider does not match the reviewed driver"
+            )
+        if trace_data.get("model") != manifest["model"]:
+            raise CampaignGateError(
+                "case report structural model does not match the campaign manifest"
+            )
+        if trace_data.get("model_version") != "provider-managed-unknown":
+            raise CampaignGateError(
+                "case report structural model version does not match the reviewed driver"
+            )
         clock_values = iter([started_at, completed_at])
 
         def replay_clock() -> str:
