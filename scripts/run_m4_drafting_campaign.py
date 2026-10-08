@@ -199,12 +199,12 @@ def load_manifest(path: Path) -> tuple[dict[str, Any], str]:
     if not isinstance(payload["model"], str) or not payload["model"].strip():
         raise CampaignGateError("model must be non-empty")
     if (
-        not isinstance(payload["timeout_seconds"], int)
+        type(payload["timeout_seconds"]) is not int
         or payload["timeout_seconds"] < 1
     ):
         raise CampaignGateError("timeout_seconds must be a positive integer")
     if (
-        not isinstance(payload["max_invocations"], int)
+        type(payload["max_invocations"]) is not int
         or payload["max_invocations"] < 1
     ):
         raise CampaignGateError("max_invocations must be a positive integer")
@@ -797,7 +797,11 @@ def verify_case_report(
         raise CampaignGateError("case report terminology hash mismatch")
     invocation = report.get("invocation", {})
     invocation_count = invocation.get("count")
-    if invocation.get("attempted") is not True or invocation_count != 1:
+    if (
+        invocation.get("attempted") is not True
+        or type(invocation_count) is not int
+        or invocation_count != 1
+    ):
         raise CampaignGateError(
             "campaign case report must prove exactly one attempted provider invocation"
         )
