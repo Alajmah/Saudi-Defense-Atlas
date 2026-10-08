@@ -186,7 +186,7 @@ Every event carries:
 - timestamp;
 - its own SHA-256 over the canonical event material.
 
-Ledger replay verifies the complete chain before additional provider work. On every nonterminal resume, all already-recorded case-terminal events are also re-closed over their immutable report/sidecar and deterministic `verify_case_report()` boundary **before any fresh provider invocation**. A missing/corrupted recorded case therefore stops the campaign without spending additional entitlement.
+Ledger replay verifies the complete chain before additional provider work. On every nonterminal resume, the controller also validates semantic history **before any fresh provider invocation**: only known nonterminal event types are allowed; invocation-start and case-terminal events must form ordered manifest prefixes; case results must follow their matching start markers; at most one unmatched start marker may exist and it must be the final event; and any recorded execution failure must be the final recorded/final ledger event awaiting terminalization. All already-recorded case-terminal events are then re-closed over their immutable report/sidecar and deterministic `verify_case_report()` boundary **before any fresh provider invocation**. A missing/corrupted recorded case therefore stops the campaign without spending additional entitlement.
 
 If a `case_execution_failure` record exists but the process died before `campaign_stopped` was appended, resume verifies that failure evidence, finalizes `stopped_execution_failure`, and returns without invoking later cases. Any later case-terminal record after an execution failure is rejected as invalid campaign history.
 
@@ -248,7 +248,7 @@ Arabic/English editorial review remains a separate human activity over the froze
 - recovered case evidence is deterministically replayed from its frozen input/raw-output bytes only after provider/model/model-version provenance is bound to the campaign/driver identity; any re-hashed trace, structural-result, or evidence tamper is rejected;
 - a standalone report without a campaign invocation-start marker is rejected as foreign/ambiguous evidence;
 - an invocation-start marker without terminal evidence blocks automatic retry;
-- ledger tampering is rejected before more provider activity;
+- ledger hash tampering and semantic nonterminal-history tampering are rejected before more provider activity, including unknown event types and out-of-order case starts;
 - terminal summary byte/sidecar/semantic tampering is rejected before provider activity;
 - terminal ledger semantics are validated independently of the hash chain, including rejection of `campaign_completed` without full case coverage and `stopped_execution_failure` without a matching failed case;
 - one deterministic per-manifest checkout lock excludes the same manifest across different evidence directories; any pre-existing lock—including a stale/dead-PID-shaped residue—is fail-closed and never auto-reclaimed;
