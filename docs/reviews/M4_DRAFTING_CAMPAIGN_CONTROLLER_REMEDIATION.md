@@ -622,3 +622,32 @@ Manifest validation now rejects any case ID for which the longest derived eviden
 Because the allowed case-ID alphabet is ASCII-only, this directly bounds the report/sidecar component length across the supported portable filesystem contract. A 244-character case ID is regression-tested and rejected before any campaign launch activity.
 
 These changes do not authorize or perform a live model call and do not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
+
+
+## Codex nonterminal-history remediation after review 5441965831
+
+The fresh Codex review on exact head `d733c0533d35768dae9d88208d852526b8ec80a4` identified one remaining pre-provider semantic-ledger gap.
+
+### DCC-NONTERM-01 — nonterminal ledger semantics were not validated before fresh provider work — REMEDIATED
+
+A hash-valid resumed ledger is now semantically validated before recorded-evidence reconciliation, preflight, credential access, or any fresh invocation.
+
+For nonterminal history the controller requires:
+
+- only `campaign_started`, `case_invocation_started`, `case_completed`, and `case_execution_failure` event types;
+- all referenced case IDs to belong to the frozen manifest;
+- invocation-start history to be an ordered manifest prefix;
+- case-terminal history to be an ordered manifest prefix;
+- no case result without a matching prior start marker;
+- at most one unmatched invocation-start marker, and only as the final ledger event;
+- every recorded case terminal event to follow its matching start event;
+- at most one execution failure, as the final recorded case and final ledger event pending `campaign_stopped` terminalization.
+
+Deterministic regressions now construct validly hash-chained nonterminal ledgers containing:
+
+1. an unknown event type; and
+2. an out-of-order `CASE-02` start before `CASE-01`;
+
+and prove both are rejected before credential access and provider activity.
+
+This closes resume semantics only. It does not authorize or perform a live model call and does not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
