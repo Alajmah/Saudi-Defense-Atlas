@@ -494,6 +494,93 @@ def main() -> int:
                 failures,
             )
 
+    # Codex nonterminal-history reconciliation: a hash-valid resume ledger
+    # must be semantically valid before any fresh provider activity.
+    for label, extra_event_type, extra_payload in (
+        (
+            "unknown-event",
+            "unexpected_event",
+            {"note": "synthetic invalid history"},
+        ),
+        (
+            "out-of-order-start",
+            "case_invocation_started",
+            {
+                "case_id": "CASE-02",
+                "fixture": repo_rel(DEFAULT_FIXTURE),
+                "fixture_sha256": _file_sha256(DEFAULT_FIXTURE),
+                "conservative_call_budget_charge": 1,
+            },
+        ),
+    ):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            td = Path(tmpdir)
+            manifest_path = td / "manifest.json"
+            loaded_manifest = write_manifest(manifest_path)
+            loaded, manifest_sha = load_manifest(manifest_path)
+            evidence_dir = td / "evidence"
+            evidence_dir.mkdir(parents=True, exist_ok=True)
+            ledger_path = evidence_dir / "campaign-ledger.jsonl"
+            attestation = attestation_for(manifest_path)
+            append_event(
+                ledger_path,
+                campaign_id=loaded["campaign_id"],
+                manifest_sha256=manifest_sha,
+                event_type="campaign_started",
+                payload={
+                    "reviewed_head": loaded["reviewed_head"],
+                    "route": loaded["route"],
+                    "entitlement_id": loaded["entitlement_id"],
+                    "entitlement_attestation_sha256": hashlib.sha256(
+                        attestation.encode("utf-8")
+                    ).hexdigest(),
+                    "model": loaded["model"],
+                    "max_invocations": loaded["max_invocations"],
+                    "case_count": len(loaded["cases"]),
+                },
+                clock=fixed_clock,
+            )
+            append_event(
+                ledger_path,
+                campaign_id=loaded["campaign_id"],
+                manifest_sha256=manifest_sha,
+                event_type=extra_event_type,
+                payload=extra_payload,
+                clock=fixed_clock,
+            )
+            nonterminal_calls: list[str] = []
+            credential_reads: list[int] = []
+
+            def nonterminal_key() -> str:
+                credential_reads.append(1)
+                return "test-key"
+
+            def nonterminal_factory(**kwargs):
+                def invoke(prompt: str) -> str:
+                    nonterminal_calls.append(prompt)
+                    return raw_good
+                return invoke
+
+            expect_gate(
+                f"invalid nonterminal history {label}",
+                lambda: run_test_campaign(
+                    manifest_path=manifest_path,
+                    evidence_dir=evidence_dir,
+                    entitlement_attestation=attestation,
+                    require_api_key=nonterminal_key,
+                    invoke_factory=nonterminal_factory,
+                    git_state_provider=fixed_git_state,
+                    env_url_provider=empty_env,
+                    clock=fixed_clock,
+                ),
+                failures,
+            )
+            expect(
+                not credential_reads and not nonterminal_calls,
+                f"invalid nonterminal history {label} reached credentials/provider",
+                failures,
+            )
+
     # Complete campaign: first output is structurally rejected, second accepted;
     # rejection is evidence and does not stop the campaign.
     with tempfile.TemporaryDirectory() as tmpdir:
