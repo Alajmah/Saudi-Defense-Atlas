@@ -75,6 +75,24 @@ DEFAULT_FIXTURE = ROOT / "tests" / "fixtures" / "m4-drafting-trial-v0.1.json"
 DEFAULT_TERMINOLOGY = ROOT / "data" / "terminology" / "bilingual-terminology-v0.1.json"
 
 REPORT_VERSION = "m4-drafting-live-trial-v0.4"
+PROVIDER_ID = "zai-openai-compatible-api"
+PROVIDER_MODEL_VERSION = "provider-managed-unknown"
+PROVIDER_EDGE_DRIVER = "zai-openai-compatible-http"
+PROVIDER_EDGE_CREDENTIAL_SOURCE = "ZAI_API_KEY environment variable"
+PROVIDER_EDGE_TRANSPORT = "python-stdlib-urllib"
+PROVIDER_EDGE_TOOLS = "none"
+PROVIDER_REASONING_CONFIGURATION = {
+    "thinking_type": "enabled",
+    "reasoning_effort": "max",
+    "explicitly_pinned": True,
+}
+TRIAL_CLAIM_CEILING = (
+    "Bounded evidence from one live invocation through the reviewed "
+    "drafting boundary on a synthetic fixture. No production-quality, "
+    "reliability, scalability, cost, or publication inference is "
+    "supported. Editorial quality is unqualified until independent "
+    "human review completes."
+)
 EDITORIAL_DIMENSIONS = [
     "Arabic fluency",
     "English fluency",
@@ -117,7 +135,7 @@ def check_entitlement(attestation: str) -> str:
     value = attestation.strip()
     if not value:
         raise TrialGateError("--entitlement-attestation must be non-empty")
-    return value
+    return attestation
 
 
 def check_route_args(
@@ -217,6 +235,7 @@ def execute_draft_invocation(
     terminology: dict,
     model_trace: DraftModelTrace,
     invoke_fn: Callable[[str], str],
+    before_invoke: Callable[[str], None] | None = None,
 ) -> tuple[dict[str, Any] | None, str | None, str | None, float, int]:
     """Run one invocation; return (draft_run, error, raw_output, elapsed, attempts).
 
@@ -230,6 +249,8 @@ def execute_draft_invocation(
 
     def capturing(prompt: str) -> str:
         nonlocal attempts
+        if before_invoke is not None:
+            before_invoke(prompt)
         attempts += 1
         result = invoke_fn(prompt)
         raw_holder.append(result)
@@ -246,7 +267,10 @@ def execute_draft_invocation(
             invoke=capturing,
         )
     except Exception as exc:  # noqa: BLE001 — failure must produce a report
-        error = str(exc)[:512]
+        message = str(exc)
+        if not message:
+            message = f"{type(exc).__name__}: invocation failed"
+        error = message[:512]
     elapsed = time.monotonic() - started
     raw_output = raw_holder[0] if raw_holder else None
     return draft_run, error, raw_output, elapsed, attempts
@@ -339,22 +363,18 @@ def build_trial_report(
     return {
         "report_version": REPORT_VERSION,
         "fixture_version": fixture["version"],
-        "provider": "zai-openai-compatible-api",
+        "provider": PROVIDER_ID,
         "requested_model": requested_model,
         "provider_checkpoint_version": None,
         "provider_edge": {
-            "driver": "zai-openai-compatible-http",
+            "driver": PROVIDER_EDGE_DRIVER,
             "resolved_base_url": base_url,
             "resolved_base_url_source": base_url_source,
             "requested_endpoint_mode": endpoint_arg,
-            "credential_source": "ZAI_API_KEY environment variable",
-            "transport": "python-stdlib-urllib",
-            "tools": "none",
-            "reasoning_configuration": {
-                "thinking_type": "enabled",
-                "reasoning_effort": "max",
-                "explicitly_pinned": True,
-            },
+            "credential_source": PROVIDER_EDGE_CREDENTIAL_SOURCE,
+            "transport": PROVIDER_EDGE_TRANSPORT,
+            "tools": PROVIDER_EDGE_TOOLS,
+            "reasoning_configuration": dict(PROVIDER_REASONING_CONFIGURATION),
         },
         "entitlement": {
             "attestation": entitlement_attestation,
@@ -410,13 +430,7 @@ def build_trial_report(
             "bounded_evidence_only": True,
             "served_model_checkpoint": "unknown",
         },
-        "claim_ceiling": (
-            "Bounded evidence from one live invocation through the reviewed "
-            "drafting boundary on a synthetic fixture. No production-quality, "
-            "reliability, scalability, cost, or publication inference is "
-            "supported. Editorial quality is unqualified until independent "
-            "human review completes."
-        ),
+        "claim_ceiling": TRIAL_CLAIM_CEILING,
     }
 
 
@@ -497,6 +511,7 @@ def run_trial(
     require_api_key: Callable[[], str],
     invoke_factory: Callable[..., Callable[[str], str]] = zai_invoker,
     created_at_fn: Callable[[], str] = _utc_now,
+    before_invoke: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """The full launch sequence: gates in order, one invocation, report write.
 
@@ -504,6 +519,14 @@ def run_trial(
     every pre-invocation gate passes, so any gate refusal — including a
     pre-existing report or sidecar — means zero credential reads, zero
     provider constructions, and zero invoker calls (DTD-02RRR).
+
+    before_invoke is an optional orchestration-only hook passed into the
+    capturing invoker with the exact rendered prompt and called immediately
+    before the actual provider closure.
+    All build_bilingual_draft_run deterministic work therefore remains before
+    the marker. The hook carries no model, publication, or mutation authority;
+    campaign control uses it only to freeze the conservative invocation-start
+    ledger marker at the narrowest provider-call boundary.
     """
 
     if args.timeout_seconds < 1:
@@ -524,9 +547,9 @@ def run_trial(
     rendered_prompt, _ = prepare_draft_input(context, terminology)
 
     trace = DraftModelTrace(
-        provider="zai-openai-compatible-api",
+        provider=PROVIDER_ID,
         model=args.model,
-        model_version="provider-managed-unknown",
+        model_version=PROVIDER_MODEL_VERSION,
     )
     api_key = require_api_key()
     invoke = invoke_factory(
@@ -535,13 +558,13 @@ def run_trial(
         base_url=base_url,
         timeout_seconds=args.timeout_seconds,
     )
-
     draft_run, execution_error, raw_output, elapsed, invocation_count = (
         execute_draft_invocation(
             context=context,
             terminology=terminology,
             model_trace=trace,
             invoke_fn=invoke,
+            before_invoke=before_invoke,
         )
     )
 

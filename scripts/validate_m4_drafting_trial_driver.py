@@ -176,8 +176,14 @@ def main() -> int:
     # Entitlement
     expect_gate_error("empty attestation", lambda: check_entitlement(""), failures)
     expect_gate_error("blank attestation", lambda: check_entitlement("   "), failures)
+    exact_attestation = "  non-empty exact attestation  "
     try:
-        check_entitlement("  non-empty  ")
+        preserved_attestation = check_entitlement(exact_attestation)
+        expect(
+            preserved_attestation == exact_attestation,
+            "valid attestation bytes/text were normalized",
+            failures,
+        )
     except TrialGateError:
         failures.append("valid attestation was rejected")
 
@@ -225,6 +231,31 @@ def main() -> int:
     except TrialGateError:
         failures.append("route-bound attestation was rejected")
 
+    # --- DCC-10: before_invoke fires only at the actual provider boundary ---
+    preboundary_hooks: list[str] = []
+    preboundary_calls: list[str] = []
+    invalid_context = copy.deepcopy(context)
+    invalid_context["claims"][0]["predicate_id"] = ""
+
+    def preboundary_hook(prompt: str) -> None:
+        preboundary_hooks.append(prompt)
+
+    def preboundary_invoke(prompt: str) -> str:
+        preboundary_calls.append(prompt)
+        return raw_good
+
+    bad_run, bad_error, bad_raw, _, bad_attempts = execute_draft_invocation(
+        context=invalid_context,
+        terminology=terminology,
+        model_trace=trace,
+        invoke_fn=preboundary_invoke,
+        before_invoke=preboundary_hook,
+    )
+    expect(bad_run is None and bad_error is not None, "pre-invoker boundary failure was not captured", failures)
+    expect(bad_raw is None and bad_attempts == 0, "pre-invoker failure consumed an attempt", failures)
+    expect(not preboundary_hooks, "before_invoke fired before the actual provider boundary", failures)
+    expect(not preboundary_calls, "pre-invoker boundary failure reached provider", failures)
+
     # --- DTD-04R: orchestration path with failing invoker ---
     failing_calls: list[str] = []
 
@@ -232,12 +263,15 @@ def main() -> int:
         failing_calls.append(prompt)
         raise RuntimeError("Z.ai API returned HTTP 500: internal error")
 
+    failing_hooks: list[str] = []
+
     fail_run, fail_error, fail_raw, fail_elapsed, fail_attempts = (
         execute_draft_invocation(
             context=context,
             terminology=terminology,
             model_trace=trace,
             invoke_fn=failing_invoke,
+            before_invoke=lambda prompt: failing_hooks.append(prompt),
         )
     )
     expect(fail_run is None, "failing invoker produced a draft run", failures)
@@ -250,6 +284,44 @@ def main() -> int:
         f"failing invocation count {fail_attempts} != invoker-observed {len(failing_calls)}",
         failures,
     )
+    expect(
+        len(failing_hooks) == 1,
+        f"failing invocation hook count {len(failing_hooks)} != 1",
+        failures,
+    )
+    expect(
+        failing_hooks == failing_calls,
+        "failing invocation hook did not receive the exact provider prompt",
+        failures,
+    )
+
+    # DCC-ERR-01: provider exceptions with an empty string representation still
+    # produce a non-empty, bounded execution diagnostic.
+    empty_error_calls: list[str] = []
+
+    def empty_error_invoke(prompt: str) -> str:
+        empty_error_calls.append(prompt)
+        raise TimeoutError()
+
+    empty_run, empty_error, empty_raw, _, empty_attempts = execute_draft_invocation(
+        context=context,
+        terminology=terminology,
+        model_trace=trace,
+        invoke_fn=empty_error_invoke,
+    )
+    expect(empty_run is None and empty_raw is None, "empty-error invoker produced evidence", failures)
+    expect(
+        empty_attempts == len(empty_error_calls) == 1,
+        "empty-error provider path did not preserve one-attempt semantics",
+        failures,
+    )
+    expect(
+        isinstance(empty_error, str)
+        and bool(empty_error)
+        and "TimeoutError" in empty_error,
+        f"empty exception message was not normalized: {empty_error!r}",
+        failures,
+    )
 
     # --- Success path through the orchestration ---
     ok_calls: list[str] = []
@@ -258,17 +330,29 @@ def main() -> int:
         ok_calls.append(prompt)
         return raw_good
 
+    ok_hooks: list[str] = []
     ok_run, ok_error, ok_raw, ok_elapsed, ok_attempts = execute_draft_invocation(
         context=context,
         terminology=terminology,
         model_trace=trace,
         invoke_fn=fake_invoke,
+        before_invoke=lambda prompt: ok_hooks.append(prompt),
     )
     expect(ok_error is None, f"succeeding invoker errored: {ok_error}", failures)
     expect(ok_raw == raw_good, "raw output was not captured verbatim", failures)
     expect(
         ok_attempts == len(ok_calls) == 1,
         f"success invocation count {ok_attempts} != invoker-observed {len(ok_calls)}",
+        failures,
+    )
+    expect(
+        len(ok_hooks) == 1,
+        f"success invocation hook count {len(ok_hooks)} != 1",
+        failures,
+    )
+    expect(
+        ok_hooks == ok_calls,
+        "success invocation hook did not receive the exact provider prompt",
         failures,
     )
     expect(
@@ -492,7 +576,11 @@ def main() -> int:
             output=output,
         )
 
-    def spy_launch(output: Path, reviewed_head: str = "a" * 40):
+    def spy_launch(
+        output: Path,
+        reviewed_head: str = "a" * 40,
+        attestation: str = "coding-plan drafting attestation",
+    ):
         key_reads: list[int] = []
         constructions: list[dict] = []
         invoker_calls: list[str] = []
@@ -512,6 +600,7 @@ def main() -> int:
 
         args = make_launch_args(output)
         args.reviewed_head = reviewed_head
+        args.entitlement_attestation = attestation
         try:
             summary = run_trial(
                 args=args,
@@ -583,7 +672,10 @@ def main() -> int:
         # Fresh paths: the launch runs end to end through the same sequence —
         # one credential read, one provider construction, one invoker call.
         fresh = Path(tmpdir) / "fresh" / "report.json"
-        outcome, summary, key_reads, constructions, invoker_calls = spy_launch(fresh)
+        exact_launch_attestation = "  coding-plan drafting attestation  "
+        outcome, summary, key_reads, constructions, invoker_calls = spy_launch(
+            fresh, attestation=exact_launch_attestation
+        )
         expect(outcome == "ran", f"fresh launch refused: {summary}", failures)
         expect(len(key_reads) == 1, "fresh launch read the credential more than once", failures)
         expect(len(constructions) == 1, "fresh launch built the provider edge more than once", failures)
@@ -599,6 +691,11 @@ def main() -> int:
             written["evidence"]["raw_model_output"] == raw_good
             and written["invocation"]["count"] == 1,
             "launch-written report lost frozen evidence or provenance",
+            failures,
+        )
+        expect(
+            written["entitlement"]["attestation"] == exact_launch_attestation,
+            "launch-written report normalized the exact supplied attestation",
             failures,
         )
         expect(
