@@ -651,3 +651,31 @@ Deterministic regressions now construct validly hash-chained nonterminal ledgers
 and prove both are rejected before credential access and provider activity.
 
 This closes resume semantics only. It does not authorize or perform a live model call and does not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
+
+
+## Codex boolean-numeric remediation after review 5457276507
+
+The fresh Codex review on exact head `153690b28b988ef6b0b2cfae3a03fe705154634f` identified two Python type-coercion gaps caused by `bool` subclassing `int`.
+
+### DCC-TYPE-01 — boolean timeout accepted as an integer — REMEDIATED
+
+Manifest validation now requires exact integer type for `timeout_seconds`:
+
+- `type(timeout_seconds) is int`;
+- value remains required to be >= 1.
+
+The adjacent authorization field `max_invocations` now uses the same exact-type rule proactively, preventing JSON `true` from being treated as integer 1.
+
+Deterministic manifest regressions set each field to JSON `true` and prove both are rejected during manifest load, before campaign launch/provider activity.
+
+### DCC-TYPE-02 — recovered boolean invocation count compared equal to integer 1 — REMEDIATED
+
+Recovery verification now requires:
+
+- `invocation.attempted is true`;
+- `type(invocation.count) is int`;
+- `invocation.count == 1`.
+
+A recovered report whose `invocation.count` is rewritten to JSON `true` and supplied with a freshly recomputed sidecar is regression-tested and rejected.
+
+These fixes change only fail-closed numeric provenance validation. They do not authorize or perform live model calls and do not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
