@@ -190,6 +190,27 @@ def main() -> int:
             failures,
         )
 
+        for field in ("timeout_seconds", "max_invocations"):
+            boolean_numeric = json.loads(
+                manifest_path.read_text(encoding="utf-8")
+            )
+            boolean_numeric[field] = True
+            boolean_numeric_path = td / f"boolean-{field}.json"
+            boolean_numeric_path.write_text(
+                json.dumps(
+                    boolean_numeric,
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            expect_gate(
+                f"boolean manifest numeric field {field}",
+                lambda p=boolean_numeric_path: load_manifest(p),
+                failures,
+            )
+
         # DCC-PATH-01: case IDs may not alias controller artifact stems,
         # including case-insensitive aliases on Windows/default macOS filesystems.
         for reserved_case_id in (
@@ -1639,6 +1660,7 @@ def main() -> int:
         for field, value, label in (
             ("attempted", False, "false-attempt"),
             ("count", 0, "zero-count"),
+            ("count", True, "boolean-count"),
         ):
             provenance_tamper = json.loads(report_path.read_text(encoding="utf-8"))
             provenance_tamper["invocation"][field] = value
