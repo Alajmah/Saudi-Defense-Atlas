@@ -455,6 +455,103 @@ def _started_cases(events: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
     return result
 
 
+def _validate_nonterminal_history(
+    manifest: dict[str, Any],
+    events: list[dict[str, Any]],
+) -> None:
+    """Validate resumable ledger semantics before any fresh provider activity."""
+
+    if not events:
+        return
+
+    allowed_event_types = {
+        "campaign_started",
+        "case_invocation_started",
+        "case_completed",
+        "case_execution_failure",
+    }
+    for event in events:
+        event_type = event.get("event_type")
+        if event_type not in allowed_event_types:
+            raise CampaignGateError(
+                f"nonterminal campaign ledger has invalid event type: {event_type}"
+            )
+
+    starts = _started_cases(events)
+    recorded = _case_events(events)
+    manifest_ids = [case["case_id"] for case in manifest["cases"]]
+    manifest_set = set(manifest_ids)
+
+    for case_id in set(starts) | set(recorded):
+        if case_id not in manifest_set:
+            raise CampaignGateError(
+                f"nonterminal campaign ledger references unknown case {case_id}"
+            )
+
+    started_ids = [
+        event["payload"].get("case_id")
+        for event in events
+        if event["event_type"] == "case_invocation_started"
+    ]
+    recorded_ids = [
+        event["payload"].get("case_id")
+        for event in events
+        if event["event_type"] in {"case_completed", "case_execution_failure"}
+    ]
+
+    if started_ids != manifest_ids[: len(started_ids)]:
+        raise CampaignGateError(
+            "nonterminal invocation-start history is not an ordered manifest prefix"
+        )
+    if recorded_ids != manifest_ids[: len(recorded_ids)]:
+        raise CampaignGateError(
+            "nonterminal case-terminal history is not an ordered manifest prefix"
+        )
+    if len(recorded_ids) > len(started_ids):
+        raise CampaignGateError(
+            "nonterminal campaign ledger records a case result without a start marker"
+        )
+    if len(started_ids) - len(recorded_ids) > 1:
+        raise CampaignGateError(
+            "nonterminal campaign ledger contains multiple unmatched start markers"
+        )
+
+    for case_id in recorded_ids:
+        if starts[case_id]["sequence"] >= recorded[case_id]["sequence"]:
+            raise CampaignGateError(
+                f"nonterminal case terminal event precedes its invocation start: {case_id}"
+            )
+
+    if len(started_ids) == len(recorded_ids) + 1:
+        unmatched_case = started_ids[-1]
+        unmatched_event = starts[unmatched_case]
+        if unmatched_event["sequence"] != len(events):
+            raise CampaignGateError(
+                "unmatched invocation-start marker must be the final nonterminal event"
+            )
+
+    failures = [
+        event
+        for event in recorded.values()
+        if event["event_type"] == "case_execution_failure"
+    ]
+    if len(failures) > 1:
+        raise CampaignGateError(
+            "nonterminal campaign ledger has multiple execution failures"
+        )
+    if failures:
+        failed = failures[0]
+        failed_case_id = failed["payload"].get("case_id")
+        if recorded_ids[-1:] != [failed_case_id]:
+            raise CampaignGateError(
+                "nonterminal execution failure must be the final recorded case"
+            )
+        if failed["sequence"] != len(events):
+            raise CampaignGateError(
+                "nonterminal execution failure must be the final ledger event"
+            )
+
+
 def _validate_terminal_history(
     manifest: dict[str, Any],
     events: list[dict[str, Any]],
@@ -1418,13 +1515,15 @@ def run_campaign(
                 raise CampaignGateError(
                     "campaign entitlement attestation changed across resume"
                 )
+        terminal = _terminal_event(events)
+        if terminal is None:
+            _validate_nonterminal_history(manifest, events)
         recorded = _case_events(events)
         if recorded:
             _verify_recorded_case_evidence(
                 manifest, events, evidence_dir, attestation
             )
 
-        terminal = _terminal_event(events)
         if terminal is None:
             failed_events = [
                 event
