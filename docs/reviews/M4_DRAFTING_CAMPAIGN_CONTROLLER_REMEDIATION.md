@@ -679,3 +679,5 @@ Recovery verification now requires:
 A recovered report whose `invocation.count` is rewritten to JSON `true` and supplied with a freshly recomputed sidecar is regression-tested and rejected.
 
 These fixes change only fail-closed numeric provenance validation. They do not authorize or perform live model calls and do not add retry, scheduler, recurrence, publication, canonical-mutation, or cross-host coordination authority.
+
+Verification note: the boolean-numeric remediation is deterministic-only; no live drafting call or entitlement consumption occurred.
